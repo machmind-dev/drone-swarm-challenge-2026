@@ -8,6 +8,6 @@ def generate_launch_description():
             executable='aruco_node.py',
             name='aruco_node',
             output='screen',
-            parameters=['/home/pihas/esp32s3-microros/gcs/vision/aruco_params.yaml']
+            parameters=['/home/pihas/drone-swarm-challenge-2026/ground-station-software/vision/aruco_params.yaml']
         )
     ])

@@ -25,7 +25,7 @@ echo ""
 echo "[INFO] Initializing micro-ROS environment ..."
 sleep 2
 
-cd "$HOME/esp32s3-microros" 
+cd "$HOME/drone-swarm-challenge-2026/drone-firmware"
 
 echo "[INFO] Building docker container ..."
 sleep 2

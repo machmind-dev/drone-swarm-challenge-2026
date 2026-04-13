@@ -29,7 +29,7 @@ sleep 2
 
 ROS_SETUP="source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0"
 UROS_SETUP="source ~/uros_ws/install/local_setup.bash"
-RVIZ_CONFIG="/home/pihas/esp32s3-microros/gcs/scene_map_objects.rviz"
+RVIZ_CONFIG="/home/pihas/drone-swarm-challenge-2026/ground-station-software/gcs/rviz/scene_map_objects.rviz"
 
 echo "[INFO] Launch Terminal 1 ..."
 sleep 2
@@ -278,7 +278,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 1.0, w: 0.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 10_9
@@ -292,7 +292,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 1.0, w: 0.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 8_7
@@ -306,7 +306,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 1.0, w: 0.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 6_5
@@ -320,7 +320,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 1.0, w: 0.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # --- Row y = 10 (NOW rotation 0°) ---
@@ -335,7 +335,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 20_19
@@ -349,7 +349,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 22_21
@@ -363,7 +363,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 24_23
@@ -377,7 +377,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # --- Left side (rotation 90° unchanged) ---
@@ -392,7 +392,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 0.70710678, w: 0.70710678}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 14_13
@@ -406,7 +406,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: 0.70710678, w: 0.70710678}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # --- Right side (rotation 270° unchanged) ---
@@ -421,7 +421,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: -0.70710678, w: 0.70710678}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 
 # monument 4_3
@@ -435,7 +435,7 @@ markers:
     orientation: {x: 0.0, y: 0.0, z: -0.70710678, w: 0.70710678}
   scale: {x: 0.001, y: 0.001, z: 0.001}
   color: {r: 1.0, g: 1.0, b: 1.0, a: 1.0}
-  mesh_resource: '\''file:///home/pihas/esp32s3-microros/gcs/marker_2_1.dae'\''
+  mesh_resource: '\''file:///home/pihas/drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae'\''
   mesh_use_embedded_materials: true
 "
 
@@ -681,7 +681,7 @@ EOF
 print_logo
 
 source /opt/ros/jazzy/setup.bash
-source ~/esp32s3-microros/gcs/install/local_setup.bash
+source ~/drone-swarm-challenge-2026/ground-station-software/gcs/install/local_setup.bash
 export ROS_DOMAIN_ID=0
 
 echo "[INFO] Waiting for ROS graph..."
