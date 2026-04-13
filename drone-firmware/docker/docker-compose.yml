@@ -1,0 +1,18 @@
+version: "3.9"
+services:
+  esp32s3_camera:
+    build:
+      context: ../components/micro_ros_espidf_component/docker/
+      dockerfile: Dockerfile
+    environment:
+      - LC_ALL=C
+    network_mode: "host"
+    privileged: true
+    tty: true
+    volumes:
+      - /dev:/dev
+      - ../components:/code/components
+      - ../main:/code/main
+      - ../CMakeLists.txt:/code/CMakeLists.txt
+      - ../sdkconfig.defaults:/code/sdkconfig.defaults
+

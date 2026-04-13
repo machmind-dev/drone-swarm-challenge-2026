@@ -1,0 +1,8 @@
+version: "3.9"
+services:
+  micro_ros_agent:
+    image: microros/micro-ros-agent:humble
+    command: udp4 --port 8888 -v6
+    network_mode: host
+    tty: true
+

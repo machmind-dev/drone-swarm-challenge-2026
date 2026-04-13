@@ -1,0 +1,6 @@
+aruco_detect_only:
+  ros__parameters:
+    image_topic: "/drone_2/camera/image_raw"
+    debug_topic: "/drone_2/aruco_debug"
+    aruco_dict: "DICT_4X4_50"
+    min_marker_px: 12.0

@@ -1,0 +1,6 @@
+dependencies:
+  espressif/esp32-camera:
+    version: '*'
+
+  esp-idf-lib/tca9548: '*'
+  espressif/mavlink: ^1.0.0~1

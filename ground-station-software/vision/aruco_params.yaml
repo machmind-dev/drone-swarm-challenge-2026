@@ -1,0 +1,63 @@
+aruco_node:
+  ros__parameters:
+    drone_names: ["drone_2"]
+    marker_size_m: 0.15
+    aruco_dict: "DICT_4X4_50"
+    publish_debug_image: true
+    camera_frame_suffix: "camera_optical_frame"
+    world_frame: "map"
+
+    camera_to_body_xyz: [0.0, 0.0, 0.0]
+    camera_to_body_rpy_deg: [0.0, 0.0, 0.0]
+
+    # Format:
+    # "id,x,y,z,yaw_deg"
+    #
+    # Scene convention from your RViz launcher:
+    # - arena extents: x=0..20, y=0..10
+    # - z is height
+    # - monument x_y => x = upper marker ID, y = lower marker ID
+
+    marker_map:
+      # Optional origin reference if you still want it defined
+      - "0,10.0,5.0,0.0,0.0"
+
+      # Bottom row (y = 0), monuments rotated 180 deg
+      - "12,4.0,0.0,4.0,180.0"
+      - "11,4.0,0.0,2.0,180.0"
+
+      - "10,8.0,0.0,4.0,180.0"
+      - "9,8.0,0.0,2.0,180.0"
+
+      - "8,12.0,0.0,4.0,180.0"
+      - "7,12.0,0.0,2.0,180.0"
+
+      - "6,16.0,0.0,4.0,180.0"
+      - "5,16.0,0.0,2.0,180.0"
+
+      # Top row (y = 10), monuments rotated 0 deg
+      - "18,4.0,10.0,4.0,0.0"
+      - "17,4.0,10.0,2.0,0.0"
+
+      - "20,8.0,10.0,4.0,0.0"
+      - "19,8.0,10.0,2.0,0.0"
+
+      - "22,12.0,10.0,4.0,0.0"
+      - "21,12.0,10.0,2.0,0.0"
+
+      - "24,16.0,10.0,4.0,0.0"
+      - "23,16.0,10.0,2.0,0.0"
+
+      # Left side (x = 0), monuments rotated +90 deg
+      - "16,0.0,6.66,4.0,90.0"
+      - "15,0.0,6.66,2.0,90.0"
+
+      - "14,0.0,3.33,4.0,90.0"
+      - "13,0.0,3.33,2.0,90.0"
+
+      # Right side (x = 20), monuments rotated -90 deg / 270 deg
+      - "2,20.0,6.66,4.0,270.0"
+      - "1,20.0,6.66,2.0,270.0"
+
+      - "4,20.0,3.33,4.0,270.0"
+      - "3,20.0,3.33,2.0,270.0"

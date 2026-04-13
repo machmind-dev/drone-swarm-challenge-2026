@@ -1,0 +1,24 @@
+aruco_node:
+  ros__parameters:
+    drone_names: ["drone_1", "drone_2", "drone_3", "drone_4", "drone_5"]
+    marker_size_m: 0.5
+    aruco_dict: "DICT_4X4_50"
+    publish_debug_image: true
+    world_frame: "map"
+    camera_frame_suffix: "camera_optical_frame"
+
+    # camera optical frame -> drone body frame
+    # adjust from your real ESP32S3 camera mounting
+    camera_to_body_xyz: [0.08, 0.00, 0.03]
+    camera_to_body_rpy_deg: [0.0, 0.0, 0.0]
+
+    marker_map:
+      0: [ 0.0,  0.0, 0.0,   0.0]    # origin marker
+      1: [-6.0,  2.5, 2.0, 180.0]
+      2: [ 6.0,  2.5, 2.0, 180.0]
+      3: [-6.0,  2.5, 4.0, 180.0]
+      4: [ 6.0,  2.5, 4.0, 180.0]
+      5: [-6.0, -2.5, 2.0, 180.0]
+      6: [ 6.0, -2.5, 2.0, 180.0]
+      7: [-6.0, -2.5, 4.0, 180.0]
+      8: [ 6.0, -2.5, 4.0, 180.0]

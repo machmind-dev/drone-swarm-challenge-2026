@@ -1,0 +1,91 @@
+# =============================================================================
+# ESP-IDF / Drone Firmware
+# =============================================================================
+drone-firmware/build/
+drone-firmware/managed_components/
+drone-firmware/components/micro_ros_espidf_component/
+drone-firmware/dependencies.lock
+drone-firmware/sdkconfig
+drone-firmware/.cache/
+drone-firmware/**/*.o
+drone-firmware/**/*.d
+drone-firmware/**/*.elf
+drone-firmware/**/*.bin
+drone-firmware/**/*.map
+
+# =============================================================================
+# ROS2 / Colcon (Ground Station)
+# =============================================================================
+ground-station-software/**/build/
+ground-station-software/**/install/
+ground-station-software/**/log/
+ground-station-software/**/.colcon_install_layout
+ground-station-software/**/*.egg-info/
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+*.egg
+
+# =============================================================================
+# Swarm data — never commit logs or raw telemetry
+# =============================================================================
+ground-station-software/swarm/data/logs/
+ground-station-software/swarm/data/telemetry/
+
+# =============================================================================
+# OS / Editor noise
+# =============================================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# =============================================================================
+# Git LFS tracked binary types (declared in .gitattributes)
+# These are committed via LFS — listed here only as a safety net
+# in case LFS is not initialised on a clone.
+# =============================================================================
+# Images
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+
+# Video
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# CAD / 3D
+*.stl
+*.step
+*.stp
+*.f3d
+*.FCStd
+*.blend
+*.blend1
+*.dae
+
+# Archives
+*.zip
+*.tar.gz
+*.tar.bz2
