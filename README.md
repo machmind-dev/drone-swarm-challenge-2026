@@ -1,6 +1,6 @@
 # Swarm Drone Challenge 2026
 
-Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [BriGkAIR](https://www.brigkair.com).
+Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigkair.com).
 
 ---
 
