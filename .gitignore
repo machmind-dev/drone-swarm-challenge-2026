@@ -56,36 +56,10 @@ Thumbs.db
 *.sublime-workspace
 
 # =============================================================================
-# Git LFS tracked binary types (declared in .gitattributes)
-# These are committed via LFS — listed here only as a safety net
-# in case LFS is not initialised on a clone.
+# Archives (not tracked)
 # =============================================================================
-# Images
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.bmp
-*.tiff
-*.webp
-
-# Video
-*.mp4
-*.avi
-*.mov
-*.mkv
-
-# CAD / 3D
-*.stl
-*.step
-*.stp
-*.f3d
-*.FCStd
-*.blend
-*.blend1
-*.dae
-
-# Archives
 *.zip
 *.tar.gz
 *.tar.bz2
+
+# Binary files (images, video, CAD) are tracked via Git LFS — see .gitattributes
