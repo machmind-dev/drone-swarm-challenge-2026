@@ -1,63 +1,73 @@
 aruco_node:
   ros__parameters:
-    drone_names: ["drone_2"]
-    marker_size_m: 0.15
+
+    # ── Drones ───────────────────────────────────────────────────────────────
+    drone_names: ["drone_1", "drone_2", "drone_3", "drone_4", "drone_5"]
+
+    # ── Marker config ────────────────────────────────────────────────────────
+    # Per SDC26 regulations section 2.1:
+    #   Dictionary: DICT_4x4_50  ✓
+    #   Size: 0.5m x 0.5m       ← CORRECTED from 0.15m
+    marker_size_m: 0.5
     aruco_dict: "DICT_4X4_50"
+
+    # ── Output ───────────────────────────────────────────────────────────────
     publish_debug_image: true
     camera_frame_suffix: "camera_optical_frame"
     world_frame: "map"
 
+    # ── Camera → drone body rigid mount offset ───────────────────────────────
     camera_to_body_xyz: [0.0, 0.0, 0.0]
     camera_to_body_rpy_deg: [0.0, 0.0, 0.0]
 
-    # Format:
-    # "id,x,y,z,yaw_deg"
+    # ── Arena marker map ─────────────────────────────────────────────────────
+    # Source: SDC26 Regulations v4.0, Figure 3, Section 2.1
     #
-    # Scene convention from your RViz launcher:
-    # - arena extents: x=0..20, y=0..10
-    # - z is height
-    # - monument x_y => x = upper marker ID, y = lower marker ID
-
+    # Notation X/Y: X = upper marker (4m), Y = lower marker (2m)
+    # Marker 0 = world origin, back wall centre (added per regulations)
+    #
+    # Format: "id, x, y, z, yaw_deg"
+    # Arena: x=0..20m  y=0..10m  z=height
+    #
+    # Yaw = direction the marker face points INTO the arena:
+    #   y=0  wall → yaw=180  (faces +Y)
+    #   y=10 wall → yaw=0    (faces -Y)
+    #   x=0  wall → yaw=90   (faces +X)
+    #   x=20 wall → yaw=270  (faces -X)
+    #
     marker_map:
-      # Optional origin reference if you still want it defined
-      - "0,10.0,5.0,0.0,0.0"
 
-      # Bottom row (y = 0), monuments rotated 180 deg
-      - "12,4.0,0.0,4.0,180.0"
-      - "11,4.0,0.0,2.0,180.0"
+      # ── Marker 0 — back wall centre, world origin (regulations Fig 4) ──────
+      - "0,10.0,5.0,2.0,0.0"
 
+      # ── Bottom wall (y=0) — IDs 12/11, 10/9, 8/7, 6/5 ─────────────────────
+      - "12,4.0,0.0,4.0,180.0"    # upper
+      - "11,4.0,0.0,2.0,180.0"    # lower
       - "10,8.0,0.0,4.0,180.0"
       - "9,8.0,0.0,2.0,180.0"
-
       - "8,12.0,0.0,4.0,180.0"
       - "7,12.0,0.0,2.0,180.0"
-
       - "6,16.0,0.0,4.0,180.0"
       - "5,16.0,0.0,2.0,180.0"
 
-      # Top row (y = 10), monuments rotated 0 deg
+      # ── Top wall (y=10) — IDs 18/17, 20/19, 22/21, 24/23 ──────────────────
       - "18,4.0,10.0,4.0,0.0"
       - "17,4.0,10.0,2.0,0.0"
-
       - "20,8.0,10.0,4.0,0.0"
       - "19,8.0,10.0,2.0,0.0"
-
       - "22,12.0,10.0,4.0,0.0"
       - "21,12.0,10.0,2.0,0.0"
-
       - "24,16.0,10.0,4.0,0.0"
       - "23,16.0,10.0,2.0,0.0"
 
-      # Left side (x = 0), monuments rotated +90 deg
+      # ── Left wall (x=0) — IDs 16/15, 14/13 ─────────────────────────────────
       - "16,0.0,6.66,4.0,90.0"
       - "15,0.0,6.66,2.0,90.0"
-
       - "14,0.0,3.33,4.0,90.0"
       - "13,0.0,3.33,2.0,90.0"
 
-      # Right side (x = 20), monuments rotated -90 deg / 270 deg
+      # ── Right wall (x=20) — IDs 2/1, 4/3 ───────────────────────────────────
       - "2,20.0,6.66,4.0,270.0"
       - "1,20.0,6.66,2.0,270.0"
-
       - "4,20.0,3.33,4.0,270.0"
       - "3,20.0,3.33,2.0,270.0"
