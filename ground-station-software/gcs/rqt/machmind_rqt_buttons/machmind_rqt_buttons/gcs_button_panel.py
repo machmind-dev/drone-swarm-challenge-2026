@@ -1,25 +1,25 @@
+# gcs_button_panel.py
 from functools import partial
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from visualization_msgs.msg import Marker, MarkerArray
 
-from python_qt_binding.QtCore import Qt
+from python_qt_binding.QtCore import Qt, QTimer
 from python_qt_binding.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGridLayout,
-    QPushButton,
-    QLabel,
-    QGroupBox,
-    QSizePolicy,
-    QMessageBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QPushButton, QLabel, QGroupBox,
+    QRadioButton, QButtonGroup
 )
 from rqt_gui_py.plugin import Plugin
 
 
 class GcsButtonPanel(Plugin):
+
+    DRONE_COUNT = 5
+    EMERGENCY_HOLD_SECONDS = 3
+
     def __init__(self, context):
         super().__init__(context)
         self.setObjectName("GcsButtonPanel")
@@ -28,332 +28,528 @@ class GcsButtonPanel(Plugin):
             rclpy.init(args=None)
 
         self.node: Node = rclpy.create_node("machmind_rqt_buttons")
-        self.publisher = self.node.create_publisher(String, "/gcs_command", 10)
+
+        self.drone_states = {}
+        self.drone_roles = {}
+        self.ui_refs = {}
+        self.command_publishers = {}
+        self.config_publishers = {}
+        self.state_subscribers = {}
+        self.role_subscribers = {}
+
+        # Global emergency countdown
+        self.global_emergency_counter = self.EMERGENCY_HOLD_SECONDS
+        self.global_emergency_hold = False
+        self.global_emergency_timer = QTimer()
+        self.global_emergency_timer.setInterval(1000)
+        self.global_emergency_timer.timeout.connect(self._global_emergency_tick)
+
+        # Per-drone emergency countdown
+        self.drone_emergency_timers = {}
+        self.drone_emergency_counters = {}
+        self.drone_emergency_holds = {}
+
+        # Scene publishers
+        self.marker_pub = self.node.create_publisher(Marker, "/visualization_marker", 10)
+        self.marker_array_pub = self.node.create_publisher(MarkerArray, "/visualization_marker_array", 10)
+
+        for i in range(1, self.DRONE_COUNT + 1):
+            self.command_publishers[i] = self.node.create_publisher(
+                String, f"/gcs/drone_{i}/command", 10
+            )
+            self.config_publishers[i] = self.node.create_publisher(
+                String, f"/gcs/drone_{i}/config", 10
+            )
+            self.state_subscribers[i] = self.node.create_subscription(
+                String, f"/drone_{i}/state",
+                lambda msg, drone_id=i: self._state_callback(msg, drone_id), 10
+            )
+            self.role_subscribers[i] = self.node.create_subscription(
+                String, f"/drone_{i}/role",
+                lambda msg, drone_id=i: self._role_callback(msg, drone_id), 10
+            )
+
+            timer = QTimer()
+            timer.setInterval(1000)
+            timer.timeout.connect(partial(self._drone_emergency_tick, i))
+            self.drone_emergency_timers[i] = timer
+            self.drone_emergency_counters[i] = self.EMERGENCY_HOLD_SECONDS
+            self.drone_emergency_holds[i] = False
 
         self._widget = QWidget()
-        self._widget.setWindowTitle("Mach Mind GCS Buttons")
+        self._widget.setWindowTitle("Mach Mind GCS")
         self._widget.setStyleSheet("""
-            QWidget {
-                background-color: #1e1e1e;
-                color: #d0d0d0;
-                font-family: Arial;
-            }
-        """)
-
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
-
-        title = QLabel("Mach Mind GCS Control Panel")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                font-weight: bold;
-                padding: 2px;
-                color: #d8d8d8;
-            }
-        """)
-        main_layout.addWidget(title)
-
-        self.status_label = QLabel("Status: READY")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("""
-            QLabel {
-                background-color: #2b2b2b;
-                color: #cfcfcf;
-                border: 1px solid #444;
-                padding: 3px;
-                font-size: 11px;
-                border-radius: 3px;
-            }
-        """)
-        main_layout.addWidget(self.status_label)
-
-        main_layout.addWidget(self._build_emergency_group())
-        main_layout.addWidget(self._build_system_group())
-        main_layout.addWidget(self._build_drones_group())
-        main_layout.addWidget(self._build_scene_group())
-
-        self._widget.setLayout(main_layout)
-        context.add_widget(self._widget)
-
-    def _make_group_box(self, title: str) -> QGroupBox:
-        box = QGroupBox(title)
-        box.setStyleSheet("""
+            QWidget { background-color: #1e1e1e; color: #d0d0d0; font-family: Arial; font-size: 10px; }
             QGroupBox {
-                font-size: 12px;
                 font-weight: bold;
                 border: 1px solid #444;
-                border-radius: 4px;
-                margin-top: 4px;
-                padding-top: 4px;
-                color: #d6d6d6;
+                border-radius: 6px;
+                margin-top: 6px;
+                padding: 4px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 6px;
-                padding: 0 3px;
+                padding: 0 3px 0 3px;
             }
         """)
+
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.addWidget(self._build_global_controls())
+        main_layout.addWidget(self._build_drones_group())
+        main_layout.addWidget(self._build_scene_management())
+
+        self._widget.setLayout(main_layout)
+        context.add_widget(self._widget)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(lambda: rclpy.spin_once(self.node, timeout_sec=0))
+        self.timer.start(50)
+
+    # ================= Global Controls =================
+    def _build_global_controls(self):
+        box = QGroupBox("Global Flight Controls")
+        layout = QHBoxLayout()
+        layout.setSpacing(6)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        base_style = """
+            QPushButton {
+                color: white;
+                font-weight: bold;
+                border-radius: 6px;
+                font-size: 10px;
+                min-height: 26px;
+                padding: 4px 6px;
+            }
+            QPushButton:pressed { background-color: #555555; }
+        """
+
+        self.arm_all_btn = QPushButton("ARM ALL")
+        self.arm_all_btn.setCheckable(True)
+        self.arm_all_btn.setStyleSheet(base_style + """
+            QPushButton { background-color: #3a3a3a; }
+            QPushButton:checked { background-color: #b00020; }
+        """)
+        self.arm_all_btn.clicked.connect(self._arm_all_toggle)
+        layout.addWidget(self.arm_all_btn)
+
+        self.mission_all_btn = QPushButton("MISSION ALL")
+        self.mission_all_btn.setStyleSheet(base_style + "QPushButton { background-color: #2d6a4f; }")
+        self.mission_all_btn.clicked.connect(self._mission_all)
+        layout.addWidget(self.mission_all_btn)
+
+        self.emergency_all_btn = QPushButton("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
+        self.emergency_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff8c00;
+                color: black;
+                font-weight: bold;
+                border-radius: 6px;
+                font-size: 10px;
+                min-height: 26px;
+                padding: 4px 6px;
+                border: 1px solid #d97a00;
+            }
+            QPushButton:pressed {
+                background-color: #ff3b30;
+                color: white;
+            }
+        """)
+        self.emergency_all_btn.pressed.connect(self._start_global_emergency)
+        self.emergency_all_btn.released.connect(self._release_global_emergency)
+        layout.addWidget(self.emergency_all_btn)
+
+        box.setLayout(layout)
         return box
 
-    def _make_button(
-        self,
-        text: str,
-        command: str,
-        min_height: int = 32,
-        style: str = "normal",
-        checkable: bool = False,
-    ) -> QPushButton:
-        button = QPushButton(text)
-        button.setMinimumHeight(min_height)
-        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setCheckable(checkable)
+    # ================= Drones =================
+    def _build_drones_group(self):
+        box = QGroupBox("Drones")
+        layout = QGridLayout()
+        layout.setSpacing(4)
+        layout.setContentsMargins(4, 4, 4, 4)
 
-        if checkable:
-            button.clicked.connect(partial(self.publish_toggle_command, button, command))
-        elif command == "kill_all":
-            button.clicked.connect(partial(self.confirm_and_publish, command))
+        for col in range(self.DRONE_COUNT):
+            layout.addWidget(self._build_single_drone_panel(col + 1), 0, col)
+
+        box.setLayout(layout)
+        return box
+
+    def _build_single_drone_panel(self, drone_id: int):
+        container = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(3)
+        layout.setContentsMargins(2, 2, 2, 2)
+
+        strip = QLabel()
+        strip.setFixedHeight(4)
+        strip.setStyleSheet("background-color: gray; border-radius: 2px;")
+        layout.addWidget(strip)
+
+        title = QLabel(f"D{drone_id}")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-weight:bold; font-size:10px;")
+        layout.addWidget(title)
+
+        role_label = QLabel("IDLE")
+        role_label.setAlignment(Qt.AlignCenter)
+        role_label.setStyleSheet("background-color:#444; border-radius:4px; padding:1px; font-size:9px;")
+        layout.addWidget(role_label)
+
+        state_label = QLabel("DISARMED")
+        state_label.setAlignment(Qt.AlignCenter)
+        state_label.setStyleSheet("font-size:9px;")
+        layout.addWidget(state_label)
+
+        btn_style = """
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border-radius: 5px;
+                font-size: 9px;
+                min-height: 22px;
+                padding: 2px;
+            }
+            QPushButton:pressed { background-color: #555; }
+        """
+
+        arm_btn = QPushButton("ARM")
+        arm_btn.setCheckable(True)
+        arm_btn.setStyleSheet(btn_style + "QPushButton:checked { background-color: #b00020; }")
+        arm_btn.clicked.connect(partial(self._send_arm_toggle, drone_id))
+        layout.addWidget(arm_btn)
+
+        mission_btn = QPushButton("MISSION")
+        mission_btn.setStyleSheet(btn_style + "QPushButton { background-color: #2d6a4f; }")
+        mission_btn.clicked.connect(partial(self._send_command, drone_id, "COMMAND_MISSION_START"))
+        mission_btn.setEnabled(False)
+        layout.addWidget(mission_btn)
+
+        emergency_btn = QPushButton("EMERG")
+        emergency_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff8c00;
+                color: black;
+                font-weight: bold;
+                border-radius: 5px;
+                font-size: 9px;
+                min-height: 22px;
+                padding: 2px;
+                border: 1px solid #d97a00;
+            }
+            QPushButton:pressed {
+                background-color: #ff3b30;
+                color: white;
+            }
+        """)
+        emergency_btn.pressed.connect(partial(self._start_drone_emergency, drone_id))
+        emergency_btn.released.connect(partial(self._release_drone_emergency, drone_id))
+        layout.addWidget(emergency_btn)
+
+        small_toggle_style = """
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border-radius: 5px;
+                font-size: 9px;
+                min-height: 20px;
+                max-height: 20px;
+                padding: 1px;
+            }
+            QPushButton:checked {
+                background-color: #2d6a4f;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #555;
+            }
+        """
+
+        camera_btn = QPushButton("CAM")
+        camera_btn.setCheckable(True)
+        camera_btn.setStyleSheet(small_toggle_style)
+        camera_btn.clicked.connect(partial(self._send_config_toggle, drone_id, camera_btn,
+                                           "CONFIG_CAMERA_ENABLE", "CONFIG_CAMERA_DISABLE"))
+        layout.addWidget(camera_btn)
+
+        vision_btn = QPushButton("VIS")
+        vision_btn.setCheckable(True)
+        vision_btn.setStyleSheet(small_toggle_style)
+        vision_btn.clicked.connect(partial(self._send_config_toggle, drone_id, vision_btn,
+                                           "CONFIG_VISION_ENABLE", "CONFIG_VISION_DISABLE"))
+        layout.addWidget(vision_btn)
+
+        rc_radio = QRadioButton("RC")
+        gcs_radio = QRadioButton("GCS")
+        rc_radio.setChecked(True)
+        rc_radio.setStyleSheet("font-size:9px;")
+        gcs_radio.setStyleSheet("font-size:9px;")
+        group = QButtonGroup(container)
+        group.addButton(rc_radio)
+        group.addButton(gcs_radio)
+        rc_radio.toggled.connect(partial(self._send_config_source, drone_id, "CONFIG_SOURCE_RC"))
+        gcs_radio.toggled.connect(partial(self._send_config_source, drone_id, "CONFIG_SOURCE_GCS"))
+
+        radio_layout = QHBoxLayout()
+        radio_layout.setSpacing(2)
+        radio_layout.setContentsMargins(0, 0, 0, 0)
+        radio_layout.addWidget(rc_radio)
+        radio_layout.addWidget(gcs_radio)
+        layout.addLayout(radio_layout)
+
+        self.ui_refs[drone_id] = {
+            "arm": arm_btn,
+            "mission": mission_btn,
+            "state": state_label,
+            "role": role_label,
+            "strip": strip,
+            "emergency": emergency_btn,
+        }
+
+        container.setLayout(layout)
+        return container
+
+    # ================= Scene Management =================
+    def _build_scene_management(self):
+        box = QGroupBox("Scene Management")
+        layout = QHBoxLayout()
+        layout.setSpacing(6)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        style = """
+            QPushButton {
+                background-color: #2f4f6f;
+                color: white;
+                font-weight: bold;
+                border-radius: 6px;
+                font-size: 10px;
+                padding: 4px 8px;
+                min-height: 24px;
+            }
+            QPushButton:pressed { background-color: #3f6f9f; }
+        """
+
+        lh_btn = QPushButton("LH Scene")
+        lh_btn.setStyleSheet(style)
+        lh_btn.clicked.connect(self._publish_lh_scene)
+        layout.addWidget(lh_btn)
+
+        rh_btn = QPushButton("RH Scene")
+        rh_btn.setStyleSheet(style)
+        rh_btn.clicked.connect(self._publish_rh_scene)
+        layout.addWidget(rh_btn)
+
+        box.setLayout(layout)
+        return box
+
+    # ================= Emergency Logic =================
+    def _start_global_emergency(self):
+        self.global_emergency_hold = True
+        self.global_emergency_counter = self.EMERGENCY_HOLD_SECONDS
+        self.emergency_all_btn.setText(f"KILL IN {self.global_emergency_counter}")
+        self.global_emergency_timer.start()
+
+    def _global_emergency_tick(self):
+        if not self.global_emergency_hold:
+            return
+        self.global_emergency_counter -= 1
+        if self.global_emergency_counter > 0:
+            self.emergency_all_btn.setText(f"KILL IN {self.global_emergency_counter}")
         else:
-            button.clicked.connect(partial(self.publish_command, command))
+            self.global_emergency_timer.stop()
+            self.global_emergency_hold = False
+            self._reset_global_emergency_text()
+            self._kill_all()
 
-        if style == "normal":
-            button.setStyleSheet("""
-                QPushButton {
-                    background-color: #2f3438;
-                    color: #dcdcdc;
-                    border: 1px solid #555;
-                    border-radius: 3px;
-                    font-size: 12px;
-                    font-weight: bold;
-                    padding: 3px;
-                }
-                QPushButton:hover {
-                    background-color: #3a4046;
-                }
-                QPushButton:pressed {
-                    background-color: #24282c;
-                }
-            """)
-        elif style == "warning":
-            button.setStyleSheet("""
-                QPushButton {
-                    background-color: #c77d2b;
-                    color: black;
-                    border: 1px solid #7a4a13;
-                    border-radius: 3px;
-                    font-size: 12px;
-                    font-weight: bold;
-                    padding: 3px;
-                }
-                QPushButton:hover {
-                    background-color: #d48a36;
-                }
-                QPushButton:pressed {
-                    background-color: #ab6620;
-                }
-            """)
-        elif style == "hazard":
-            button.setStyleSheet("""
-                QPushButton {
-                    background-color: #e0b000;
-                    color: black;
-                    border: 2px solid black;
-                    border-radius: 3px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    padding: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #f0bf1a;
-                }
-                QPushButton:pressed {
-                    background-color: #c79a00;
-                }
-            """)
-        elif style == "scene":
-            button.setStyleSheet("""
-                QPushButton {
-                    background-color: #4c5b6b;
-                    color: #d8d8d8;
-                    border: 1px solid #667788;
-                    border-radius: 3px;
-                    font-size: 12px;
-                    font-weight: bold;
-                    padding: 3px;
-                }
-                QPushButton:hover {
-                    background-color: #5a6b7d;
-                }
-                QPushButton:pressed {
-                    background-color: #3d4b59;
-                }
-            """)
-        elif style == "video_toggle":
-            button.setStyleSheet("""
-                QPushButton {
-                    background-color: #3a3a3a;
-                    color: #cccccc;
-                    border: 1px solid #666;
-                    border-radius: 3px;
-                    font-size: 11px;
-                    font-weight: bold;
-                    padding: 2px;
-                }
-                QPushButton:hover {
-                    background-color: #4a4a4a;
-                }
-                QPushButton:checked {
-                    background-color: #2d6a4f;
-                    color: white;
-                    border: 1px solid #52b788;
-                }
-            """)
+    def _release_global_emergency(self):
+        if self.global_emergency_hold and self.global_emergency_timer.isActive():
+            self.global_emergency_timer.stop()
+            self.global_emergency_hold = False
+            self._reset_global_emergency_text()
+            for drone_id in range(1, self.DRONE_COUNT + 1):
+                self._publish(drone_id, "COMMAND_ELAND")
 
-        return button
+    def _reset_global_emergency_text(self):
+        self.emergency_all_btn.setText("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
 
-    def _build_emergency_group(self) -> QGroupBox:
-        box = self._make_group_box("Emergency")
-        layout = QHBoxLayout()
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(6)
+    def _start_drone_emergency(self, drone_id):
+        self.drone_emergency_holds[drone_id] = True
+        self.drone_emergency_counters[drone_id] = self.EMERGENCY_HOLD_SECONDS
+        self.ui_refs[drone_id]["emergency"].setText(f"KILL {self.drone_emergency_counters[drone_id]}")
+        self.drone_emergency_timers[drone_id].start()
 
-        land_all = self._make_button("LAND ALL", "land_all", min_height=38, style="warning")
-        kill_all = self._make_button("⚠ KILL ALL ⚠", "kill_all", min_height=38, style="hazard")
+    def _drone_emergency_tick(self, drone_id):
+        if not self.drone_emergency_holds[drone_id]:
+            return
+        self.drone_emergency_counters[drone_id] -= 1
+        btn = self.ui_refs[drone_id]["emergency"]
+        if self.drone_emergency_counters[drone_id] > 0:
+            btn.setText(f"KILL {self.drone_emergency_counters[drone_id]}")
+        else:
+            self.drone_emergency_timers[drone_id].stop()
+            self.drone_emergency_holds[drone_id] = False
+            btn.setText("EMERG")
+            self._publish(drone_id, "COMMAND_KILL")
 
-        layout.addWidget(land_all)
-        layout.addWidget(kill_all)
-        box.setLayout(layout)
-        return box
+    def _release_drone_emergency(self, drone_id):
+        timer = self.drone_emergency_timers[drone_id]
+        if self.drone_emergency_holds[drone_id] and timer.isActive():
+            timer.stop()
+            self.drone_emergency_holds[drone_id] = False
+            self.ui_refs[drone_id]["emergency"].setText("EMERG")
+            self._publish(drone_id, "COMMAND_ELAND")
 
-    def _build_system_group(self) -> QGroupBox:
-        box = self._make_group_box("System")
-        layout = QGridLayout()
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setHorizontalSpacing(6)
-        layout.setVerticalSpacing(6)
+    # ================= Scene Publishing =================
+    def _publish_base_floor(self):
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.ns = "arena"
+        marker.id = 100
+        marker.type = Marker.CUBE
+        marker.action = Marker.ADD
+        marker.pose.position.x = 10.0
+        marker.pose.position.y = 5.0
+        marker.pose.position.z = -0.02
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 20.0
+        marker.scale.y = 10.0
+        marker.scale.z = 0.02
+        marker.color.r = marker.color.g = marker.color.b = 0.22
+        marker.color.a = 1.0
+        self.marker_pub.publish(marker)
 
-        buttons = [
-            ("ARM", "arm"),
-            ("TAKEOFF", "takeoff"),
-            ("START MISSION", "start_mission"),
-            ("RETURN BASE", "return_base"),
-            ("LAND", "land"),
-            ("DISARM", "disarm"),
-        ]
+    def _zone_marker(self, x, color, mid):
+        m = Marker()
+        m.header.frame_id = "map"
+        m.ns = "arena"
+        m.id = mid
+        m.type = Marker.CUBE
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = 5.0
+        m.pose.position.z = -0.005
+        m.pose.orientation.w = 1.0
+        m.scale.x = 6.6667
+        m.scale.y = 10.0
+        m.scale.z = 0.01
+        m.color.r, m.color.g, m.color.b, m.color.a = color
+        return m
 
-        for idx, (label, cmd) in enumerate(buttons):
-            btn = self._make_button(label, cmd, min_height=32, style="normal")
-            layout.addWidget(btn, 0, idx)
+    def _zone_label(self, x, text, mid):
+        m = Marker()
+        m.header.frame_id = "map"
+        m.ns = "arena_labels"
+        m.id = mid
+        m.type = Marker.TEXT_VIEW_FACING
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = 5.0
+        m.pose.position.z = 0.3
+        m.pose.orientation.w = 1.0
+        m.scale.z = 0.6
+        m.color.r = m.color.g = m.color.b = 0.68
+        m.color.a = 1.0
+        m.text = text
+        return m
 
-        box.setLayout(layout)
-        return box
+    def _publish_lh_scene(self):
+        self._publish_base_floor()
+        arr = MarkerArray()
+        arr.markers.append(self._zone_marker(3.3333, (0.2, 0.4, 0.8, 0.30), 101))
+        arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
+        arr.markers.append(self._zone_marker(16.6667, (0.8, 0.3, 0.3, 0.30), 103))
+        arr.markers.append(self._zone_label(3.3333, "TEAM-ZONE", 201))
+        arr.markers.append(self._zone_label(10.0, "NO-MAN'S-LAND", 202))
+        arr.markers.append(self._zone_label(16.6667, "OPPONENT-ZONE", 203))
+        self.marker_array_pub.publish(arr)
 
-    def _build_drones_group(self) -> QGroupBox:
-        box = self._make_group_box("Drones")
-        layout = QGridLayout()
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(4)
+    def _publish_rh_scene(self):
+        self._publish_base_floor()
+        arr = MarkerArray()
+        arr.markers.append(self._zone_marker(3.3333, (0.8, 0.3, 0.3, 0.30), 101))
+        arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
+        arr.markers.append(self._zone_marker(16.6667, (0.2, 0.4, 0.8, 0.30), 103))
+        arr.markers.append(self._zone_label(3.3333, "OPPONENT-ZONE", 201))
+        arr.markers.append(self._zone_label(10.0, "NO-MAN'S-LAND", 202))
+        arr.markers.append(self._zone_label(16.6667, "TEAM-ZONE", 203))
+        self.marker_array_pub.publish(arr)
 
-        for col in range(5):
-            drone_id = col + 1
+    # ================= Commands =================
+    def _arm_all_toggle(self):
+        command = "COMMAND_ARM" if self.arm_all_btn.isChecked() else "COMMAND_DISARM"
+        self.arm_all_btn.setText("ARMED" if command == "COMMAND_ARM" else "ARM ALL")
+        for drone_id in range(1, self.DRONE_COUNT + 1):
+            self._publish(drone_id, command)
 
-            title = QLabel(f"D{drone_id}")
-            title.setAlignment(Qt.AlignCenter)
-            title.setStyleSheet("""
-                QLabel {
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: #cfcfcf;
-                    padding: 1px;
-                }
-            """)
-            layout.addWidget(title, 0, col)
+    def _mission_all(self):
+        for drone_id in range(1, self.DRONE_COUNT + 1):
+            if self.drone_states.get(drone_id) == "armed":
+                self._publish(drone_id, "COMMAND_MISSION_START")
 
-            col_widget = QWidget()
-            col_layout = QVBoxLayout()
-            col_layout.setContentsMargins(0, 0, 0, 0)
-            col_layout.setSpacing(4)
+    def _kill_all(self):
+        for drone_id in range(1, self.DRONE_COUNT + 1):
+            self._publish(drone_id, "COMMAND_KILL")
 
-            video_btn = self._make_button(
-                "VIDEO OFF",
-                f"drone_{drone_id}_video",
-                min_height=28,
-                style="video_toggle",
-                checkable=True,
-            )
-            emerg_btn = self._make_button(
-                "E-LAND",
-                f"drone_{drone_id}_emer_land",
-                min_height=28,
-                style="warning",
-            )
-            rtb_btn = self._make_button(
-                "RTB",
-                f"drone_{drone_id}_rtb",
-                min_height=28,
-                style="normal",
-            )
+    def _send_command(self, drone_id: int, command: str):
+        if command == "COMMAND_MISSION_START" and self.drone_states.get(drone_id) != "armed":
+            self.node.get_logger().warn(f"Drone {drone_id} not armed → mission blocked")
+            return
+        self._publish(drone_id, command)
 
-            col_layout.addWidget(video_btn)
-            col_layout.addWidget(emerg_btn)
-            col_layout.addWidget(rtb_btn)
+    def _send_arm_toggle(self, drone_id: int):
+        current_state = self.drone_states.get(drone_id, "disarmed")
+        command = "COMMAND_ARM" if current_state == "disarmed" else "COMMAND_DISARM"
+        self._publish(drone_id, command)
 
-            col_widget.setLayout(col_layout)
-            layout.addWidget(col_widget, 1, col)
+    def _send_config_toggle(self, drone_id, button, cmd_on, cmd_off):
+        msg = String()
+        msg.data = cmd_on if button.isChecked() else cmd_off
+        self.config_publishers[drone_id].publish(msg)
 
-        box.setLayout(layout)
-        return box
-
-    def _build_scene_group(self) -> QGroupBox:
-        box = self._make_group_box("Scene")
-        layout = QHBoxLayout()
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(6)
-
-        load_lh = self._make_button("LOAD LH ZONE", "scene_load_LH_team_zone", min_height=32, style="scene")
-        load_rh = self._make_button("LOAD RH ZONE", "scene_load_RH_team_zone", min_height=32, style="scene")
-
-        layout.addWidget(load_lh)
-        layout.addWidget(load_rh)
-        box.setLayout(layout)
-        return box
-
-    def publish_command(self, command: str) -> None:
+    def _send_config_source(self, drone_id, command, checked):
+        if not checked:
+            return
         msg = String()
         msg.data = command
-        self.publisher.publish(msg)
-        self.status_label.setText(f"Status: SENT → {command}")
-        self.node.get_logger().info(f"Published /gcs_command: {command}")
+        self.config_publishers[drone_id].publish(msg)
 
-    def publish_toggle_command(self, button: QPushButton, base_command: str) -> None:
-        state = "on" if button.isChecked() else "off"
-        full_command = f"{base_command}_{state}"
+    # ================= Feedback =================
+    def _state_callback(self, msg: String, drone_id: int):
+        state = msg.data.lower()
+        self.drone_states[drone_id] = state
+        ui = self.ui_refs.get(drone_id)
+        if not ui:
+            return
 
+        ui["state"].setText(state.upper())
+        color_map = {
+            "disarmed": "#555",
+            "armed": "#b00020",
+            "mission": "#1f6aa5",
+            "landing": "#c77d2b",
+            "killed": "#000000",
+        }
+        ui["strip"].setStyleSheet(f"background-color: {color_map.get(state, '#555')}; border-radius: 2px;")
+        ui["mission"].setEnabled(state == "armed")
+        ui["arm"].setChecked(state == "armed")
+
+    def _role_callback(self, msg: String, drone_id: int):
+        role = msg.data.upper()
+        self.drone_roles[drone_id] = role
+        ui = self.ui_refs.get(drone_id)
+        if ui:
+            ui["role"].setText(role[:10])
+
+    def _publish(self, drone_id, command):
         msg = String()
-        msg.data = full_command
-        self.publisher.publish(msg)
+        msg.data = command
+        self.command_publishers[drone_id].publish(msg)
 
-        button.setText("VIDEO ON" if button.isChecked() else "VIDEO OFF")
-        self.status_label.setText(f"Status: SENT → {full_command}")
-        self.node.get_logger().info(f"Published /gcs_command: {full_command}")
-
-    def confirm_and_publish(self, command: str) -> None:
-        reply = QMessageBox.question(
-            self._widget,
-            "CONFIRM ACTION",
-            f"Are you sure you want to execute:\n{command} ?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-
-        if reply == QMessageBox.Yes:
-            self.publish_command(command)
-        else:
-            self.status_label.setText("Status: CANCELLED")
-
-    def shutdown_plugin(self) -> None:
+    def shutdown_plugin(self):
         if hasattr(self, "node"):
             self.node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
