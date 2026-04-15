@@ -602,8 +602,9 @@ class GcsButtonPanel(Plugin):
         self._publish(drone_id, command)
 
     def _send_arm_toggle(self, drone_id: int):
-        current_state = self.drone_states.get(drone_id, "disarmed")
-        command = "COMMAND_ARM" if current_state == "disarmed" else "COMMAND_DISARM"
+        btn = self.ui_refs[drone_id]["arm"]
+        command = "COMMAND_ARM" if btn.isChecked() else "COMMAND_DISARM"
+        btn.setText("ARMED" if command == "COMMAND_ARM" else "ARM")
         self._publish(drone_id, command)
 
     def _send_config_toggle(self, drone_id, button, cmd_on, cmd_off):
@@ -639,6 +640,7 @@ class GcsButtonPanel(Plugin):
         ui["strip"].setStyleSheet(f"background-color: {color_map.get(state, '#555')}; border-radius: 2px;")
         ui["mission"].setEnabled(state == "armed")
         ui["arm"].setChecked(state == "armed")
+        ui["arm"].setText("ARMED" if state == "armed" else "ARM")
 
     def _role_callback(self, msg: String, drone_id: int):
         role = msg.data.upper()
