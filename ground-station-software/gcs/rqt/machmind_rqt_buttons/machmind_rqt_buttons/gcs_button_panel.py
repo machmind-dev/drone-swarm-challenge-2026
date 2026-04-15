@@ -140,9 +140,10 @@ class GcsButtonPanel(Plugin):
         layout.addWidget(self.arm_all_btn)
 
         self.mission_all_btn = QPushButton("MISSION ALL")
-        self.mission_all_btn.setStyleSheet(base_style + "QPushButton { background-color: #2d6a4f; }")
+        self.mission_all_btn.setStyleSheet(base_style + "QPushButton { background-color: #3a3a3a; }")
         self.mission_all_btn.clicked.connect(self._mission_all)
         layout.addWidget(self.mission_all_btn)
+        self._mission_all_base_style = base_style
 
         self.emergency_all_btn = QPushButton("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
         self.emergency_all_btn.setStyleSheet("""
@@ -226,7 +227,10 @@ class GcsButtonPanel(Plugin):
         layout.addWidget(arm_btn)
 
         mission_btn = QPushButton("MISSION")
-        mission_btn.setStyleSheet(btn_style + "QPushButton { background-color: #2d6a4f; }")
+        mission_btn.setStyleSheet(btn_style + """
+            QPushButton:enabled  { background-color: #2d6a4f; }
+            QPushButton:disabled { background-color: #3a3a3a; }
+        """)
         mission_btn.clicked.connect(partial(self._send_command, drone_id, "COMMAND_MISSION_START"))
         mission_btn.setEnabled(False)
         layout.addWidget(mission_btn)
@@ -689,6 +693,12 @@ class GcsButtonPanel(Plugin):
         ui["mission"].setEnabled(state == "armed")
         ui["arm"].setChecked(state == "armed")
         ui["arm"].setText("ARMED" if state == "armed" else "ARM")
+
+        any_armed = any(s == "armed" for s in self.drone_states.values())
+        mission_all_color = "#2d6a4f" if any_armed else "#3a3a3a"
+        self.mission_all_btn.setStyleSheet(
+            self._mission_all_base_style + f"QPushButton {{ background-color: {mission_all_color}; }}"
+        )
 
     def _role_callback(self, msg: String, drone_id: int):
         role = msg.data.upper()
