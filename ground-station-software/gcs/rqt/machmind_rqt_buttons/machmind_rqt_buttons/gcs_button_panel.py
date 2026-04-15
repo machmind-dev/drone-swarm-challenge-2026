@@ -53,6 +53,7 @@ class GcsButtonPanel(Plugin):
         # Scene publishers
         self.marker_pub = self.node.create_publisher(Marker, "/visualization_marker", 10)
         self.marker_array_pub = self.node.create_publisher(MarkerArray, "/visualization_marker_array", 10)
+        self.team_area_pub = self.node.create_publisher(String, "/gcs/system/team_area", 10)
 
         for i in range(1, self.DRONE_COUNT + 1):
             self.command_publishers[i] = self.node.create_publisher(
@@ -551,6 +552,8 @@ class GcsButtonPanel(Plugin):
     def _publish_lh_scene(self):
         self._publish_base_floor()
         self._publish_monuments()
+        msg = String(); msg.data = "LH"
+        self.team_area_pub.publish(msg)
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.2, 0.4, 0.8, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
@@ -563,6 +566,8 @@ class GcsButtonPanel(Plugin):
     def _publish_rh_scene(self):
         self._publish_base_floor()
         self._publish_monuments()
+        msg = String(); msg.data = "RH"
+        self.team_area_pub.publish(msg)
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.8, 0.3, 0.3, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
