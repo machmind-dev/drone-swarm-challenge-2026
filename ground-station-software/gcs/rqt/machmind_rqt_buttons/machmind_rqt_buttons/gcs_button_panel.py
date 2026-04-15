@@ -690,15 +690,22 @@ class GcsButtonPanel(Plugin):
             "killed": "#000000",
         }
         ui["strip"].setStyleSheet(f"background-color: {color_map.get(state, '#555')}; border-radius: 2px;")
+        ARMED_STATES = {"armed", "mission", "landing"}
         ui["mission"].setEnabled(state == "armed")
-        ui["arm"].setChecked(state == "armed")
-        ui["arm"].setText("ARMED" if state == "armed" else "ARM")
+        ui["arm"].setChecked(state in ARMED_STATES)
+        ui["arm"].setText("ARMED" if state in ARMED_STATES else "ARM")
 
-        any_armed = any(s == "armed" for s in self.drone_states.values())
+        any_armed   = any(s in ARMED_STATES for s in self.drone_states.values())
+        any_mission = any(s == "mission"    for s in self.drone_states.values())
         self.arm_all_btn.setChecked(any_armed)
         self.arm_all_btn.setText("ARMED" if any_armed else "ARM ALL")
 
-        mission_all_color = "#2d6a4f" if any_armed else "#3a3a3a"
+        if any_mission:
+            mission_all_color = "#1f6aa5"
+        elif any_armed:
+            mission_all_color = "#2d6a4f"
+        else:
+            mission_all_color = "#3a3a3a"
         self.mission_all_btn.setStyleSheet(
             self._mission_all_base_style + f"QPushButton {{ background-color: {mission_all_color}; }}"
         )
