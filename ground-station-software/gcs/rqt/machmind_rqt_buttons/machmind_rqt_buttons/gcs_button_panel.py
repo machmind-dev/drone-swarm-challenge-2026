@@ -554,6 +554,7 @@ class GcsButtonPanel(Plugin):
         self._publish_monuments()
         msg = String(); msg.data = "LH"
         self.team_area_pub.publish(msg)
+        self.node.get_logger().info("SCENE: LH loaded → /gcs/system/team_area = LH")
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.2, 0.4, 0.8, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
@@ -568,6 +569,7 @@ class GcsButtonPanel(Plugin):
         self._publish_monuments()
         msg = String(); msg.data = "RH"
         self.team_area_pub.publish(msg)
+        self.node.get_logger().info("SCENE: RH loaded → /gcs/system/team_area = RH")
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.8, 0.3, 0.3, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
@@ -608,6 +610,7 @@ class GcsButtonPanel(Plugin):
         msg = String()
         msg.data = cmd_on if button.isChecked() else cmd_off
         self.config_publishers[drone_id].publish(msg)
+        self.node.get_logger().info(f"D{drone_id} → /gcs/drone_{drone_id}/config : {msg.data}")
 
     def _send_config_source(self, drone_id, command, checked):
         if not checked:
@@ -615,6 +618,7 @@ class GcsButtonPanel(Plugin):
         msg = String()
         msg.data = command
         self.config_publishers[drone_id].publish(msg)
+        self.node.get_logger().info(f"D{drone_id} → /gcs/drone_{drone_id}/config : {msg.data}")
 
     # ================= Feedback =================
     def _state_callback(self, msg: String, drone_id: int):
@@ -647,6 +651,7 @@ class GcsButtonPanel(Plugin):
         msg = String()
         msg.data = command
         self.command_publishers[drone_id].publish(msg)
+        self.node.get_logger().info(f"D{drone_id} → /gcs/drone_{drone_id}/command : {command}")
 
     def shutdown_plugin(self):
         if hasattr(self, "node"):
