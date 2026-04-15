@@ -4,6 +4,7 @@ from functools import partial
 
 import rclpy
 from rclpy.node import Node
+from geometry_msgs.msg import Point
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -344,6 +345,11 @@ class GcsButtonPanel(Plugin):
         rh_btn.clicked.connect(self._publish_rh_scene)
         layout.addWidget(rh_btn)
 
+        axis_btn = QPushButton("Display Axis")
+        axis_btn.setStyleSheet(style)
+        axis_btn.clicked.connect(self._publish_axis_markers)
+        layout.addWidget(axis_btn)
+
         box.setLayout(layout)
         return box
 
@@ -403,6 +409,48 @@ class GcsButtonPanel(Plugin):
             self.drone_emergency_holds[drone_id] = False
             self.ui_refs[drone_id]["emergency"].setText("EMERG")
             self._publish(drone_id, "COMMAND_ELAND")
+
+    # ================= Axis Publishing =================
+    def _publish_axis_markers(self):
+        axes = [
+            # (id, tip_x, tip_y, tip_z, r, g, b, label)
+            (1, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, "X"),
+            (2, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, "Y"),
+            (3, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, "Z"),
+        ]
+        arr = MarkerArray()
+        for mid, tx, ty, tz, r, g, b, label in axes:
+            arrow = Marker()
+            arrow.header.frame_id = "map"
+            arrow.ns = "axes"
+            arrow.id = mid
+            arrow.type = Marker.ARROW
+            arrow.action = Marker.ADD
+            arrow.scale.x = 0.05
+            arrow.scale.y = 0.10
+            arrow.scale.z = 0.0
+            arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = r, g, b, 1.0
+            arrow.points.append(Point(x=0.0, y=0.0, z=0.0))
+            arrow.points.append(Point(x=tx,  y=ty,  z=tz))
+            arr.markers.append(arrow)
+
+            text = Marker()
+            text.header.frame_id = "map"
+            text.ns = "axes_labels"
+            text.id = mid
+            text.type = Marker.TEXT_VIEW_FACING
+            text.action = Marker.ADD
+            text.pose.position.x = tx * 1.15
+            text.pose.position.y = ty * 1.15
+            text.pose.position.z = tz * 1.15
+            text.pose.orientation.w = 1.0
+            text.scale.z = 0.3
+            text.color.r, text.color.g, text.color.b, text.color.a = r, g, b, 1.0
+            text.text = label
+            arr.markers.append(text)
+
+        self.marker_array_pub.publish(arr)
+        self.node.get_logger().info("SCENE: Axis markers published → /visualization_marker_array")
 
     # ================= Scene Publishing =================
     def _publish_base_floor(self):
