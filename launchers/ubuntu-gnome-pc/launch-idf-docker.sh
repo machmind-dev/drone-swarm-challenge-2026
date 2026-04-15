@@ -23,29 +23,65 @@ echo -e "${RESET}"
 
 echo ""
 echo "[INFO] Initializing micro-ROS environment ..."
-sleep 2
+sleep 1
 
-cd "$HOME/drone-swarm-challenge-2026/drone-firmware"
+PROJECT_DIR="$HOME/esp32s3-microros"
+COMPOSE_FILE="docker/docker-compose.yml"
+SERVICE_NAME="esp32s3_camera"
 
-echo "[INFO] Building docker container ..."
-sleep 2
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo "[ERROR] Project directory not found: $PROJECT_DIR"
+    exit 1
+fi
 
-docker compose -f docker/docker-compose.yml up -d --build
+cd "$PROJECT_DIR" || exit 1
 
-echo "[INFO] Start docker, then exec into it ..."
-sleep 2
+if ! command -v docker >/dev/null 2>&1; then
+    echo "[ERROR] Docker is not installed."
+    exit 1
+fi
 
-docker compose -f docker/docker-compose.yml exec -it docker-esp32s3_camera bash
+# Rebuild only if explicitly requested:
+# REBUILD=1 bash launch-idf-docker.sh
+if [ "${REBUILD:-0}" = "1" ]; then
+    echo "[INFO] Building docker container ..."
+    sleep 1
+    sudo docker compose -f "$COMPOSE_FILE" up -d --build
+else
+    echo "[INFO] Starting existing docker container ..."
+    sleep 1
+    sudo docker compose -f "$COMPOSE_FILE" up -d
+fi
 
-echo "[INFO] Enter running container ..."
-sleep 2
+if [ $? -ne 0 ]; then
+    echo "[ERROR] Docker compose start failed."
+    exit 1
+fi
 
-docker compose -f docker/docker-compose.yml exec -it esp32s3_camera \
-bash -c 'sudo chown -R "$(whoami)":"$(whoami)" /code && cd /code && source /opt/esp/idf/export.sh && exec bash'
+echo "[INFO] Entering running container ..."
+sleep 1
 
-sudo chown -R "$(whoami)":"$(whoami)" /code
-cd /code
-source /opt/esp/idf/export.sh
+sudo docker compose -f "$COMPOSE_FILE" exec -it "$SERVICE_NAME" bash -ic '
+cd /code || exit 1
+
+if [ -f /opt/esp/idf/export.sh ]; then
+    source /opt/esp/idf/export.sh
+    echo "[INFO] ESP-IDF environment loaded"
+else
+    echo "[WARN] /opt/esp/idf/export.sh not found"
+fi
+
+export HISTFILE=/code/.bash_history
+touch "$HISTFILE"
+export HISTSIZE=5000
+export HISTFILESIZE=10000
+history -r 2>/dev/null || true
+
+echo "[INFO] Working directory: $(pwd)"
+echo "[INFO] Use arrow-up for previous commands"
+
+exec bash -i
+'
 
 
 
