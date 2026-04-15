@@ -695,6 +695,9 @@ class GcsButtonPanel(Plugin):
         ui["arm"].setText("ARMED" if state == "armed" else "ARM")
 
         any_armed = any(s == "armed" for s in self.drone_states.values())
+        self.arm_all_btn.setChecked(any_armed)
+        self.arm_all_btn.setText("ARMED" if any_armed else "ARM ALL")
+
         mission_all_color = "#2d6a4f" if any_armed else "#3a3a3a"
         self.mission_all_btn.setStyleSheet(
             self._mission_all_base_style + f"QPushButton {{ background-color: {mission_all_color}; }}"
