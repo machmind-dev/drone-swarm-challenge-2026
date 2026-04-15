@@ -1,4 +1,5 @@
 # gcs_button_panel.py
+import os
 from functools import partial
 
 import rclpy
@@ -455,8 +456,101 @@ class GcsButtonPanel(Plugin):
         m.text = text
         return m
 
+    def _monument_mesh(self, mid, x, y, qz, qw):
+        m = Marker()
+        m.header.frame_id = "map"
+        m.ns = "monuments"
+        m.id = mid
+        m.type = Marker.MESH_RESOURCE
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = y
+        m.pose.position.z = 0.01
+        m.pose.orientation.z = qz
+        m.pose.orientation.w = qw
+        m.scale.x = m.scale.y = m.scale.z = 0.001
+        m.color.r = m.color.g = m.color.b = m.color.a = 1.0
+        m.mesh_use_embedded_materials = True
+        dae = os.path.join(
+            os.path.expanduser("~"),
+            "drone-swarm-challenge-2026/docs/media/software/marker_2_1.dae"
+        )
+        m.mesh_resource = f"file://{dae}"
+        return m
+
+    def _monument_label(self, ns, mid, x, y, z, text):
+        m = Marker()
+        m.header.frame_id = "map"
+        m.ns = ns
+        m.id = mid
+        m.type = Marker.TEXT_VIEW_FACING
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = y
+        m.pose.position.z = z
+        m.pose.orientation.w = 1.0
+        m.scale.z = 0.4
+        m.color.r = m.color.g = m.color.b = 0.95
+        m.color.a = 1.0
+        m.text = text
+        return m
+
+    def _publish_monuments(self):
+        arr = MarkerArray()
+
+        # Meshes — row y=0 (rotation 180°)
+        for mid, x in zip(range(1, 5), [4.0, 8.0, 12.0, 16.0]):
+            arr.markers.append(self._monument_mesh(mid, x, 0.0, 1.0, 0.0))
+        # Meshes — row y=10 (rotation 0°)
+        for mid, x in zip(range(5, 9), [4.0, 8.0, 12.0, 16.0]):
+            arr.markers.append(self._monument_mesh(mid, x, 10.0, 0.0, 1.0))
+        # Meshes — left side (rotation 90°)
+        arr.markers.append(self._monument_mesh(9,  0.0, 6.66,  0.70710678,  0.70710678))
+        arr.markers.append(self._monument_mesh(10, 0.0, 3.33,  0.70710678,  0.70710678))
+        # Meshes — right side (rotation 270°)
+        arr.markers.append(self._monument_mesh(11, 20.0, 6.66, -0.70710678, 0.70710678))
+        arr.markers.append(self._monument_mesh(12, 20.0, 3.33, -0.70710678, 0.70710678))
+
+        self.marker_array_pub.publish(arr)
+
+        # Labels
+        label_arr = MarkerArray()
+        # Bottom row (y=-0.9): pairs (top_id, bottom_id, x, top_text, bottom_text)
+        bottom_row = [
+            (101, 102, 4.0,  '12', '11'),
+            (103, 104, 8.0,  '10', '9'),
+            (105, 106, 12.0, '8',  '7'),
+            (107, 108, 16.0, '6',  '5'),
+        ]
+        for top_id, bot_id, x, top_txt, bot_txt in bottom_row:
+            label_arr.markers.append(self._monument_label("labels_top",    top_id, x, -0.9, 4.0, top_txt))
+            label_arr.markers.append(self._monument_label("labels_bottom", bot_id, x, -0.9, 2.0, bot_txt))
+        # Top row (y=10.9)
+        top_row = [
+            (109, 110, 4.0,  '18', '17'),
+            (111, 112, 8.0,  '20', '19'),
+            (113, 114, 12.0, '22', '21'),
+            (115, 116, 16.0, '24', '23'),
+        ]
+        for top_id, bot_id, x, top_txt, bot_txt in top_row:
+            label_arr.markers.append(self._monument_label("labels_top",    top_id, x, 10.9, 4.0, top_txt))
+            label_arr.markers.append(self._monument_label("labels_bottom", bot_id, x, 10.9, 2.0, bot_txt))
+        # Left side (x=-0.9)
+        label_arr.markers.append(self._monument_label("labels_top",    117, -0.9, 6.66, 4.0, '16'))
+        label_arr.markers.append(self._monument_label("labels_bottom", 118, -0.9, 6.66, 2.0, '15'))
+        label_arr.markers.append(self._monument_label("labels_top",    119, -0.9, 3.33, 4.0, '14'))
+        label_arr.markers.append(self._monument_label("labels_bottom", 120, -0.9, 3.33, 2.0, '13'))
+        # Right side (x=20.9)
+        label_arr.markers.append(self._monument_label("labels_top",    121, 20.9, 6.66, 4.0, '2'))
+        label_arr.markers.append(self._monument_label("labels_bottom", 122, 20.9, 6.66, 2.0, '1'))
+        label_arr.markers.append(self._monument_label("labels_top",    123, 20.9, 3.33, 4.0, '4'))
+        label_arr.markers.append(self._monument_label("labels_bottom", 124, 20.9, 3.33, 2.0, '3'))
+
+        self.marker_array_pub.publish(label_arr)
+
     def _publish_lh_scene(self):
         self._publish_base_floor()
+        self._publish_monuments()
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.2, 0.4, 0.8, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
@@ -468,6 +562,7 @@ class GcsButtonPanel(Plugin):
 
     def _publish_rh_scene(self):
         self._publish_base_floor()
+        self._publish_monuments()
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.8, 0.3, 0.3, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
