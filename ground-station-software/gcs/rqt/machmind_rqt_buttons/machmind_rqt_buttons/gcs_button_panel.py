@@ -286,7 +286,7 @@ class GcsButtonPanel(Plugin):
 
         rc_radio = QRadioButton("RC")
         gcs_radio = QRadioButton("GCS")
-        rc_radio.setChecked(True)
+        gcs_radio.setChecked(True)
         rc_radio.setStyleSheet("font-size:9px;")
         gcs_radio.setStyleSheet("font-size:9px;")
         group = QButtonGroup(container)
