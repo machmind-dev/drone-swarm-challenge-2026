@@ -25,7 +25,7 @@ echo ""
 echo "[INFO] Initializing micro-ROS environment ..."
 sleep 1
 
-PROJECT_DIR="$HOME/esp32s3-microros"
+PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-firmware"
 COMPOSE_FILE="docker/docker-compose.yml"
 SERVICE_NAME="esp32s3_camera"
 
@@ -46,11 +46,11 @@ fi
 if [ "${REBUILD:-0}" = "1" ]; then
     echo "[INFO] Building docker container ..."
     sleep 1
-    sudo docker compose -f "$COMPOSE_FILE" up -d --build
+    docker compose -f "$COMPOSE_FILE" up -d --build
 else
     echo "[INFO] Starting existing docker container ..."
     sleep 1
-    sudo docker compose -f "$COMPOSE_FILE" up -d
+    docker compose -f "$COMPOSE_FILE" up -d
 fi
 
 if [ $? -ne 0 ]; then
@@ -58,10 +58,14 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+echo "[INFO] Fixing /code permissions ..."
+docker compose -f "$COMPOSE_FILE" exec --user root "$SERVICE_NAME" \
+    chown -R espidf:espidf /code
+
 echo "[INFO] Entering running container ..."
 sleep 1
 
-sudo docker compose -f "$COMPOSE_FILE" exec -it "$SERVICE_NAME" bash -ic '
+docker compose -f "$COMPOSE_FILE" exec -it "$SERVICE_NAME" bash -ic '
 cd /code || exit 1
 
 if [ -f /opt/esp/idf/export.sh ]; then
@@ -78,7 +82,7 @@ export HISTFILESIZE=10000
 history -r 2>/dev/null || true
 
 echo "[INFO] Working directory: $(pwd)"
-echo "[INFO] Use arrow-up for previous commands"
+echo "[INFO] Available commands: idf.py build | idf.py -p /dev/ttyACM0 flash | idf.py -p /dev/ttyACM0 monitor"
 
 exec bash -i
 '

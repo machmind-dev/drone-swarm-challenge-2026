@@ -4,6 +4,7 @@
 drone-firmware/build/
 drone-firmware/managed_components/
 drone-firmware/components/micro_ros_espidf_component/
+!drone-firmware/components/micro_ros_espidf_component/colcon.meta
 drone-firmware/dependencies.lock
 drone-firmware/sdkconfig
 drone-firmware/.cache/

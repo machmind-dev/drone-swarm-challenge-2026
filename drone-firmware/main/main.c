@@ -88,7 +88,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          1
+#define DRONE_ID          2
 #define DRONE_ID_LED_PIN  GPIO_NUM_1
 
 /* ── RViz marker dimensions ────────────────────────────────────────────── */
@@ -348,10 +348,10 @@ static void send_obstacle_distance_all4_debug(void)
     uint16_t lc = tof_array[2].range_mm / 10;
     uint16_t fc = tof_array[3].range_mm / 10;
 
-    if (rc < 4) rc = 4; if (rc > 400) rc = 400;
-    if (tc < 4) tc = 4; if (tc > 400) tc = 400;
-    if (lc < 4) lc = 4; if (lc > 400) lc = 400;
-    if (fc < 4) fc = 4; if (fc > 400) fc = 400;
+    if (rc < 4)   rc = 4; else if (rc > 400) rc = 400;
+    if (tc < 4)   tc = 4; else if (tc > 400) tc = 400;
+    if (lc < 4)   lc = 4; else if (lc > 400) lc = 400;
+    if (fc < 4)   fc = 4; else if (fc > 400) fc = 400;
 
     distances[71] = distances[0]  = distances[1]  = fc;
     distances[17] = distances[18] = distances[19] = rc;
@@ -1127,9 +1127,9 @@ static esp_err_t set_preferred_ip_from_drone_id(void)
     memset(&ip_info, 0, sizeof(ip_info));
     char ip_str[16];
     snprintf(ip_str, sizeof(ip_str), DRONE_IP_PREFIX "%d", DRONE_IP_BASE_OCTET + DRONE_ID);
-    ip4addr_aton(ip_str,           &ip_info.ip);
-    ip4addr_aton(DRONE_IP_GATEWAY, &ip_info.gw);
-    ip4addr_aton(DRONE_IP_NETMASK, &ip_info.netmask);
+    ip4addr_aton(ip_str,           (ip4_addr_t *)&ip_info.ip);
+    ip4addr_aton(DRONE_IP_GATEWAY, (ip4_addr_t *)&ip_info.gw);
+    ip4addr_aton(DRONE_IP_NETMASK, (ip4_addr_t *)&ip_info.netmask);
     err = esp_netif_set_ip_info(netif, &ip_info);
     if (err == ESP_OK)
         ESP_LOGI(TAG, "Static IP: %s  GW: %s", ip_str, DRONE_IP_GATEWAY);
