@@ -55,6 +55,8 @@ Visualization Manager:
       Namespaces:
         arena: true
         arena_labels: true
+        axes: true
+        axes_labels: true
         labels_bottom: true
         labels_top: true
         monuments: true
@@ -153,10 +155,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5597968101501465
+      Pitch: 0.38979676365852356
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.6936285495758057
+      Yaw: 3.498631715774536
     Saved: ~
 Window Geometry:
   Displays:

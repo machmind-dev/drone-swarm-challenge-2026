@@ -4,6 +4,7 @@ from functools import partial
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from geometry_msgs.msg import Point
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
@@ -105,6 +106,19 @@ class GcsButtonPanel(Plugin):
         main_layout.addWidget(self._build_scene_management())
 
         self._widget.setLayout(main_layout)
+
+        # Hardware button override — subscribe after widget is built so button refs exist
+        self._hw_arm_locked   = False
+        self._hw_emerg_locked = False
+        hw_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.node.create_subscription(String, "/gcs/hw_arm_state",     self._hw_arm_callback,     hw_qos)
+        self.node.create_subscription(String, "/gcs/hw_mission_state", self._hw_mission_callback, hw_qos)
+        self.node.create_subscription(String, "/gcs/hw_emerg_state",   self._hw_emerg_callback,   hw_qos)
+
         context.add_widget(self._widget)
 
         self.timer = QTimer()
@@ -140,6 +154,7 @@ class GcsButtonPanel(Plugin):
         layout.addWidget(self.arm_all_btn)
 
         self.mission_all_btn = QPushButton("MISSION ALL")
+        self.mission_all_btn.setCheckable(True)
         self.mission_all_btn.setStyleSheet(base_style + "QPushButton { background-color: #3a3a3a; }")
         self.mission_all_btn.clicked.connect(self._mission_all)
         layout.addWidget(self.mission_all_btn)
@@ -634,14 +649,23 @@ class GcsButtonPanel(Plugin):
     # ================= Commands =================
     def _arm_all_toggle(self):
         command = "COMMAND_ARM" if self.arm_all_btn.isChecked() else "COMMAND_DISARM"
-        self.arm_all_btn.setText("ARMED" if command == "COMMAND_ARM" else "ARM ALL")
+        self.arm_all_btn.setText("ARMING (SW)" if command == "COMMAND_ARM" else "ARM ALL")
         for drone_id in range(1, self.DRONE_COUNT + 1):
             self._publish(drone_id, command)
 
     def _mission_all(self):
-        for drone_id in range(1, self.DRONE_COUNT + 1):
-            if self.drone_states.get(drone_id) == "armed":
-                self._publish(drone_id, "COMMAND_MISSION_START")
+        if self.mission_all_btn.isChecked():
+            any_armed = any(self.drone_states.get(i) == "armed" for i in range(1, self.DRONE_COUNT + 1))
+            if any_armed:
+                for drone_id in range(1, self.DRONE_COUNT + 1):
+                    if self.drone_states.get(drone_id) == "armed":
+                        self._publish(drone_id, "COMMAND_MISSION_START")
+                self.mission_all_btn.setText("MISSION STARTING (SW)")
+            else:
+                self.mission_all_btn.setChecked(False)
+                self.mission_all_btn.setText("MISSION ALL")
+        else:
+            self.mission_all_btn.setText("MISSION ALL")
 
     def _kill_all(self):
         for drone_id in range(1, self.DRONE_COUNT + 1):
@@ -698,14 +722,17 @@ class GcsButtonPanel(Plugin):
         any_armed   = any(s in ARMED_STATES for s in self.drone_states.values())
         any_mission = any(s == "mission"    for s in self.drone_states.values())
         self.arm_all_btn.setChecked(any_armed)
-        self.arm_all_btn.setText("ARMED" if any_armed else "ARM ALL")
+        self.arm_all_btn.setText("ARMED (ACTIVE)" if any_armed else "ARM ALL")
 
         if any_mission:
             mission_all_color = "#1f6aa5"
+            self.mission_all_btn.setText("MISSION (RUNNING)")
         elif any_armed:
             mission_all_color = "#2d6a4f"
+            self.mission_all_btn.setText("MISSION ALL")
         else:
             mission_all_color = "#3a3a3a"
+            self.mission_all_btn.setText("MISSION ALL")
         self.mission_all_btn.setStyleSheet(
             self._mission_all_base_style + f"QPushButton {{ background-color: {mission_all_color}; }}"
         )
@@ -722,6 +749,46 @@ class GcsButtonPanel(Plugin):
         msg.data = command
         self.command_publishers[drone_id].publish(msg)
         self.node.get_logger().info(f"D{drone_id} → /gcs/drone_{drone_id}/command : {command}")
+
+    # ================= Hardware Button Callbacks =================
+    def _hw_arm_callback(self, msg: String):
+        hw_armed = (msg.data == "ARMED")
+        self._hw_arm_locked = hw_armed
+        # Disable software ARM ALL while hardware is holding arm — hardware has priority
+        self.arm_all_btn.setEnabled(not hw_armed)
+        self.arm_all_btn.setChecked(hw_armed)
+        ARMED_STATES = {"armed", "mission", "landing"}
+        any_active = any(s in ARMED_STATES for s in self.drone_states.values())
+        if any_active:
+            self.arm_all_btn.setText("ARMED (ACTIVE)")
+        elif hw_armed:
+            self.arm_all_btn.setText("ARMING (HW)")
+        else:
+            self.arm_all_btn.setText("ARM ALL")
+
+    def _hw_mission_callback(self, msg: String):
+        any_mission = any(s == "mission" for s in self.drone_states.values())
+        if any_mission:
+            color, text = "#1f6aa5", "MISSION (RUNNING)"
+        elif msg.data == "MISSION":
+            color, text = "#1f6aa5", "MISSION STARTING (HW)"
+        else:
+            color, text = "#3a3a3a", "MISSION ALL"
+        self.mission_all_btn.setStyleSheet(
+            self._mission_all_base_style + f"QPushButton {{ background-color: {color}; }}"
+        )
+        self.mission_all_btn.setText(text)
+
+    def _hw_emerg_callback(self, msg: String):
+        active = (msg.data != "OK")
+        self._hw_emerg_locked = active
+        # Disable software EMERGENCY ALL while hardware emergency is active — hardware has priority
+        self.emergency_all_btn.setEnabled(not active)
+        if active:
+            label = msg.data.replace("_", " ")
+            self.emergency_all_btn.setText(f"{label} (HW)")
+        else:
+            self.emergency_all_btn.setText("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
 
     def shutdown_plugin(self):
         if hasattr(self, "node"):

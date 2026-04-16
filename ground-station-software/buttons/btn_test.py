@@ -21,7 +21,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from visualization_msgs.msg import Marker, MarkerArray
-from std_msgs.msg import ColorRGBA
+from std_msgs.msg import ColorRGBA, String
 from geometry_msgs.msg import Point, Vector3
 
 # ── GPIO ──────────────────────────────────────────────────────────────────────
@@ -50,7 +50,8 @@ _SIN45 = 0.7071067811865476
 _COS45 = 0.7071067811865476
 
 PUBLISH_HZ     = 10     # marker republish rate
-LONG_PRESS_S   = 5.0   # seconds — threshold for KILL ALL (hold ≥ 5 s)
+LONG_PRESS_S   = 3.0   # seconds — threshold for KILL ALL (hold ≥ 3 s, matches rqt EMERGENCY_HOLD_SECONDS)
+DRONE_COUNT    = 5      # number of drones to command
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED          = ColorRGBA(r=0.85, g=0.12, b=0.12, a=0.95)
@@ -62,8 +63,6 @@ DIMMED_WHITE = ColorRGBA(r=0.72, g=0.72, b=0.72, a=1.0)
 
 # ── Mission states (cycle on each press) ─────────────────────────────────────
 MISSION_STATES = [
-    (AMBER,  "TAKEOFF"),
-    (GREEN,  "START"),
     (BLUE,   "MISSION"),
 ]
 
@@ -121,6 +120,25 @@ class ButtonStatusNode(Node):
         self._pub = self.create_publisher(MarkerArray, "/button_status_markers", qos)
         self._timer = self.create_timer(1.0 / PUBLISH_HZ, self._publish)
 
+        # Per-drone command publishers — hardware has direct priority over rqt
+        self._drone_command_pubs = [
+            self.create_publisher(String, f"/gcs/drone_{i}/command", 10)
+            for i in range(1, DRONE_COUNT + 1)
+        ]
+
+        # Latched state topics — rqt panel subscribes to mirror HW state and lock its buttons
+        self._hw_arm_pub     = self.create_publisher(String, "/gcs/hw_arm_state",     qos)
+        self._hw_mission_pub = self.create_publisher(String, "/gcs/hw_mission_state", qos)
+        self._hw_emerg_pub   = self.create_publisher(String, "/gcs/hw_emerg_state",   qos)
+
+        # Drone state tracking — required to enforce mission prerequisites (mirrors rqt logic)
+        self._drone_states: dict[int, str] = {}
+        for i in range(1, DRONE_COUNT + 1):
+            self.create_subscription(
+                String, f"/drone_{i}/state",
+                lambda msg, drone_id=i: self._drone_state_callback(msg, drone_id), 10,
+            )
+
         # GPIO setup
         self._chip = gpiod.Chip(GPIO_CHIP)
         self._lines: dict[int, gpiod.Line] = {}
@@ -145,6 +163,10 @@ class ButtonStatusNode(Node):
         self._emerg_state      = 0
         self._emerg_press_time: float | None = None
 
+        # Publish initial latched states so rqt reflects correct state on startup
+        self._hw_arm_pub.publish(String(data="DISARMED"))
+        self._hw_emerg_pub.publish(String(data="OK"))
+
         self.get_logger().info("Button status node started — publishing to /button_status_markers")
 
     # ── gpio read ──────────────────────────────────────────────────────────────
@@ -157,28 +179,74 @@ class ButtonStatusNode(Node):
                     f"{name} {'PRESSED' if new == 0 else 'RELEASED'} (GPIO{pin})"
                 )
 
-                if pin == 6:                         # MISSION — cycle on press
-                    if new == 0:
-                        self._mission_idx = (self._mission_idx + 1) % len(MISSION_STATES)
+                if pin == 5:                         # ARM — active while held
+                    if new == 0:                     # pressed → ARM all drones
+                        self._publish_command_all("COMMAND_ARM")
+                        self._hw_arm_pub.publish(String(data="ARMED"))
+                    else:                            # released → DISARM all drones
+                        self._publish_command_all("COMMAND_DISARM")
+                        self._hw_arm_pub.publish(String(data="DISARMED"))
 
-                elif pin == 13:                      # EMERG — resolve on release
-                    if new == 0:                     # falling edge: record press time
+                elif pin == 6:                       # MISSION — cycle on press, armed drones only
+                    if new == 0:                     # pressed
+                        self._mission_idx = (self._mission_idx + 1) % len(MISSION_STATES)
+                        _, label = MISSION_STATES[self._mission_idx]
+                        self._publish_command_armed_only("COMMAND_MISSION_START")
+                        self._hw_mission_pub.publish(String(data=label))
+                    else:                            # released
+                        self._hw_mission_pub.publish(String(data="RELEASED"))
+
+                elif pin == 13:                      # EMERG — falling edge arms timer; rising edge resolves
+                    if new == 0:                     # pressed: record time, auto-kill fires in polling loop
                         self._emerg_press_time = time.monotonic()
-                    else:                            # rising edge: determine action
-                        if self._emerg_state != 0:   # any press from active → reset to OK
+                    else:                            # released
+                        if self._emerg_state != 0:   # any press from active state → reset to OK
                             self._emerg_state = 0
+                            self._hw_emerg_pub.publish(String(data="OK"))
                             self.get_logger().info("EMERG reset to OK")
                         elif self._emerg_press_time is not None:
-                            held = time.monotonic() - self._emerg_press_time
-                            if held >= LONG_PRESS_S:
-                                self._emerg_state = 2
-                                self.get_logger().info("EMERG → KILL ALL (long press)")
-                            else:
-                                self._emerg_state = 1
-                                self.get_logger().info("EMERG → EMERG LAND (short press)")
+                            # Released before auto-kill threshold → emergency land
+                            self._emerg_state = 1
+                            self._publish_command_all("COMMAND_ELAND")
+                            self._hw_emerg_pub.publish(String(data="EMERGENCY_LAND"))
+                            self.get_logger().info("EMERG → EMERG LAND (short press)")
                         self._emerg_press_time = None
 
                 self._states[pin] = new
+
+        # Auto-fire KILL while button still held — mirrors rqt QTimer tick behaviour
+        if (self._emerg_press_time is not None
+                and self._emerg_state == 0
+                and time.monotonic() - self._emerg_press_time >= LONG_PRESS_S):
+            self._emerg_state = 2
+            self._publish_command_all("COMMAND_KILL")
+            self._hw_emerg_pub.publish(String(data="KILL_ALL"))
+            self.get_logger().info("EMERG → KILL ALL (auto-fire after 3 s hold)")
+            self._emerg_press_time = None  # prevent re-triggering on continued hold
+
+    # ── drone state callback ───────────────────────────────────────────────────
+    def _drone_state_callback(self, msg: String, drone_id: int) -> None:
+        self._drone_states[drone_id] = msg.data.lower()
+
+    # ── command helpers ────────────────────────────────────────────────────────
+    def _publish_command_all(self, command: str) -> None:
+        msg = String(data=command)
+        for pub in self._drone_command_pubs:
+            pub.publish(msg)
+        self.get_logger().info(f"HW → all drones: {command}")
+
+    def _publish_command_armed_only(self, command: str) -> None:
+        """Send command only to drones in 'armed' state — mirrors rqt _mission_all() gate."""
+        msg = String(data=command)
+        sent = []
+        for i, pub in enumerate(self._drone_command_pubs, start=1):
+            if self._drone_states.get(i) == "armed":
+                pub.publish(msg)
+                sent.append(i)
+        if sent:
+            self.get_logger().info(f"HW → armed drones {sent}: {command}")
+        else:
+            self.get_logger().warn("HW MISSION blocked — no drones in armed state")
 
     # ── marker build ───────────────────────────────────────────────────────────
     def _build_markers(self) -> MarkerArray:
