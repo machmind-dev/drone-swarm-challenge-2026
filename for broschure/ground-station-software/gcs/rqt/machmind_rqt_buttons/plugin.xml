@@ -1,0 +1,18 @@
+<library path="machmind_rqt_buttons.gcs_button_panel">
+  <class
+      name="machmind_rqt_buttons/GcsButtonPanel"
+      type="machmind_rqt_buttons.gcs_button_panel.GcsButtonPanel"
+      base_class_type="rqt_gui_py::Plugin">
+    <qtgui>
+      <label>GCS Button Panel</label>
+      <icon type="theme">applications-system</icon>
+      <statustip>Mach Mind GCS command buttons</statustip>
+      <group>
+        <label>Mach Mind</label>
+      </group>
+    </qtgui>
+    <description>
+      Mach Mind GCS button panel
+    </description>
+  </class>
+</library>

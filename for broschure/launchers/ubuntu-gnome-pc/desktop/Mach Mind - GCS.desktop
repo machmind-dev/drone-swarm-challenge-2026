@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=true
+Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch.sh
+Path=/home/pihas/drone-swarm-challenge-2026/
+Name=GCS - Mach Mind
+Comment=Starts the Mach Mind Ground Control Station
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/GCS_GUI_ico.png

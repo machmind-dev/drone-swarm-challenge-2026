@@ -1,0 +1,71 @@
+{
+  "keys": {},
+  "groups": {
+    "mainwindow": {
+      "keys": {
+        "geometry": {
+          "repr(QByteArray.hex)": "QtCore.QByteArray(b'01d9d0cb00030000000003e2000001340000081b00000416000003e2000001590000081b0000041600000000000000000d70000003e2000001590000081b00000416')",
+          "type": "repr(QByteArray.hex)",
+          "pretty-print": "       4       Y        p   Y    "
+        },
+        "state": {
+          "repr(QByteArray.hex)": "QtCore.QByteArray(b'000000ff00000000fd00000001000000030000043a0000028efc0100000001fb00000058007200710074005f007000750062006c00690073006800650072005f005f005000750062006c00690073006800650072005f005f0031005f005f005000750062006c0069007300680065007200570069006400670065007401000000000000043a0000023b00ffffff0000043a0000000000000004000000040000000800000008fc00000001000000030000000100000036004d0069006e0069006d0069007a006500640044006f0063006b00570069006400670065007400730054006f006f006c0062006100720000000000ffffffff0000000000000000')",
+          "type": "repr(QByteArray.hex)",
+          "pretty-print": "                 Xrqt_publisher__Publisher__1__PublisherWidget                            6MinimizedDockWidgetsToolbar        "
+        }
+      },
+      "groups": {
+        "toolbar_areas": {
+          "keys": {
+            "MinimizedDockWidgetsToolbar": {
+              "repr": "8",
+              "type": "repr"
+            }
+          },
+          "groups": {}
+        }
+      }
+    },
+    "pluginmanager": {
+      "keys": {
+        "running-plugins": {
+          "repr": "{'rqt_publisher/Publisher': [1]}",
+          "type": "repr"
+        }
+      },
+      "groups": {
+        "plugin__rqt_publisher__Publisher__1": {
+          "keys": {},
+          "groups": {
+            "dock_widget__PublisherWidget": {
+              "keys": {
+                "dock_widget_title": {
+                  "repr": "'Message Publisher'",
+                  "type": "repr"
+                },
+                "dockable": {
+                  "repr": "True",
+                  "type": "repr"
+                },
+                "parent": {
+                  "repr": "None",
+                  "type": "repr"
+                }
+              },
+              "groups": {}
+            },
+            "plugin": {
+              "keys": {
+                "publishers": {
+                  "repr": "'[{\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 0, \\'counter\\': 779, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"arm\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 1, \\'counter\\': 776, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"start\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 2, \\'counter\\': 700, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"drone_1_land\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 3, \\'counter\\': 699, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"drone_2_land\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 4, \\'counter\\': 645, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"drone_3_land\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 5, \\'counter\\': 612, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"drone_4_land\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 6, \\'counter\\': 597, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"drone_5_land\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 7, \\'counter\\': 596, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"emer_land\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 8, \\'counter\\': 564, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"emer_kill\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 9, \\'counter\\': 383, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"scene_load_lh_team_zone\"\\'}}, {\\'topic_name\\': \\'/gcs_command\\', \\'type_name\\': \\'std_msgs/msg/String\\', \\'rate\\': 0.0, \\'enabled\\': False, \\'publisher_id\\': 10, \\'counter\\': 320, \\'expressions\\': {\\'/gcs_command/data\\': \\'\"scene_load_rh_team_zone\"\\'}}]'",
+                  "type": "repr"
+                }
+              },
+              "groups": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}
