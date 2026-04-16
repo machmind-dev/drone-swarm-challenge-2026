@@ -252,6 +252,15 @@ class GcsButtonPanel(Plugin):
         mission_btn.setEnabled(False)
         layout.addWidget(mission_btn)
 
+        home_btn = QPushButton("HOME")
+        home_btn.setStyleSheet(btn_style + """
+            QPushButton:enabled  { background-color: #2d6a4f; }
+            QPushButton:disabled { background-color: #3a3a3a; }
+        """)
+        home_btn.clicked.connect(partial(self._send_command, drone_id, "COMMAND_RETURN_HOME"))
+        home_btn.setEnabled(False)
+        layout.addWidget(home_btn)
+
         emergency_btn = QPushButton("EMERG")
         emergency_btn.setStyleSheet("""
             QPushButton {
@@ -327,6 +336,7 @@ class GcsButtonPanel(Plugin):
         self.ui_refs[drone_id] = {
             "arm": arm_btn,
             "mission": mission_btn,
+            "home": home_btn,
             "state": state_label,
             "role": role_label,
             "strip": strip,
@@ -711,7 +721,7 @@ class GcsButtonPanel(Plugin):
             self._publish(drone_id, "COMMAND_KILL")
 
     def _send_command(self, drone_id: int, command: str):
-        if command == "COMMAND_MISSION_START" and self.drone_states.get(drone_id) != "armed":
+        if command == "COMMAND_MISSION_START" and self.drone_states.get(drone_id) not in {"armed", "returning_home"}:
             self.node.get_logger().warn(f"Drone {drone_id} not armed → mission blocked")
             return
         self._publish(drone_id, command)
@@ -749,12 +759,26 @@ class GcsButtonPanel(Plugin):
             "disarmed": "#555",
             "armed": "#b00020",
             "mission": "#1f6aa5",
+            "returning_home": "#2d6a4f",
             "landing": "#c77d2b",
             "killed": "#000000",
         }
         ui["strip"].setStyleSheet(f"background-color: {color_map.get(state, '#555')}; border-radius: 2px;")
-        ARMED_STATES = {"armed", "mission", "landing"}
-        ui["mission"].setEnabled(state == "armed")
+        ARMED_STATES = {"armed", "mission", "returning_home", "landing"}
+        ui["mission"].setEnabled(state in {"armed", "returning_home"})
+        ui["home"].setEnabled(state in {"mission", "returning_home"})
+
+        _btn_base = """
+            QPushButton {
+                color: white; border-radius: 5px; font-size: 9px;
+                min-height: 22px; padding: 2px;
+            }
+            QPushButton:pressed { background-color: #555; }
+        """
+        mission_color = "#1f6aa5" if state == "mission" else "#2d6a4f" if state in {"armed", "returning_home"} else "#3a3a3a"
+        home_color    = "#1f6aa5" if state == "returning_home" else "#2d6a4f" if state == "mission" else "#3a3a3a"
+        ui["mission"].setStyleSheet(_btn_base + f"QPushButton {{ background-color: {mission_color}; }}")
+        ui["home"].setStyleSheet(_btn_base + f"QPushButton {{ background-color: {home_color}; }}")
         ui["arm"].setChecked(state in ARMED_STATES)
         ui["arm"].setText("ARMED" if state in ARMED_STATES else "ARM")
 
@@ -838,6 +862,10 @@ class GcsButtonPanel(Plugin):
             self.emergency_all_btn.setText(f"{label} (HW)")
 
     def shutdown_plugin(self):
+        self.timer.stop()
+        self.global_emergency_timer.stop()
+        for t in self.drone_emergency_timers.values():
+            t.stop()
         if hasattr(self, "node"):
             self.node.destroy_node()
         if rclpy.ok():

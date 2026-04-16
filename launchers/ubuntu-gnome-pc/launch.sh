@@ -167,8 +167,8 @@ echo "[INFO] Waiting for ROS graph..."
 sleep 3
 
 echo "[INFO] Launching rqt..."
-source ~/drone-swarm-challenge-2026/ground-station-software/gcs/install/local_setup.bash
-rqt
+source ~/drone-swarm-challenge-2026/ground-station-software/gcs/rqt/install/setup.bash
+rqt --force-discover
 
 exec bash
 ' &
