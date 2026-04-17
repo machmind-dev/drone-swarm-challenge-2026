@@ -1018,8 +1018,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
     RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
 
-    /* Waypoint arrow — tail tracks live drone position, tip fixed at setpoint */
-    if (setpoint_received) {
+    /* Waypoint arrow — only draw when both setpoint and a valid drone position are known */
+    if (setpoint_received && vision_pose_valid) {
         wp_arrow_points[0].x = vp_x;
         wp_arrow_points[0].y = vp_y;
         wp_arrow_points[0].z = vp_z;
