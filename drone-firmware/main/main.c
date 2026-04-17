@@ -1392,14 +1392,14 @@ void app_main(void)
         send_heartbeat_once();
         send_obstacle_distance_all4_debug();
 
-        printf("\r RIGHT: %4d cm | TOP: %4d cm | LEFT: %4d cm | "
-               "FRONT: %4d cm | STATE: %-15s | VISION: %s    ",
+        printf("\r RH:%4d TOP:%4d LH:%4d FWD:%4d cm | STATE:%-13s | VIS:%s   ",
                tof_array[0].range_mm / 10,
                tof_array[1].range_mm / 10,
                tof_array[2].range_mm / 10,
                tof_array[3].range_mm / 10,
                state_names[(int)drone_state],
                vision_pose_valid ? "OK" : "NO");
+        fflush(stdout);
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
