@@ -938,6 +938,19 @@ static void vision_pose_callback(const void *msg_in)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * Obstacle timer callback — 25 ms (40 Hz, matches ToF read rate)
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static void obstacle_timer_callback(rcl_timer_t *timer, int64_t last_call_time)
+{
+    RCLC_UNUSED(last_call_time);
+    if (!timer) return;
+    update_obstacle_markers();
+    for (int i = 0; i < 4; i++)
+        RCSOFTCHECK(rcl_publish(&publisher_marker, &obstacle_labels[i], NULL));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
  * Timer callback — 100 ms  (camera, RViz markers, state publish)
  * ══════════════════════════════════════════════════════════════════════════ */
 
@@ -981,28 +994,11 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         } else {
             ESP_LOGW(TAG, "Camera capture failed");
         }
-    } else {
-        /* Publish synthetic black frame with drone ID */
-        if (img_msg.data.capacity >= 160 * 120) {
-            clock_gettime(CLOCK_REALTIME, &ts);
-            img_msg.header.stamp.sec     = ts.tv_sec;
-            img_msg.header.stamp.nanosec = ts.tv_nsec;
-            img_msg.header.frame_id =
-                micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
-            img_msg.width    = 160; img_msg.height = 120; img_msg.step = 160;
-            img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
-            img_msg.data.size = 160 * 120;
-            generate_black_frame(img_msg.data.data, DRONE_ID);
-            RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
-        }
     }
 
-    /* RViz markers */
-    update_obstacle_markers();
+    /* RViz markers — drone disc and label at 10 Hz */
     RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
     RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
-    for (int i = 0; i < 4; i++)
-        RCSOFTCHECK(rcl_publish(&publisher_marker, &obstacle_labels[i], NULL));
 
     /* Waypoint arrow — tail tracks live drone position, tip fixed at setpoint */
     if (setpoint_received) {
@@ -1111,13 +1107,17 @@ static void micro_ros_task(void *arg)
     rosidl_runtime_c__String__assign(&role_pub_msg.data, "idle");
     RCSOFTCHECK(rcl_publish(&publisher_role, &role_pub_msg, NULL));
 
-    /* ── Timer + executor (1 timer + 4 subscriptions = 5 handles) ─────────── */
+    /* ── Timers + executor (2 timers + 4 subscriptions = 6 handles) ────────── */
     rcl_timer_t timer;
     RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(100), timer_callback));
 
+    rcl_timer_t obstacle_timer;
+    RCCHECK(rclc_timer_init_default(&obstacle_timer, &support, RCL_MS_TO_NS(25), obstacle_timer_callback));
+
     rclc_executor_t executor;
-    RCCHECK(rclc_executor_init(&executor, &support.context, 5, &allocator));
+    RCCHECK(rclc_executor_init(&executor, &support.context, 6, &allocator));
     RCCHECK(rclc_executor_add_timer(&executor, &timer));
+    RCCHECK(rclc_executor_add_timer(&executor, &obstacle_timer));
     RCCHECK(rclc_executor_add_subscription(&executor, &command_sub,
                 &command_msg, &command_callback, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_subscription(&executor, &config_sub,
