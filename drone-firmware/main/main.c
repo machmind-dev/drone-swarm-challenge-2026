@@ -1013,10 +1013,6 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
             ESP_LOGW(TAG, "Camera capture failed");
         }
     } else {
-        /* Drain stale frame to keep DMA healthy */
-        camera_fb_t *stale = esp_camera_fb_get();
-        if (stale) esp_camera_fb_return(stale);
-
         /* Publish synthetic black frame with drone ID */
         if (img_msg.data.capacity >= 160 * 120) {
             clock_gettime(CLOCK_REALTIME, &ts);
