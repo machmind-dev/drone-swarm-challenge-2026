@@ -1068,12 +1068,14 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     static bool wp_arrow_visible      = false;
     static bool land_arrow_visible    = false;
 
-    bool vis              = vision_pose_valid;
-    float takeoff_tip_z   = home_z + MISSION_TAKEOFF_ALT_M;
-    bool  at_altitude     = (vp_z >= takeoff_tip_z - 0.15f);
+    /* pos_known: at least one vision_pose received — avoids 0,0,0 tail but
+     * tolerates brief timeouts during active flight.
+     * vision_pose_valid: live fresh pose — required only for waypoint direction. */
+    bool pos_known   = (last_vision_pose_ms > 0);
+    float takeoff_tip_z = home_z + MISSION_TAKEOFF_ALT_M;
 
-    /* Takeoff arrow (green) — DRONE_MISSION while still climbing */
-    bool show_takeoff = vis && (drone_state == DRONE_MISSION) && !at_altitude;
+    /* Takeoff arrow (green) — all of DRONE_MISSION phase (shrinks while climbing) */
+    bool show_takeoff = pos_known && (drone_state == DRONE_MISSION);
     if (show_takeoff) {
         publish_phase_arrow(&takeoff_arrow_msg, &takeoff_label_msg,
                             vp_x, vp_y, vp_z,
@@ -1084,9 +1086,9 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         takeoff_arrow_visible = false;
     }
 
-    /* Waypoint arrow (amber) — DRONE_MISSION at altitude with a known setpoint */
-    bool show_wp = vis && setpoint_received &&
-                   (drone_state == DRONE_MISSION) && at_altitude;
+    /* Waypoint arrow (amber) — DRONE_MISSION with a known setpoint and live pose */
+    bool show_wp = vision_pose_valid && setpoint_received &&
+                   (drone_state == DRONE_MISSION);
     if (show_wp) {
         publish_phase_arrow(&waypoint_arrow_msg, &waypoint_label_msg,
                             vp_x, vp_y, vp_z,
@@ -1098,8 +1100,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         wp_arrow_visible = false;
     }
 
-    /* Landing arrow (orange) — DRONE_LANDING, descends to ground at current XY */
-    bool show_land = vis && (drone_state == DRONE_LANDING);
+    /* Landing arrow (orange) — DRONE_LANDING covers NAV_LAND, ELAND, and C2 loss */
+    bool show_land = pos_known && (drone_state == DRONE_LANDING);
     if (show_land) {
         publish_phase_arrow(&land_arrow_msg, &land_label_msg,
                             vp_x, vp_y, vp_z,
