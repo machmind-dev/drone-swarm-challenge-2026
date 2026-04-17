@@ -190,7 +190,6 @@ static volatile int64_t last_vision_pose_ms = 0;
 static TaskHandle_t mission_task_handle     = NULL;
 static TaskHandle_t return_home_task_handle = NULL;
 static TaskHandle_t eland_task_handle       = NULL;
-static TaskHandle_t c2_watchdog_task_handle = NULL;
 
 /* ══════════════════════════════════════════════════════════════════════════
  * UART / MAVLink
@@ -754,36 +753,6 @@ static void trigger_eland(void)
     xTaskCreate(eland_task_fn, "eland", 2048, NULL, 5, &eland_task_handle);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
- * C2 watchdog task
- *
- * Pings the micro-ROS agent every C2_CHECK_INTERVAL_MS.
- * After C2_FAIL_THRESHOLD consecutive failures (~2 s) ELAND is initiated.
- * ══════════════════════════════════════════════════════════════════════════ */
-
-static void c2_watchdog_task_fn(void *arg)
-{
-    int failures = 0;
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(C2_CHECK_INTERVAL_MS));
-        rmw_ret_t ret = rmw_uros_ping_agent(C2_PING_TIMEOUT_MS, C2_PING_ATTEMPTS);
-        if (ret == RMW_RET_OK) {
-            failures = 0;
-        } else {
-            failures++;
-            ESP_LOGW(TAG, "C2 ping failed (%d/%d)", failures, C2_FAIL_THRESHOLD);
-            if (failures >= C2_FAIL_THRESHOLD) {
-                failures = 0;
-                if (drone_state != DRONE_LANDING &&
-                    drone_state != DRONE_DISARMED &&
-                    drone_state != DRONE_KILLED) {
-                    ESP_LOGE(TAG, "C2 link lost — initiating emergency landing");
-                    trigger_eland();
-                }
-            }
-        }
-    }
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
  * GCS command callback  (/gcs/drone_{ID}/command)
@@ -1074,7 +1043,6 @@ static void micro_ros_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     ESP_LOGI(TAG, "micro-ROS agent connected!");
-    xTaskCreate(c2_watchdog_task_fn, "c2_watchdog", 4096, NULL, 4, &c2_watchdog_task_handle);
 
     rcl_node_t node;
     RCCHECK(rclc_node_init_default(&node, "esp32_drone_brain", "", &support));
@@ -1159,8 +1127,33 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_executor_add_subscription(&executor, &vision_pose_sub,
                 &vision_pose_msg, &vision_pose_callback, ON_NEW_DATA));
 
+    /* C2 watchdog state — ping runs in this task to avoid transport race conditions */
+    int64_t last_c2_check_ms = now_ms();
+    int     c2_failures       = 0;
+
     while (true) {
         rclc_executor_spin_some(&executor, RCL_MS_TO_NS(50));
+
+        int64_t t = now_ms();
+        if (t - last_c2_check_ms >= C2_CHECK_INTERVAL_MS) {
+            last_c2_check_ms = t;
+            if (rmw_uros_ping_agent(C2_PING_TIMEOUT_MS, C2_PING_ATTEMPTS) == RMW_RET_OK) {
+                c2_failures = 0;
+            } else {
+                c2_failures++;
+                ESP_LOGW(TAG, "C2 ping failed (%d/%d)", c2_failures, C2_FAIL_THRESHOLD);
+                if (c2_failures >= C2_FAIL_THRESHOLD) {
+                    c2_failures = 0;
+                    if (drone_state != DRONE_LANDING &&
+                        drone_state != DRONE_DISARMED &&
+                        drone_state != DRONE_KILLED) {
+                        ESP_LOGE(TAG, "C2 link lost — initiating emergency landing");
+                        trigger_eland();
+                    }
+                }
+            }
+        }
+
         usleep(10000);
     }
 
