@@ -974,8 +974,10 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         ESP_LOGI(TAG, "State → %s", s);
     }
 
-    /* Camera / black frame */
+    /* Camera — publish live frames; on streaming→off transition send one black frame */
+    static bool prev_camera_streaming = false;
     if (camera_streaming) {
+        prev_camera_streaming = true;
         camera_fb_t *pic = esp_camera_fb_get();
         if (pic) {
             if (pic->len <= img_msg.data.capacity) {
@@ -993,6 +995,22 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
             esp_camera_fb_return(pic);
         } else {
             ESP_LOGW(TAG, "Camera capture failed");
+        }
+    } else if (prev_camera_streaming) {
+        /* One-shot: streaming just turned off — push black frame with drone ID */
+        prev_camera_streaming = false;
+        if (img_msg.data.capacity >= 160 * 120) {
+            clock_gettime(CLOCK_REALTIME, &ts);
+            img_msg.header.stamp.sec     = ts.tv_sec;
+            img_msg.header.stamp.nanosec = ts.tv_nsec;
+            img_msg.header.frame_id =
+                micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
+            img_msg.width    = 160; img_msg.height = 120; img_msg.step = 160;
+            img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
+            img_msg.data.size = 160 * 120;
+            generate_black_frame(img_msg.data.data, DRONE_ID);
+            RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
+            ESP_LOGI(TAG, "Camera off — black frame sent");
         }
     }
 
