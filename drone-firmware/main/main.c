@@ -1078,7 +1078,7 @@ static void micro_ros_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     ESP_LOGI(TAG, "micro-ROS agent connected!");
-    xTaskCreate(c2_watchdog_task_fn, "c2_watchdog", 2048, NULL, 4, &c2_watchdog_task_handle);
+    xTaskCreate(c2_watchdog_task_fn, "c2_watchdog", 4096, NULL, 4, &c2_watchdog_task_handle);
 
     rcl_node_t node;
     RCCHECK(rclc_node_init_default(&node, "esp32_drone_brain", "", &support));
