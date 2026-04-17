@@ -97,12 +97,14 @@ static const char *TAG = "drone";
 #define DRONE_DEFAULT_Z_M      0.5f
 #define VISION_TIMEOUT_MS      1500
 
-#define MARKER_ID_DISC(id)   ((id)*100)
-#define MARKER_ID_TEXT(id)   ((id)*100+1)
-#define MARKER_ID_RIGHT(id)  ((id)*100+10)
-#define MARKER_ID_TOP(id)    ((id)*100+11)
-#define MARKER_ID_LEFT(id)   ((id)*100+12)
-#define MARKER_ID_FRONT(id)  ((id)*100+13)
+#define MARKER_ID_DISC(id)     ((id)*100)
+#define MARKER_ID_TEXT(id)     ((id)*100+1)
+#define MARKER_ID_RIGHT(id)    ((id)*100+10)
+#define MARKER_ID_TOP(id)      ((id)*100+11)
+#define MARKER_ID_LEFT(id)     ((id)*100+12)
+#define MARKER_ID_FRONT(id)    ((id)*100+13)
+#define MARKER_ID_WP_ARROW(id) ((id)*100+20)
+#define MARKER_ID_WP_TEXT(id)  ((id)*100+21)
 
 /* ── Network ───────────────────────────────────────────────────────────── */
 #define DRONE_IP_BASE_OCTET 100
@@ -121,6 +123,12 @@ static const char *TAG = "drone";
 /* PX4 custom flight modes (main_mode << 16) */
 #define PX4_MODE_STABILIZED  0x00070000UL   /* RC takes control */
 #define PX4_MODE_OFFBOARD    0x00060000UL   /* onboard computer control */
+
+/* ── C2 watchdog ───────────────────────────────────────────────────────── */
+#define C2_PING_TIMEOUT_MS   500   /* per ping attempt */
+#define C2_PING_ATTEMPTS     2     /* attempts per check */
+#define C2_CHECK_INTERVAL_MS 1000  /* interval between checks */
+#define C2_FAIL_THRESHOLD    2     /* consecutive failures before ELAND */
 
 /* ── Mission parameters ────────────────────────────────────────────────── */
 #define MISSION_TAKEOFF_ALT_M      1.5f   /* Option B — change to 2.0 for tight swarm */
@@ -168,7 +176,7 @@ static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
 static volatile bool  setpoint_received = false;
 
 /* Feature flags */
-static volatile bool camera_streaming    = true;
+static volatile bool camera_streaming    = false;
 static volatile bool vision_enabled      = false;
 static volatile bool gcs_control_active  = false;
 
@@ -181,6 +189,8 @@ static volatile int64_t last_vision_pose_ms = 0;
 /* FreeRTOS task handles */
 static TaskHandle_t mission_task_handle     = NULL;
 static TaskHandle_t return_home_task_handle = NULL;
+static TaskHandle_t eland_task_handle       = NULL;
+static TaskHandle_t c2_watchdog_task_handle = NULL;
 
 /* ══════════════════════════════════════════════════════════════════════════
  * UART / MAVLink
@@ -473,6 +483,10 @@ static rcl_publisher_t    publisher_marker;
 static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 
+static visualization_msgs__msg__Marker   waypoint_arrow_msg;
+static visualization_msgs__msg__Marker   waypoint_label_msg;
+static geometry_msgs__msg__Point         wp_arrow_points[2];
+
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
 static rcl_subscription_t control_sub;
@@ -664,16 +678,9 @@ static void mission_task_fn(void *arg)
         elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
     } while (elapsed < MISSION_SETPOINT_DWELL_MS);
 
-    /* Phase 5: return above home */
+    /* Phase 5: land on spot */
     drone_state = DRONE_LANDING;
     state_dirty = true;
-
-    t0 = xTaskGetTickCount();
-    do {
-        mav_set_position_ned(home_x, home_y, -MISSION_TAKEOFF_ALT_M);
-        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
-        elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
-    } while (elapsed < 3000);
 
     mav_eland();
     vTaskDelay(pdMS_TO_TICKS(MISSION_LAND_DESCEND_MS));
@@ -720,6 +727,62 @@ static void return_home_task_fn(void *arg)
 rh_done:
     return_home_task_handle = NULL;
     vTaskDelete(NULL);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Emergency-land FreeRTOS task
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static void eland_task_fn(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(MISSION_LAND_DESCEND_MS));
+    mav_arm(false);
+    drone_state = DRONE_DISARMED;
+    state_dirty = true;
+    eland_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+static void trigger_eland(void)
+{
+    if (mission_task_handle)     { vTaskDelete(mission_task_handle);     mission_task_handle = NULL; }
+    if (return_home_task_handle) { vTaskDelete(return_home_task_handle); return_home_task_handle = NULL; }
+    if (eland_task_handle)       { vTaskDelete(eland_task_handle);       eland_task_handle = NULL; }
+    mav_eland();
+    drone_state = DRONE_LANDING;
+    state_dirty = true;
+    xTaskCreate(eland_task_fn, "eland", 2048, NULL, 5, &eland_task_handle);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * C2 watchdog task
+ *
+ * Pings the micro-ROS agent every C2_CHECK_INTERVAL_MS.
+ * After C2_FAIL_THRESHOLD consecutive failures (~2 s) ELAND is initiated.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static void c2_watchdog_task_fn(void *arg)
+{
+    int failures = 0;
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(C2_CHECK_INTERVAL_MS));
+        rmw_ret_t ret = rmw_uros_ping_agent(C2_PING_TIMEOUT_MS, C2_PING_ATTEMPTS);
+        if (ret == RMW_RET_OK) {
+            failures = 0;
+        } else {
+            failures++;
+            ESP_LOGW(TAG, "C2 ping failed (%d/%d)", failures, C2_FAIL_THRESHOLD);
+            if (failures >= C2_FAIL_THRESHOLD) {
+                failures = 0;
+                if (drone_state != DRONE_LANDING &&
+                    drone_state != DRONE_DISARMED &&
+                    drone_state != DRONE_KILLED) {
+                    ESP_LOGE(TAG, "C2 link lost — initiating emergency landing");
+                    trigger_eland();
+                }
+            }
+        }
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -781,11 +844,7 @@ static void command_callback(const void *msg_in)
         xTaskCreate(return_home_task_fn, "return_home", 4096, NULL, 5, &return_home_task_handle);
 
     } else if (strcmp(buf, "COMMAND_ELAND") == 0) {
-        if (mission_task_handle)     { vTaskDelete(mission_task_handle);     mission_task_handle = NULL; }
-        if (return_home_task_handle) { vTaskDelete(return_home_task_handle); return_home_task_handle = NULL; }
-        mav_eland();
-        drone_state = DRONE_LANDING;
-        state_dirty = true;
+        trigger_eland();
 
     } else if (strcmp(buf, "COMMAND_KILL") == 0) {
         if (mission_task_handle)     { vTaskDelete(mission_task_handle);     mission_task_handle = NULL; }
@@ -862,6 +921,11 @@ static void control_callback(const void *msg_in)
     setpoint_y = (float)msg->pose.position.y;
     setpoint_z = (float)msg->pose.position.z;   /* positive up */
     setpoint_received = true;
+
+    /* Update waypoint arrow tip to new setpoint */
+    wp_arrow_points[1].x = setpoint_x;
+    wp_arrow_points[1].y = setpoint_y;
+    wp_arrow_points[1].z = setpoint_z;
 
     ESP_LOGI(TAG, "Setpoint: (%.2f, %.2f, %.2f up)", setpoint_x, setpoint_y, setpoint_z);
 
@@ -974,6 +1038,18 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
     for (int i = 0; i < 4; i++)
         RCSOFTCHECK(rcl_publish(&publisher_marker, &obstacle_labels[i], NULL));
+
+    /* Waypoint arrow — tail tracks live drone position, tip fixed at setpoint */
+    if (setpoint_received) {
+        wp_arrow_points[0].x = vp_x;
+        wp_arrow_points[0].y = vp_y;
+        wp_arrow_points[0].z = vp_z;
+        waypoint_label_msg.pose.position.x = (vp_x + setpoint_x) * 0.5f;
+        waypoint_label_msg.pose.position.y = (vp_y + setpoint_y) * 0.5f;
+        waypoint_label_msg.pose.position.z = (vp_z + setpoint_z) * 0.5f + (DRONE_ID * 0.15f);
+        RCSOFTCHECK(rcl_publish(&publisher_marker, &waypoint_arrow_msg, NULL));
+        RCSOFTCHECK(rcl_publish(&publisher_marker, &waypoint_label_msg, NULL));
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1002,6 +1078,7 @@ static void micro_ros_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     ESP_LOGI(TAG, "micro-ROS agent connected!");
+    xTaskCreate(c2_watchdog_task_fn, "c2_watchdog", 2048, NULL, 4, &c2_watchdog_task_handle);
 
     rcl_node_t node;
     RCCHECK(rclc_node_init_default(&node, "esp32_drone_brain", "", &support));
@@ -1262,6 +1339,42 @@ void app_main(void)
 
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
     update_obstacle_markers();
+
+    /* Waypoint arrow marker (2-point ARROW: tail = drone, tip = setpoint) */
+    visualization_msgs__msg__Marker__init(&waypoint_arrow_msg);
+    rosidl_runtime_c__String__assign(&waypoint_arrow_msg.header.frame_id, "map");
+    rosidl_runtime_c__String__assign(&waypoint_arrow_msg.ns, drone_ns);
+    waypoint_arrow_msg.id                = MARKER_ID_WP_ARROW(DRONE_ID);
+    waypoint_arrow_msg.type              = visualization_msgs__msg__Marker__ARROW;
+    waypoint_arrow_msg.action            = visualization_msgs__msg__Marker__ADD;
+    waypoint_arrow_msg.pose.orientation.w = 1.0f;
+    waypoint_arrow_msg.scale.x           = 0.02f;   /* shaft diameter */
+    waypoint_arrow_msg.scale.y           = 0.05f;   /* arrowhead diameter */
+    waypoint_arrow_msg.scale.z           = 0.0f;    /* auto arrowhead length */
+    waypoint_arrow_msg.color.r           = 1.0f;
+    waypoint_arrow_msg.color.g           = 0.8f;
+    waypoint_arrow_msg.color.b           = 0.0f;
+    waypoint_arrow_msg.color.a           = 0.9f;
+    waypoint_arrow_msg.points.data       = wp_arrow_points;
+    waypoint_arrow_msg.points.size       = 2;
+    waypoint_arrow_msg.points.capacity   = 2;
+
+    /* Waypoint label marker (midpoint + per-drone Z stagger) */
+    visualization_msgs__msg__Marker__init(&waypoint_label_msg);
+    rosidl_runtime_c__String__assign(&waypoint_label_msg.header.frame_id, "map");
+    rosidl_runtime_c__String__assign(&waypoint_label_msg.ns, drone_ns);
+    waypoint_label_msg.id                = MARKER_ID_WP_TEXT(DRONE_ID);
+    waypoint_label_msg.type              = visualization_msgs__msg__Marker__TEXT_VIEW_FACING;
+    waypoint_label_msg.action            = visualization_msgs__msg__Marker__ADD;
+    waypoint_label_msg.pose.orientation.w = 1.0f;
+    waypoint_label_msg.scale.z           = 0.12f;
+    waypoint_label_msg.color.r           = 1.0f;
+    waypoint_label_msg.color.g           = 0.8f;
+    waypoint_label_msg.color.b           = 0.0f;
+    waypoint_label_msg.color.a           = 1.0f;
+    char wp_label[16];
+    snprintf(wp_label, sizeof(wp_label), "D%d WP", DRONE_ID);
+    rosidl_runtime_c__String__assign(&waypoint_label_msg.text, wp_label);
 
     xTaskCreate(micro_ros_task, "uros_task",
                 CONFIG_MICRO_ROS_APP_STACK, NULL,

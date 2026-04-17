@@ -18,6 +18,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from std_msgs.msg import String
+from geometry_msgs.msg import PoseStamped
 
 # ── GPIO ──────────────────────────────────────────────────────────────────────
 GPIO_CHIP = "gpiochip4"
@@ -50,6 +51,20 @@ class ButtonStatusNode(Node):
             self.create_publisher(String, f"/gcs/drone_{i}/command", 10)
             for i in range(1, DRONE_COUNT + 1)
         ]
+
+        # Per-drone control publishers — setpoints before mission start
+        self._drone_control_pubs = [
+            self.create_publisher(PoseStamped, f"/gcs/drone_{i}/control", 10)
+            for i in range(1, DRONE_COUNT + 1)
+        ]
+
+        # Per-drone vision pose cache — updated by /drone_{i}/vision_pose
+        self._drone_poses: dict[int, PoseStamped] = {}
+        for i in range(1, DRONE_COUNT + 1):
+            self.create_subscription(
+                PoseStamped, f"/drone_{i}/vision_pose",
+                lambda msg, drone_id=i: self._vision_pose_callback(msg, drone_id), 10,
+            )
 
         # Latched state topics — rqt panel subscribes to mirror HW state and lock its buttons
         self._hw_arm_pub     = self.create_publisher(String, "/gcs/hw_arm_state",     qos)
@@ -121,6 +136,7 @@ class ButtonStatusNode(Node):
                     if new == 0:                     # pressed
                         self._mission_idx = (self._mission_idx + 1) % len(MISSION_STATES)
                         label = MISSION_STATES[self._mission_idx]
+                        self._publish_mission_setpoints_armed_only()
                         self._publish_command_armed_only("COMMAND_MISSION_START")
                         self._hw_mission_pub.publish(String(data=label))
                     else:                            # released
@@ -164,6 +180,44 @@ class ButtonStatusNode(Node):
     # ── drone state callback ───────────────────────────────────────────────────
     def _drone_state_callback(self, msg: String, drone_id: int) -> None:
         self._drone_states[drone_id] = msg.data.lower()
+
+    # ── vision pose callback ───────────────────────────────────────────────────
+    def _vision_pose_callback(self, msg: PoseStamped, drone_id: int) -> None:
+        self._drone_poses[drone_id] = msg
+
+    # ── yaw from quaternion ────────────────────────────────────────────────────
+    @staticmethod
+    def _yaw_from_pose(pose: PoseStamped) -> float:
+        q = pose.pose.orientation
+        return math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+        )
+
+    # ── publish setpoints to armed drones before mission start ────────────────
+    def _publish_mission_setpoints_armed_only(self) -> None:
+        for i, pub in enumerate(self._drone_control_pubs, start=1):
+            if self._drone_states.get(i) != "armed":
+                continue
+            pose = self._drone_poses.get(i)
+            if pose is None:
+                self.get_logger().warn(f"D{i} — no vision pose received, skipping setpoint")
+                continue
+            distance = float(i)   # D1 = 1 m, D2 = 2 m, D3 = 3 m …
+            yaw = self._yaw_from_pose(pose)
+            sp = PoseStamped()
+            sp.header.frame_id = "map"
+            sp.header.stamp    = self.get_clock().now().to_msg()
+            sp.pose.position.x = pose.pose.position.x + math.cos(yaw) * distance
+            sp.pose.position.y = pose.pose.position.y + math.sin(yaw) * distance
+            sp.pose.position.z = pose.pose.position.z
+            sp.pose.orientation.w = 1.0
+            pub.publish(sp)
+            self.get_logger().info(
+                f"D{i} → /gcs/drone_{i}/control : "
+                f"({sp.pose.position.x:.2f}, {sp.pose.position.y:.2f}, "
+                f"{sp.pose.position.z:.2f}) [{distance:.0f} m fwd]"
+            )
 
     # ── command helpers ────────────────────────────────────────────────────────
     def _publish_command_all(self, command: str) -> None:
