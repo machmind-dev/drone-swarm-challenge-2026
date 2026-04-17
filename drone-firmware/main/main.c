@@ -1392,11 +1392,11 @@ void app_main(void)
         send_heartbeat_once();
         send_obstacle_distance_all4_debug();
 
-        printf("\r RH:%4d TOP:%4d LH:%4d FWD:%4d cm | STATE:%-13s | VIS:%s   ",
-               tof_array[0].range_mm / 10,
-               tof_array[1].range_mm / 10,
+        printf("\r|LH:%3d(cm)|RH:%3d(cm)|FWD:%3d(cm)|TOP:%3d(cm)|STATE:%-14s|VIS:%-2s|",
                tof_array[2].range_mm / 10,
+               tof_array[0].range_mm / 10,
                tof_array[3].range_mm / 10,
+               tof_array[1].range_mm / 10,
                state_names[(int)drone_state],
                vision_pose_valid ? "OK" : "NO");
         fflush(stdout);
