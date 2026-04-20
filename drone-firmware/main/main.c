@@ -88,7 +88,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          2
+#define DRONE_ID          1
 #define DRONE_ID_LED_PIN  GPIO_NUM_1
 
 /* ── RViz marker dimensions ────────────────────────────────────────────── */
@@ -428,7 +428,7 @@ static const camera_config_t camera_config = {
     .frame_size   = FRAMESIZE_QQVGA,
     .jpeg_quality = 63, .fb_count = 2,
     .fb_location  = CAMERA_FB_IN_PSRAM,
-    .grab_mode    = CAMERA_GRAB_WHEN_EMPTY,
+    .grab_mode    = CAMERA_GRAB_LATEST,
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -482,6 +482,7 @@ static void generate_black_frame(uint8_t *buf, int id)
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static rcl_publisher_t    publisher_image;
+static bool               publisher_image_ok = false;
 static rcl_publisher_t    publisher_marker;
 static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
@@ -1021,7 +1022,7 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
 
     /* Camera — publish live frames; on streaming→off transition send one black frame */
     static bool prev_camera_streaming = false;
-    if (camera_streaming) {
+    if (publisher_image_ok && camera_streaming) {
         prev_camera_streaming = true;
         camera_fb_t *pic = esp_camera_fb_get();
         if (pic) {
@@ -1041,7 +1042,7 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         } else {
             ESP_LOGW(TAG, "Camera capture failed");
         }
-    } else if (prev_camera_streaming) {
+    } else if (publisher_image_ok && prev_camera_streaming) {
         /* One-shot: streaming just turned off — push black frame with drone ID */
         prev_camera_streaming = false;
         if (img_msg.data.capacity >= 160 * 120) {
@@ -1136,11 +1137,15 @@ static void micro_ros_task(void *arg)
     ESP_LOGI(TAG, "micro-ROS agent connected!");
 
     rcl_node_t node;
-    RCCHECK(rclc_node_init_default(&node, "esp32_drone_brain", "", &support));
+    char node_name[32];
+    snprintf(node_name, sizeof(node_name), "esp32_drone_brain_%d", DRONE_ID);
+    RCCHECK(rclc_node_init_default(&node, node_name, "", &support));
 
     /* ── Publishers ──────────────────────────────────────────────────────── */
-    RCCHECK(rclc_publisher_init_default(&publisher_image, &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Image), topic_image));
+    publisher_image_ok = (rclc_publisher_init_best_effort(&publisher_image, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Image), topic_image) == RCL_RET_OK);
+    if (!publisher_image_ok)
+        ESP_LOGW(TAG, "Image publisher init failed — camera streaming disabled (XML buffer too small, rebuild libmicroros)");
 
     RCCHECK(rclc_publisher_init_default(&publisher_marker, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
@@ -1252,7 +1257,7 @@ static void micro_ros_task(void *arg)
         usleep(10000);
     }
 
-    RCCHECK(rcl_publisher_fini(&publisher_image,  &node));
+    if (publisher_image_ok) RCCHECK(rcl_publisher_fini(&publisher_image,  &node));
     RCCHECK(rcl_publisher_fini(&publisher_marker, &node));
     RCCHECK(rcl_publisher_fini(&publisher_state,  &node));
     RCCHECK(rcl_publisher_fini(&publisher_role,   &node));
@@ -1370,7 +1375,17 @@ void app_main(void)
     } else {
         ESP_LOGI(TAG, "Camera OK");
         sensor_t *s = esp_camera_sensor_get();
-        if (s) { s->set_vflip(s, 1); s->set_hmirror(s, 1); }
+        if (s) {
+            s->set_vflip(s, 1); s->set_hmirror(s, 1); // 180° rotation
+            s->set_gain_ctrl(s, 0);     // disable AGC — reduce RF-coupled noise amplification
+            s->set_agc_gain(s, 1);      // minimum effective gain (0 zeros the register → black image)
+            s->set_exposure_ctrl(s, 0); // disable AEC
+            s->set_aec_value(s, 400);   // tune 200–600 to ambient lighting
+            s->set_contrast(s, 2);      // max contrast for ArUco edge detection
+            s->set_sharpness(s, 2);
+            s->set_bpc(s, 1);           // black pixel correction
+            s->set_wpc(s, 1);           // white pixel correction
+        }
     }
 
     const float ix = get_initial_x_from_drone_id();

@@ -28,9 +28,10 @@ PINS = {
     13: "EMERG",
 }
 
-POLL_HZ      = 10    # GPIO poll rate
-LONG_PRESS_S = 3.0   # seconds — threshold for KILL ALL (matches rqt EMERGENCY_HOLD_SECONDS)
-DRONE_COUNT  = 5     # number of drones to command
+POLL_HZ               = 10    # GPIO poll rate
+LONG_PRESS_S          = 3.0   # seconds — threshold for KILL ALL (matches rqt EMERGENCY_HOLD_SECONDS)
+DRONE_COUNT           = 5     # number of drones to command
+MISSION_PENDING_TIMEOUT_S = 2.0  # give up retrying MISSION_START after this long
 
 # ── Mission states (cycle on each press) ─────────────────────────────────────
 MISSION_STATES = ["MISSION"]
@@ -98,6 +99,10 @@ class ButtonStatusNode(Node):
         # Mission cycles through states on each press
         self._mission_idx = 0
 
+        # Pending mission — retried each tick until a drone confirms armed or timeout
+        self._mission_pending      = False
+        self._mission_pending_since: float = 0.0
+
         # Emergency: 0=OK, 1=EMERG LAND, 2=KILL ALL
         self._emerg_state          = 0
         self._emerg_press_time:    float | None = None
@@ -113,6 +118,25 @@ class ButtonStatusNode(Node):
     # ── timer callback ─────────────────────────────────────────────────────────
     def _tick(self) -> None:
         self._read_gpio()
+        self._check_pending_mission()
+
+    # ── pending mission retry ──────────────────────────────────────────────────
+    def _check_pending_mission(self) -> None:
+        if not self._mission_pending:
+            return
+        elapsed = time.monotonic() - self._mission_pending_since
+        if elapsed > MISSION_PENDING_TIMEOUT_S:
+            self._mission_pending = False
+            self.get_logger().warn("MISSION pending timed out — no drones confirmed armed")
+            return
+        if self._try_send_mission():
+            self._mission_pending = False
+            self.get_logger().info(f"MISSION sent after {elapsed*1000:.0f} ms pending (state confirmed)")
+
+    def _try_send_mission(self) -> bool:
+        """Send setpoints + COMMAND_MISSION_START to armed drones. Returns True if sent to ≥1 drone."""
+        self._publish_mission_setpoints_armed_only()
+        return self._publish_command_armed_only("COMMAND_MISSION_START")
 
     # ── gpio read ──────────────────────────────────────────────────────────────
     def _read_gpio(self) -> None:
@@ -136,9 +160,12 @@ class ButtonStatusNode(Node):
                     if new == 0:                     # pressed
                         self._mission_idx = (self._mission_idx + 1) % len(MISSION_STATES)
                         label = MISSION_STATES[self._mission_idx]
-                        self._publish_mission_setpoints_armed_only()
-                        self._publish_command_armed_only("COMMAND_MISSION_START")
                         self._hw_mission_pub.publish(String(data=label))
+                        if not self._try_send_mission():
+                            self._mission_pending = True
+                            self._mission_pending_since = time.monotonic()
+                            self.get_logger().info(
+                                "MISSION pending — no drones confirmed armed yet, retrying…")
                     else:                            # released
                         self._hw_mission_pub.publish(String(data="RELEASED"))
 
@@ -227,8 +254,8 @@ class ButtonStatusNode(Node):
             pub.publish(msg)
             self.get_logger().info(f"D{i} → /gcs/drone_{i}/command : {command}")
 
-    def _publish_command_armed_only(self, command: str) -> None:
-        """Send command only to drones in 'armed' state — mirrors rqt _mission_all() gate."""
+    def _publish_command_armed_only(self, command: str) -> bool:
+        """Send command only to drones in 'armed' state. Returns True if sent to ≥1 drone."""
         sent = []
         for i, pub in enumerate(self._drone_command_pubs, start=1):
             if self._drone_states.get(i) == "armed":
@@ -239,6 +266,7 @@ class ButtonStatusNode(Node):
                 sent.append(i)
         if not sent:
             self.get_logger().warn("HW MISSION blocked — no drones in armed state")
+        return bool(sent)
 
     def destroy_node(self) -> None:
         for line in self._lines.values():

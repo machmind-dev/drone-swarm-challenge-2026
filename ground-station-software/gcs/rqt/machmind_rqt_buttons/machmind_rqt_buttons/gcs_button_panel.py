@@ -1,5 +1,6 @@
 # gcs_button_panel.py
 import os
+import time
 from functools import partial
 
 import rclpy
@@ -22,6 +23,7 @@ class GcsButtonPanel(Plugin):
 
     DRONE_COUNT = 5
     EMERGENCY_HOLD_SECONDS = 3
+    ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
 
     def __init__(self, context):
         super().__init__(context)
@@ -35,6 +37,7 @@ class GcsButtonPanel(Plugin):
         self.drone_states = {}
         self.drone_roles = {}
         self.ui_refs = {}
+        self._arm_sent_times: dict[int, float] = {}  # monotonic time when ARM was sent per drone
         self.command_publishers = {}
         self.config_publishers = {}
         self.state_subscribers = {}
@@ -699,20 +702,43 @@ class GcsButtonPanel(Plugin):
     def _arm_all_toggle(self):
         command = "COMMAND_ARM" if self.arm_all_btn.isChecked() else "COMMAND_DISARM"
         self.arm_all_btn.setText("ARMING (SW)" if command == "COMMAND_ARM" else "ARM ALL")
+        now = time.monotonic()
         for drone_id in range(1, self.DRONE_COUNT + 1):
+            if command == "COMMAND_ARM":
+                self._arm_sent_times[drone_id] = now
+            else:
+                self._arm_sent_times.pop(drone_id, None)
             self._publish(drone_id, command)
 
     def _mission_all(self):
-        if self.mission_all_btn.isChecked():
-            any_armed = any(self.drone_states.get(i) == "armed" for i in range(1, self.DRONE_COUNT + 1))
-            if any_armed:
-                for drone_id in range(1, self.DRONE_COUNT + 1):
-                    if self.drone_states.get(drone_id) == "armed":
-                        self._publish(drone_id, "COMMAND_MISSION_START")
-                self.mission_all_btn.setText("MISSION STARTING (SW)")
+        if not self.mission_all_btn.isChecked():
+            self.mission_all_btn.setText("MISSION ALL")
+            return
+
+        now = time.monotonic()
+        ready, pending_ms = [], 0
+        for i in range(1, self.DRONE_COUNT + 1):
+            if self.drone_states.get(i) != "armed":
+                continue
+            elapsed_ms = (now - self._arm_sent_times.get(i, 0)) * 1000
+            if elapsed_ms < self.ARM_MISSION_GUARD_MS:
+                pending_ms = max(pending_ms, self.ARM_MISSION_GUARD_MS - elapsed_ms)
             else:
-                self.mission_all_btn.setChecked(False)
-                self.mission_all_btn.setText("MISSION ALL")
+                ready.append(i)
+
+        if pending_ms > 0 and not ready:
+            retry_ms = int(pending_ms) + 10
+            self.node.get_logger().info(f"ARM guard active, retrying MISSION ALL in {retry_ms} ms")
+            QTimer.singleShot(retry_ms, self._mission_all)
+            return
+
+        if ready:
+            for drone_id in ready:
+                self._publish(drone_id, "COMMAND_MISSION_START")
+            self.mission_all_btn.setText("MISSION STARTING (SW)")
+        else:
+            self.mission_all_btn.setChecked(False)
+            self.mission_all_btn.setText("MISSION ALL")
         else:
             self.mission_all_btn.setText("MISSION ALL")
 
@@ -721,15 +747,27 @@ class GcsButtonPanel(Plugin):
             self._publish(drone_id, "COMMAND_KILL")
 
     def _send_command(self, drone_id: int, command: str):
-        if command == "COMMAND_MISSION_START" and self.drone_states.get(drone_id) not in {"armed", "returning_home"}:
-            self.node.get_logger().warn(f"Drone {drone_id} not armed → mission blocked")
-            return
+        if command == "COMMAND_MISSION_START":
+            if self.drone_states.get(drone_id) not in {"armed", "returning_home"}:
+                self.node.get_logger().warn(f"D{drone_id}: not armed → mission blocked")
+                return
+            elapsed_ms = (time.monotonic() - self._arm_sent_times.get(drone_id, 0)) * 1000
+            if elapsed_ms < self.ARM_MISSION_GUARD_MS:
+                remaining = int(self.ARM_MISSION_GUARD_MS - elapsed_ms) + 10
+                self.node.get_logger().info(
+                    f"D{drone_id}: ARM guard active ({elapsed_ms:.0f} ms elapsed), retrying in {remaining} ms")
+                QTimer.singleShot(remaining, lambda: self._send_command(drone_id, command))
+                return
         self._publish(drone_id, command)
 
     def _send_arm_toggle(self, drone_id: int):
         btn = self.ui_refs[drone_id]["arm"]
         command = "COMMAND_ARM" if btn.isChecked() else "COMMAND_DISARM"
         btn.setText("ARMED" if command == "COMMAND_ARM" else "ARM")
+        if command == "COMMAND_ARM":
+            self._arm_sent_times[drone_id] = time.monotonic()
+        else:
+            self._arm_sent_times.pop(drone_id, None)
         self._publish(drone_id, command)
 
     def _send_config_toggle(self, drone_id, button, cmd_on, cmd_off):
@@ -820,6 +858,16 @@ class GcsButtonPanel(Plugin):
         # Disable software ARM ALL while hardware is holding arm — hardware has priority
         self.arm_all_btn.setEnabled(not hw_armed)
         self.arm_all_btn.setChecked(hw_armed)
+        # Record ARM time so the mission guard works even when ARM came from hardware
+        now = time.monotonic()
+        for drone_id in range(1, self.DRONE_COUNT + 1):
+            if hw_armed:
+                self._arm_sent_times[drone_id] = now
+            else:
+                self._arm_sent_times.pop(drone_id, None)
+            # Lock per-drone ARM buttons while hardware holds ARM to prevent accidental DISARM
+            if drone_id in self.ui_refs:
+                self.ui_refs[drone_id]["arm"].setEnabled(not hw_armed)
         ARMED_STATES = {"armed", "mission", "landing"}
         any_active = any(s in ARMED_STATES for s in self.drone_states.values())
         if any_active:
