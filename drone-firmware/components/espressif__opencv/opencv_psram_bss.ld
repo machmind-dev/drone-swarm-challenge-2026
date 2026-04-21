@@ -4,37 +4,41 @@
  * Routes OpenCV library BSS/COMMON sections to PSRAM (extern_ram_seg) so they
  * do not consume the limited internal DRAM on ESP32-S3.
  *
- * Why INSERT BEFORE .dram0.bss (not .ext_ram.bss)
- * ------------------------------------------------
- * This script is the FIRST -T argument processed by the linker.  At that point
- * only the ROM linker files (-T esp32s3.rom.ld etc.) have been read, so only
- * memory regions defined there (including extern_ram_seg) are available.
- * dram0_0_seg is declared later in memory.ld and cannot be used here without
- * triggering an "implicit region" miscompile.
+ * Why INSERT BEFORE .ext_ram.bss
+ * --------------------------------
+ * On ESP32-S3, extern_ram_seg and drom0_0_seg (flash) share the same MMU bus
+ * and address space, both starting at 0x3C000020.  The generated sections.ld
+ * contains a .ext_ram.dummy (NOLOAD) section that advances the location
+ * counter past the flash-mapped DROM content to the first real PSRAM address
+ * (e.g. 0x3C5A0000) before .ext_ram.bss is placed.
  *
- * INSERT BEFORE .dram0.bss fires just before the main DRAM-BSS output section,
- * by which time sections.ld / memory.ld have already been processed and all
- * memory regions are defined.  Sections consumed here are not re-consumed by
- * .dram0.bss, so WiFi / LwIP BSS naturally stays in DRAM — DMA-safe.
+ * INSERT BEFORE .dram0.bss fires before .ext_ram.dummy has run, so the
+ * extern_ram_seg pointer is still at 0x3C000020 — the start of the read-only
+ * flash region.  Any memset to that address faults immediately.
  *
- * Why CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y is also required
- * -------------------------------------------------------------------
- * Without that config, ESP-IDF's esp_psram_extram_heap_add() starts the PSRAM
- * heap at SOC_EXTRAM_DATA_LOW (0x3D000000) — the same address where .opencv.bss
- * is placed below.  The TLSF heap metadata would overwrite OpenCV BSS, causing
- * memory corruption that manifests as a WiFi crash during init.
+ * INSERT BEFORE .ext_ram.bss fires after .ext_ram.dummy has advanced the
+ * pointer to actual PSRAM.  Our .opencv.bss then occupies the first N bytes
+ * of real PSRAM, followed immediately by .ext_ram.bss.
  *
- * With the config set, esp_psram_extram_heap_add() uses _ext_ram_bss_end
- * (defined in the generated .ext_ram.bss section of sections.ld) as the heap
- * start.  .ext_ram.bss is placed after .opencv.bss in extern_ram_seg, so
- * _ext_ram_bss_end points just past our BSS — no overlap.
+ * Memory layout in extern_ram_seg (PSRAM address space)
+ * -------------------------------------------------------
+ *   [0x3C000020 .. flash_end]      .ext_ram.dummy  — placeholder, skips flash
+ *   [psram_start .. psram_start+N] .opencv.bss     — OpenCV BSS (this script)
+ *   [psram_start+N .. +M]          .ext_ram.bss    — WiFi/LwIP/app PSRAM BSS
+ *   [psram_start+N+M .. end]       PSRAM heap      — starts at _ext_ram_bss_end
+ *
+ * Why CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y is required
+ * --------------------------------------------------------------
+ * This config causes ESP-IDF to emit .ext_ram.bss with _ext_ram_bss_start/end
+ * symbols and to start the PSRAM heap at _ext_ram_bss_end.  Without it the
+ * heap starts at the raw PSRAM base, overlapping our BSS.
  *
  * Zero-initialisation
  * -------------------
- * .opencv.bss is placed before .ext_ram.bss in extern_ram_seg and is therefore
- * NOT covered by the [_ext_ram_bss_start, _ext_ram_bss_end] range that the
- * startup code zeros.  app_main() must zero [_opencv_psram_bss_start,
- * _opencv_psram_bss_end] explicitly before any OpenCV function is called.
+ * .opencv.bss is placed BEFORE .ext_ram.bss in extern_ram_seg, so it is NOT
+ * covered by the [_ext_ram_bss_start, _ext_ram_bss_end] range that the startup
+ * code zeros.  app_main() must call memset on [_opencv_psram_bss_start,
+ * _opencv_psram_bss_end] before any OpenCV function is invoked.
  */
 
 SECTIONS
@@ -60,4 +64,4 @@ SECTIONS
     _opencv_psram_bss_end = ABSOLUTE(.);
   } > extern_ram_seg
 }
-INSERT BEFORE .dram0.bss;
+INSERT BEFORE .ext_ram.bss;
