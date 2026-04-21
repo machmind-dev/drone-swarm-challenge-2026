@@ -73,11 +73,28 @@ DECLARE_CV_PAUSE
 namespace cv
 {
 
+#ifdef __XTENSA__
+namespace { struct _ParallelInitProbe {
+    _ParallelInitProbe(const char* tag) { printf("[cv::parallel] %s\r\n", tag); fflush(stdout); }
+}; }
+static _ParallelInitProbe _par_probe_a("before CV_ACTIVE_WAIT_PAUSE_LIMIT");
+#endif
 static int CV_ACTIVE_WAIT_PAUSE_LIMIT = (int)utils::getConfigurationParameterSizeT("OPENCV_THREAD_POOL_ACTIVE_WAIT_PAUSE_LIMIT", 16);  // iterations
+#ifdef __XTENSA__
+static _ParallelInitProbe _par_probe_b("before CV_WORKER_ACTIVE_WAIT");
+#endif
 static int CV_WORKER_ACTIVE_WAIT = (int)utils::getConfigurationParameterSizeT("OPENCV_THREAD_POOL_ACTIVE_WAIT_WORKER", 2000);  // iterations
+#ifdef __XTENSA__
+static _ParallelInitProbe _par_probe_c("before CV_MAIN_THREAD_ACTIVE_WAIT");
+#endif
 static int CV_MAIN_THREAD_ACTIVE_WAIT = (int)utils::getConfigurationParameterSizeT("OPENCV_THREAD_POOL_ACTIVE_WAIT_MAIN", 10000); // iterations
-
+#ifdef __XTENSA__
+static _ParallelInitProbe _par_probe_d("before CV_WORKER_ACTIVE_WAIT_THREADS_LIMIT");
+#endif
 static int CV_WORKER_ACTIVE_WAIT_THREADS_LIMIT = (int)utils::getConfigurationParameterSizeT("OPENCV_THREAD_POOL_ACTIVE_WAIT_THREADS_LIMIT", 0); // number of real cores
+#ifdef __XTENSA__
+static _ParallelInitProbe _par_probe_e("parallel_impl statics done");
+#endif
 
 class WorkerThread;
 class ParallelJob;

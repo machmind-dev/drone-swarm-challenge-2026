@@ -45,6 +45,13 @@
 
 #include <opencv2/core/utils/tls.hpp>
 
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _UMatInitProbe {
+    _UMatInitProbe() { printf("[cv::umatrix] static init reached\r\n"); fflush(stdout); }
+}; static _UMatInitProbe _umat_probe; }
+#endif
+
 ///////////////////////////////// UMat implementation ///////////////////////////////
 
 namespace cv {

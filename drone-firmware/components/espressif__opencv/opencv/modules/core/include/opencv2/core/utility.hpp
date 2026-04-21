@@ -714,6 +714,12 @@ void Mat::forEach_impl(const Functor& operation) {
 /////////////////////////// Synchronization Primitives ///////////////////////////////
 
 #if !defined(_M_CEE)
+#if defined(__XTENSA__) && !defined(OPENCV_DISABLE_THREAD_SUPPORT)
+// ESP-IDF pthread lazy-init (PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP) is not
+// handled by pthread_mutex_init_if_static, causing crashes/hangs during static
+// initialization. Disable thread support for all Xtensa/ESP32 targets.
+#define OPENCV_DISABLE_THREAD_SUPPORT
+#endif
 #ifndef OPENCV_DISABLE_THREAD_SUPPORT
 typedef std::recursive_mutex Mutex;
 typedef std::lock_guard<cv::Mutex> AutoLock;

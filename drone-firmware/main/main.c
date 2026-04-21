@@ -1322,6 +1322,10 @@ static void print_current_ip_info(void)
 
 void app_main(void)
 {
+
+  printf("app_main started\r\n"); fflush(stdout);
+
+
 #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
     ESP_ERROR_CHECK(uros_network_interface_initialize());
     set_device_hostname_from_drone_id();
