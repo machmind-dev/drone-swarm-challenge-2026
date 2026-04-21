@@ -60,7 +60,3 @@ CONFIG_ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND=y
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 
-# Halt on panic so the full backtrace prints before reboot (remove after debugging)
-CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
-# Raise INT WDT timeout so panic handler can print before level-2 fires
-CONFIG_ESP_INT_WDT_TIMEOUT_MS=800
