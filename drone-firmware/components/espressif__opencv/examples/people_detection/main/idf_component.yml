@@ -1,0 +1,9 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp32-camera: ">=2.0.3"
+  ## Required IDF version
+  idf:
+    version: ">=4.1.0"
+  espressif/opencv:
+    override_path: "../../../"
+    version: "*"

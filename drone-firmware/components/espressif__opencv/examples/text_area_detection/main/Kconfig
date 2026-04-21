@@ -1,0 +1,15 @@
+    menu "Camera Pinout Configuration"
+        choice CAMERA_MODULE
+            bool "Select Camera Pinout"
+            default CAMERA_MODULE_ESP_EYE
+            help
+                Select Camera Pinout.
+
+            config CAMERA_MODULE_ESP_EYE
+                bool "ESP-EYE DevKit"
+            config CAMERA_MODULE_ESP_S3_EYE
+                bool "ESP-S3-EYE DevKit"
+            config CAMERA_MODULE_AI_THINKER
+                bool "ESP32-CAM by AI-Thinker"
+        endchoice
+    endmenu

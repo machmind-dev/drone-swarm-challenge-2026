@@ -1,0 +1,24 @@
+dependencies:
+  idf: '>=4.4'
+description: OpenCV build for esp-idf
+files:
+  exclude:
+  - opencv/apps/**/*
+  - opencv/data/**/*
+  - opencv/samples/**/*
+  - opencv/doc/**/*
+  - opencv_contrib/samples/**/*
+  - opencv_contrib/doc/**/*
+  include:
+  - opencv/apps/CMakeLists.txt
+  - opencv/data/CMakeLists.txt
+  - opencv/samples/CMakeLists.txt
+  - opencv/doc/CMakeLists.txt
+repository: https://github.com/espressif/esp-opencv-component.git
+targets:
+- esp32
+- esp32s2
+- esp32s3
+- esp32p4
+url: https://github.com/espressif/esp-opencv-component
+version: 4.10.0~3

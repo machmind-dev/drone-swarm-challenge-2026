@@ -1,0 +1,226 @@
+set(deps esp_rom vfs lwip pthread newlib)
+
+idf_component_register(
+                       # We need the dummy source file so that the component
+                       # library is not an interface library. This allows to
+                       # get the list of include directories from other components
+                       # via INCLUDE_DIRECTORIES property later on.
+                       SRCS dummy.c
+                       # OpenCV librarires depend on some of the IDF libraries,
+                       # add them here:
+                       PRIV_REQUIRES ${deps})
+
+# Determine compilation flags used for building OpenCV
+# Flags inherited from IDF build system and other IDF components:
+set(idf_include_directories $<TARGET_PROPERTY:idf::${COMPONENT_NAME},INCLUDE_DIRECTORIES>)
+set(includes "-I$<JOIN:${idf_include_directories}, -I>")
+# IDF is built with -D_GNU_SOURCE, but we don't actually implement all _GNU_SOURCE
+# features. Defining _GNU_SOURCE causes OpenCV to try to use them, which fails.
+# Use _DEFAULT_SOURCE instead, it provides enough features to build OpenCV.
+set(extra_defines -D_DEFAULT_SOURCE)
+# Final flags for C and C++:
+set(c_flags "${includes} ${extra_defines}")
+set(cxx_flags "${includes} ${extra_defines}")
+set(cxx_flags "${includes} ${extra_defines} -DCV_INT32_T_IS_LONG_INT=ON -Dalloca=__builtin_alloca")
+
+set(common_flags "-ggdb  -ffunction-sections -fdata-sections")
+
+# Calculate flags for optimizations, assertions, debug info:
+if(COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE)
+   set(assert_flags "-DNDEBUG")
+else()
+   set(assert_flags "-DDEBUG -D_DEBUG")
+endif()
+
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    set(assert_flags "${assert_flags} -mlongcalls -mauto-litpools")
+    # Xtensa GCC esp-2022r1-11.2.0 has a pervasive ICE in the postreload pass at -O1+.
+    # The bug manifests as "extract_constrain_insn, at recog.c:2671" on any function
+    # that loads float constants from the literal pool (affects core, imgproc, flann,
+    # features2d, calib3d, objdetect). Using -O0 is the only reliable workaround.
+    # ArUco detection at 10fps on ESP32-S3@240MHz is fast enough without optimization.
+    # See https://github.com/jcmvbkbc/gcc-xtensa/issues/14
+    set(opt_flags "-O0 ${common_flags} ${assert_flags}")
+    set(opt_args -DCMAKE_BUILD_TYPE=Release
+                 -DCMAKE_C_FLAGS_RELEASE=${opt_flags}
+                 -DCMAKE_CXX_FLAGS_RELEASE=${opt_flags})
+elseif(CONFIG_COMPILER_OPTIMIZATION_DEFAULT)
+    set(opt_flags "-Og ${common_flags} ${assert_flags}")
+    set(opt_args -DCMAKE_BUILD_TYPE=Debug
+                 -DCMAKE_C_FLAGS_DEBUG=${opt_flags}
+                 -DCMAKE_CXX_FLAGS_DEBUG=${opt_flags})
+elseif(CONFIG_COMPILER_OPTIMIZATION_SIZE)
+    # Normally we should use MinSizeRel build type for this,
+    # however OpenCV CMake files only handle Debug and Release
+    # (see e.g. opencv/cmake/OpenCVCompilerOptions.cmake).
+    # So we redefine the flags for Release instead.
+    set(opt_flags "-Os ${common_flags} ${assert_flags}")
+    set(opt_args -DCMAKE_BUILD_TYPE=Release
+                 -DCMAKE_C_FLAGS_RELEASE=${opt_flags}
+                 -DCMAKE_CXX_FLAGS_RELEASE=${opt_flags})
+elseif(COMPILER_OPTIMIZATION_PERF)
+    set(opt_flags "-O3 ${common_flags} ${assert_flags}")
+    set(opt_args -DCMAKE_BUILD_TYPE=Release
+                 -DCMAKE_C_FLAGS_RELEASE=${opt_flags}
+                 -DCMAKE_CXX_FLAGS_RELEASE=${opt_flags})
+elseif(COMPILER_OPTIMIZATION_NONE)
+    set(opt_flags "-O0 ${common_flags} ${assert_flags}")
+    set(opt_args -DCMAKE_BUILD_TYPE=Debug
+                 -DCMAKE_C_FLAGS_DEBUG=${opt_flags}
+                 -DCMAKE_CXX_FLAGS_DEBUG=${opt_flags})
+else()
+    message(FATAL_ERROR "Unsupported optimization level")
+endif()
+
+# Python to use for OpenCV build
+idf_build_get_property(python PYTHON)
+
+include(ExternalProject)
+
+# Build OpenCV in this directory:
+set(BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/opencv-build)
+
+# List of OpenCV static libraries we expect to see after the build.
+# Obtained manually by looking at ${BINARY_DIR}/install/lib directory.
+# In some cases it's important to have right order of libraries here.
+set(opencv_libraries
+    calib3d flann features2d
+    objdetect
+    imgproc core
+)
+
+set(3rdparty_libraries
+    zlib
+    libjpeg-turbo
+)
+
+# List of all static libraries to be produced
+set(all_libraries)
+set(all_targets)
+foreach(libname ${opencv_libraries})
+    set(lib_path ${BINARY_DIR}/install/lib/libopencv_${libname}.a)
+    list(APPEND all_libraries ${lib_path})
+    list(APPEND all_targets opencv_${libname})
+    add_prebuilt_library(opencv_${libname} ${lib_path})
+endforeach()
+foreach(libname ${3rdparty_libraries})
+    set(lib_path ${BINARY_DIR}/install/lib/opencv4/3rdparty/lib${libname}.a)
+    list(APPEND all_libraries ${lib_path})
+    list(APPEND all_targets opencv_${libname})
+    add_prebuilt_library(opencv_${libname} ${lib_path})
+endforeach()
+
+# Add OpenCV as a subproject.
+ExternalProject_Add(opencv_proj
+    SOURCE_DIR ${COMPONENT_DIR}/opencv
+    BINARY_DIR ${BINARY_DIR}
+    BUILD_BYPRODUCTS ${all_libraries}
+    # These two options are set so that Ninja immediately outputs
+    # the subproject build to the terminal. Otherwise it looks like the
+    # build process "hangs" for too long until OpenCV build is complete.
+    USES_TERMINAL_CONFIGURE TRUE
+    USES_TERMINAL_BUILD TRUE
+    # Arguments to pass to OpenCV CMake invocation:
+    CMAKE_ARGS
+        -DCMAKE_C_FLAGS=${c_flags}
+        -DCMAKE_CXX_FLAGS=${cxx_flags}
+        ${opt_args}
+        -DCMAKE_INSTALL_PREFIX=${BINARY_DIR}/install
+        -DENABLE_CCACHE=${CCACHE_ENABLE}
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        -DPYTHON_DEFAULT_EXECUTABLE=${python}
+        -DCV_CPU_BASELINE_MODE=${CONFIG_IDF_TARGET}
+        -DCV_DISABLE_OPTIMIZATION=0
+        -DOPENCV_EXTRA_MODULES_PATH=${CMAKE_CURRENT_LIST_DIR}/opencv_contrib/modules
+        -DOPENCV_FORCE_3RDPARTY_BUILD=1
+        -DCMAKE_SYSTEM_PROCESSOR=${CONFIG_IDF_TARGET_ARCH}
+        -DENABLE_PIC=0
+        -DTARGET=${CONFIG_IDF_TARGET}
+        -DWITH_ADE=0
+        -DWITH_JPEG=1
+        -DWITH_OPENCL=0
+        -DWITH_OPENEXR=0
+        -DWITH_OPENGL=0
+        -DWITH_OPENMP=0
+        -DWITH_PNG=1
+        -DWITH_PROTOBUF=0
+        -DWITH_TIFF=1
+        -DWITH_WEBP=1
+        -DBUILD_EXAMPLES=0
+        -DBUILD_PACKAGE=1
+        -DBUILD_PERF_TESTS=0
+        -DBUILD_PNG=1
+        -DBUILD_SHARED_LIBS=0
+        -DBUILD_TESTS=0
+        -DBUILD_ZLIB=1
+        # Enable only the modules needed for ArUco pose estimation:
+        -DBUILD_opencv_core=1
+        -DBUILD_opencv_imgproc=1
+        -DBUILD_opencv_flann=1
+        -DBUILD_opencv_features2d=1
+        -DBUILD_opencv_calib3d=1
+        -DBUILD_opencv_objdetect=1
+        # Disable everything else to avoid Xtensa GCC ICEs and reduce build time:
+        -DBUILD_opencv_apps=0
+        -DBUILD_opencv_aruco=0
+        -DBUILD_opencv_bgsegm=0
+        -DBUILD_opencv_bioinspired=0
+        -DBUILD_opencv_datasets=0
+        -DBUILD_opencv_dnn=0
+        -DBUILD_opencv_dnn_objdetect=0
+        -DBUILD_opencv_dnn_superres=0
+        -DBUILD_opencv_dpm=0
+        -DBUILD_opencv_face=0
+        -DBUILD_opencv_fuzzy=0
+        -DBUILD_opencv_hfs=0
+        -DBUILD_opencv_highgui=0
+        -DBUILD_opencv_img_hash=0
+        -DBUILD_opencv_imgcodecs=0
+        -DBUILD_opencv_intensity_transform=0
+        -DBUILD_opencv_line_descriptor=0
+        -DBUILD_opencv_mcc=0
+        -DBUILD_opencv_ml=0
+        -DBUILD_opencv_phase_unwrapping=0
+        -DBUILD_opencv_photo=0
+        -DBUILD_opencv_plot=0
+        -DBUILD_opencv_quality=0
+        -DBUILD_opencv_rapid=0
+        -DBUILD_opencv_reg=0
+        -DBUILD_opencv_rgbd=0
+        -DBUILD_opencv_saliency=0
+        -DBUILD_opencv_shape=0
+        -DBUILD_opencv_signal=0
+        -DBUILD_opencv_stitching=0
+        -DBUILD_opencv_structured_light=0
+        -DBUILD_opencv_surface_matching=0
+        -DBUILD_opencv_text=0
+        -DBUILD_opencv_tracking=0
+        -DBUILD_opencv_video=0
+        -DBUILD_opencv_videoio=0
+        -DBUILD_opencv_wechat_qrcode=0
+        -DBUILD_opencv_xfeatures2d=0
+        -DBUILD_opencv_xphoto=0
+)
+
+# Attach header files to the component library:
+set_target_properties(${COMPONENT_LIB} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${BINARY_DIR}/install/include/opencv4)
+
+# Route OpenCV BSS to PSRAM (extern_ram_seg) to avoid DRAM overflow.
+# INSERT BEFORE .dram0.bss ensures these patterns are consumed before the
+# main linker script places them in internal DRAM.
+idf_build_set_property(LINK_OPTIONS "-T${CMAKE_CURRENT_LIST_DIR}/opencv_psram_bss.ld" APPEND)
+
+# Make sure the subproject is built before the component library:
+add_dependencies(${COMPONENT_LIB} opencv_proj)
+
+
+foreach(opencv_target ${all_targets})
+    # Attach IDF compoenent dependencies to OpenCV libraries
+    foreach(dep ${deps})
+        target_link_libraries(${opencv_target} INTERFACE idf::${dep})
+    endforeach()
+    # Attach OpenCV libraries to the component library
+    target_link_libraries(${COMPONENT_LIB} INTERFACE ${opencv_target})
+endforeach()
+
+

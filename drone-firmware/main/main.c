@@ -75,6 +75,10 @@
 #include <visualization_msgs/msg/marker.h>
 #include <uros_network_interfaces.h>
 
+
+// Open CV
+#include "aruco_task.h"
+
 #define CAMERA_MODEL_XIAO_ESP32S3 1
 #include "boards.h"
 
@@ -181,14 +185,14 @@ static volatile bool  setpoint_received = false;
 
 /* Feature flags */
 static volatile bool camera_streaming    = false;
-static volatile bool vision_enabled      = false;
+volatile bool vision_enabled = false;
 static volatile bool gcs_control_active  = false;
 
 /* Vision pose cache (written by vision_pose_callback, read by mission/home tasks) */
-static volatile float vp_x = 0.0f, vp_y = 0.0f, vp_z = 0.0f;
-static volatile float vp_qx = 0.0f, vp_qy = 0.0f, vp_qz = 0.0f, vp_qw = 1.0f;
-static volatile bool    vision_pose_valid   = false;
-static volatile int64_t last_vision_pose_ms = 0;
+volatile float vp_x = 0.0f, vp_y = 0.0f, vp_z = 0.0f;
+volatile float vp_qx = 0.0f, vp_qy = 0.0f, vp_qz = 0.0f, vp_qw = 1.0f;
+volatile bool    vision_pose_valid   = false;
+volatile int64_t last_vision_pose_ms = 0;
 
 /* FreeRTOS task handles */
 static TaskHandle_t mission_task_handle     = NULL;
@@ -301,7 +305,7 @@ static void mav_set_mode(uint32_t custom_mode)
 
 /* VISION_POSITION_ESTIMATE — MAV_FRAME_LOCAL_NED.
  * covariance=NULL signals unknown covariance to PX4 EKF2. */
-static void mav_send_vision_estimate(float x, float y, float z,
+void mav_send_vision_estimate(float x, float y, float z,
                                       float roll, float pitch, float yaw)
 {
     mavlink_message_t msg;
@@ -1386,6 +1390,9 @@ void app_main(void)
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
         }
+
+        aruco_task_start();   // OpenCV
+
     }
 
     const float ix = get_initial_x_from_drone_id();

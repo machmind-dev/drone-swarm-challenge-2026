@@ -15,4 +15,5 @@ services:
       - ../main:/code/main
       - ../CMakeLists.txt:/code/CMakeLists.txt
       - ../sdkconfig.defaults:/code/sdkconfig.defaults
+      - ../partitions.csv:/code/partitions.csv
 
