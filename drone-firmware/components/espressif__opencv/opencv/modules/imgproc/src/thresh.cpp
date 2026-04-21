@@ -41,6 +41,14 @@
 //M*/
 
 #include "precomp.hpp"
+
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _ImgprocThreshProbe {
+    _ImgprocThreshProbe() { printf("[cv::imgproc/thresh] TU static init\r\n"); fflush(stdout); }
+}; static _ImgprocThreshProbe _probe; }
+#endif
+
 #include "opencl_kernels_imgproc.hpp"
 #include "opencv2/core/hal/intrin.hpp"
 

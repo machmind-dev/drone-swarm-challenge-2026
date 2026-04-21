@@ -42,6 +42,14 @@
 //M*/
 
 #include "precomp.hpp"
+
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _ImgprocAccumProbe {
+    _ImgprocAccumProbe() { printf("[cv::imgproc/accum] TU static init\r\n"); fflush(stdout); }
+}; static _ImgprocAccumProbe _probe; }
+#endif
+
 #include "opencl_kernels_imgproc.hpp"
 #include "opencv2/core/hal/intrin.hpp"
 #define CV_CPU_OPTIMIZATION_DECLARATIONS_ONLY

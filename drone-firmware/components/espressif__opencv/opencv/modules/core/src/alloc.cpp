@@ -257,4 +257,10 @@ CV_IMPL void cvFree_( void* ptr )
     cv::fastFree( ptr );
 }
 
+#ifdef __XTENSA__
+namespace { struct _AllocExitProbe {
+    _AllocExitProbe() { printf("[cv::alloc] TU static init DONE\r\n"); fflush(stdout); }
+}; static _AllocExitProbe _alloc_exit_probe; }
+#endif
+
 /* End of file. */
