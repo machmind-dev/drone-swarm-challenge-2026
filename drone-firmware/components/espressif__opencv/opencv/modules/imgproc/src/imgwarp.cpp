@@ -48,6 +48,14 @@
 // */
 
 #include "precomp.hpp"
+
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _ImgwarpProbe {
+    _ImgwarpProbe() { printf("[cv::imgproc/imgwarp] TU static init\r\n"); fflush(stdout); }
+}; static _ImgwarpProbe _probe; }
+#endif
+
 #include "opencl_kernels_imgproc.hpp"
 #include "hal_replacement.hpp"
 #include <opencv2/core/utils/configuration.private.hpp>

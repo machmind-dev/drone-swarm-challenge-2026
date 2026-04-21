@@ -9,6 +9,14 @@
 \**********************************************************************************/
 
 #include "precomp.hpp"
+
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _ColorLabProbe {
+    _ColorLabProbe() { printf("[cv::imgproc/color_lab] TU static init\r\n"); fflush(stdout); }
+}; static _ColorLabProbe _probe; }
+#endif
+
 #include "opencl_kernels_imgproc.hpp"
 #include "opencv2/core/hal/intrin.hpp"
 #include "opencv2/core/softfloat.hpp"
