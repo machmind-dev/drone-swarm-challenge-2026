@@ -1774,4 +1774,10 @@ cvAdaptiveThreshold( const void *srcIm, void *dstIm, double maxValue,
     cv::adaptiveThreshold( src, dst, maxValue, method, type, blockSize, delta );
 }
 
+#ifdef __XTENSA__
+namespace { struct _ImgprocThreshExitProbe {
+    _ImgprocThreshExitProbe() { printf("[cv::imgproc/thresh] TU static init DONE\r\n"); fflush(stdout); }
+}; static _ImgprocThreshExitProbe _exit_probe; }
+#endif
+
 /* End of file. */
