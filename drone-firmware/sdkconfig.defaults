@@ -58,5 +58,5 @@ CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 
 # Halt on panic so the full backtrace prints before reboot (remove after debugging)
 CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
-# Increase INT WDT from 300ms → 2000ms so level-2 doesn't fire mid-panic-print
-CONFIG_ESP_INT_WDT_TIMEOUT_MS=2000
+# Temporarily disable INT WDT to confirm WiFi crash is a timeout not a real fault
+CONFIG_ESP_INT_WDT=n
