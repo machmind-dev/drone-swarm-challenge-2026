@@ -82,10 +82,9 @@ static void* OutOfMemoryError(size_t size)
 
 CV_EXPORTS cv::utils::AllocatorStatisticsInterface& getAllocatorStatistics();
 
-static cv::utils::AllocatorStatistics allocator_stats;
-
 cv::utils::AllocatorStatisticsInterface& getAllocatorStatistics()
 {
+    static cv::utils::AllocatorStatistics allocator_stats;
     return allocator_stats;
 }
 
@@ -123,11 +122,15 @@ bool isAlignedAllocationEnabled()
 }
 
 // need for this static const is disputed; retaining as it doesn't cause harm
+// Skip eager init on Xtensa — do_global_ctors runs before FreeRTOS; isAlignedAllocationEnabled()
+// uses a C++11 magic static that is safe to call lazily at runtime instead.
+#if !defined(__XTENSA__)
 static const bool g_force_initialization_memalign_flag
 #if defined __GNUC__
     __attribute__((unused))
 #endif
     = isAlignedAllocationEnabled();
+#endif
 #endif
 
 #ifdef OPENCV_ALLOC_ENABLE_STATISTICS

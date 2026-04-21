@@ -137,11 +137,10 @@ namespace cv { namespace ocl {
     void release() { if( CV_XADD(&refcount, -1) == 1 && !cv::__termination) delete this; } \
     int refcount
 
-static cv::utils::AllocatorStatistics opencl_allocator_stats;
-
 CV_EXPORTS cv::utils::AllocatorStatisticsInterface& getOpenCLAllocatorStatistics();
 cv::utils::AllocatorStatisticsInterface& getOpenCLAllocatorStatistics()
 {
+    static cv::utils::AllocatorStatistics opencl_allocator_stats;
     return opencl_allocator_stats;
 }
 
