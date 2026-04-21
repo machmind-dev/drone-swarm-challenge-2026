@@ -40,7 +40,6 @@ CONFIG_SPIRAM_MEMTEST=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 # CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP is not set
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
-# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is not set
 # CONFIG_SPIRAM_ALLOW_NOINIT_SEG_EXTERNAL_MEMORY is not set
 # CONFIG_SPIRAM_ECC_ENABLE is not set
 
@@ -52,10 +51,13 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 CONFIG_ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND=y
 
 
-# OpenCV BSS is routed to PSRAM selectively via opencv_psram_bss.ld (INSERT BEFORE).
-# Do NOT set CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY globally — that routes ALL
-# BSS (including WiFi DMA descriptors) to PSRAM, breaking WiFi DMA.
-# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is not set
+# Route all BSS to PSRAM via .ext_ram.bss so _ext_ram_bss_end is properly defined
+# and the PSRAM heap starts AFTER the BSS region.  Without this, esp_psram_extram_heap_add()
+# starts the PSRAM heap at SOC_EXTRAM_DATA_LOW (0x3D000000), the same address where
+# opencv_psram_bss.ld places .opencv.bss — the heap metadata then corrupts OpenCV BSS.
+# WiFi/LwIP BSS is rescued back into internal DRAM by opencv_psram_bss.ld (INSERT BEFORE
+# .ext_ram.bss) so WiFi DMA ring buffers stay in DMA-capable internal SRAM.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 
 # Halt on panic so the full backtrace prints before reboot (remove after debugging)
