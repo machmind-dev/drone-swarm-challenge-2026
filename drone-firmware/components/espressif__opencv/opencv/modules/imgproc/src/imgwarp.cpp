@@ -294,7 +294,7 @@ static const void* initInterTab2D( int method, bool fixpt )
     return fixpt ? (const void*)itab : (const void*)tab;
 }
 
-#ifndef __MINGW32__
+#if !defined(__MINGW32__) && !defined(__XTENSA__)
 static bool initAllInterTab2D()
 {
     return  initInterTab2D( INTER_LINEAR, false ) &&
@@ -3893,5 +3893,11 @@ void cvLogPolar( const CvArr* srcarr, CvArr* dstarr,
 
     cv::logPolar(src, dst, center, M, flags);
 }
+
+#ifdef __XTENSA__
+namespace { struct _ImgwarpExitProbe {
+    _ImgwarpExitProbe() { printf("[cv::imgproc/imgwarp] TU static init DONE\r\n"); fflush(stdout); }
+}; static _ImgwarpExitProbe _imgwarp_exit_probe; }
+#endif
 
 /* End of file. */
