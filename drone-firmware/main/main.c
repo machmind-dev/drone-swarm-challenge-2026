@@ -1351,7 +1351,9 @@ void app_main(void)
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
         }
-        aruco_task_start();   // OpenCV
+        /* NOTE: aruco_task_start() is intentionally deferred to after WiFi init.
+         * ArUco task stacks consume DMA-capable DRAM; starting them here would
+         * exhaust the heap before WiFi's static RX buffer allocation. */
     }
 
 #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
@@ -1559,6 +1561,13 @@ void app_main(void)
     land_label_msg.color.b           = 0.0f;
     land_label_msg.color.a           = 1.0f;
     rosidl_runtime_c__String__assign(&land_label_msg.text, drone_label);
+
+    /* Start ArUco detection tasks now that WiFi has allocated its static
+     * buffers.  Camera DMA was reserved early (before WiFi), but task stacks
+     * are allocated here to avoid competing with WiFi's RX buffer malloc. */
+    if (camera_streaming) {
+        aruco_task_start();
+    }
 
     xTaskCreate(micro_ros_task, "uros_task",
                 CONFIG_MICRO_ROS_APP_STACK, NULL,

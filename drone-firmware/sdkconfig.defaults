@@ -39,7 +39,7 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MEMTEST=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 # CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP is not set
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 # CONFIG_SPIRAM_ALLOW_NOINIT_SEG_EXTERNAL_MEMORY is not set
 # CONFIG_SPIRAM_ECC_ENABLE is not set
 
@@ -59,4 +59,19 @@ CONFIG_ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND=y
 # .ext_ram.bss) so WiFi DMA ring buffers stay in DMA-capable internal SRAM.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+
+# WiFi TX/RX buffer tuning — required to coexist with camera DMA (30 KB) in internal DRAM.
+#
+# Available DMA-capable internal DRAM at startup is ~65 KB.  With default static TX
+# (16 × 1600 = 25 600 B) + static RX (10 × 1600 = 16 000 B) + camera DMA (30 720 B) the
+# total exceeds available DRAM and WiFi rx buffer malloc fails.
+#
+# Switching TX to dynamic (allocated from the general heap on demand, PSRAM-eligible) frees
+# ~25 600 B of upfront DMA reservation.  Static RX buffers are kept (they do need DMA-capable
+# DRAM) but the count is reduced to 6 and compensated by more dynamic RX buffers:
+#   camera DMA  (30 720) + static RX (6 × 1600 = 9 600) = 40 320 B  — fits with headroom.
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=y
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
 
