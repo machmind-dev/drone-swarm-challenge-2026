@@ -48,13 +48,6 @@
 #include <iostream>
 #include "mathfuncs.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _MathFuncsInitProbe {
-    _MathFuncsInitProbe() { printf("[cv::mathfuncs] TU static init\r\n"); fflush(stdout); }
-}; static _MathFuncsInitProbe _mathfuncs_probe; }
-#endif
-
 namespace cv
 {
 

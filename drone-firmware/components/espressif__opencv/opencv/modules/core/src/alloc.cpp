@@ -42,13 +42,6 @@
 
 #include "precomp.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _AllocInitProbe {
-    _AllocInitProbe() { printf("[cv::alloc] TU static init\r\n"); fflush(stdout); }
-}; static _AllocInitProbe _alloc_probe; }
-#endif
-
 #include <opencv2/core/utils/logger.defines.hpp>
 #undef CV_LOG_STRIP_LEVEL
 #define CV_LOG_STRIP_LEVEL CV_LOG_LEVEL_VERBOSE + 1
@@ -256,11 +249,5 @@ CV_IMPL void cvFree_( void* ptr )
 {
     cv::fastFree( ptr );
 }
-
-#ifdef __XTENSA__
-namespace { struct _AllocExitProbe {
-    _AllocExitProbe() { printf("[cv::alloc] TU static init DONE\r\n"); fflush(stdout); }
-}; static _AllocExitProbe _alloc_exit_probe; }
-#endif
 
 /* End of file. */

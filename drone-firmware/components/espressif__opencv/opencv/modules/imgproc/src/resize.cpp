@@ -49,13 +49,6 @@
 
 #include "precomp.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _ResizeProbe {
-    _ResizeProbe() { printf("[cv::imgproc/resize] TU static init\r\n"); fflush(stdout); }
-}; static _ResizeProbe _probe; }
-#endif
-
 #include "opencl_kernels_imgproc.hpp"
 #include "hal_replacement.hpp"
 #include "opencv2/core/hal/intrin.hpp"

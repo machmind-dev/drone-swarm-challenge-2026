@@ -59,14 +59,6 @@
 #include <opencv2/core/utils/fp_control_utils.hpp>
 #include <opencv2/core/utils/fp_control.private.hpp>
 
-// Xtensa/ESP32 static-init diagnostics — remove once boot is stable.
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _CvInitProbe {
-    _CvInitProbe(int step) { printf("[cv::init] step %d\r\n", step); fflush(stdout); }
-}; }
-#endif
-
 namespace cv {
 
 static void _initSystem()
@@ -92,13 +84,7 @@ Mutex& getInitializationMutex()
     return *__initialization_mutex;
 }
 // force initialization (single-threaded environment)
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_1(1);
-#endif
 Mutex* __initialization_mutex_initializer = &getInitializationMutex();
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_2(2);
-#endif
 
 static bool param_dumpErrors = utils::getConfigurationParameterBool("OPENCV_DUMP_ERRORS",
 #if defined(_DEBUG) || defined(__ANDROID__)
@@ -107,9 +93,6 @@ static bool param_dumpErrors = utils::getConfigurationParameterBool("OPENCV_DUMP
     false
 #endif
 );
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_3(3);
-#endif
 
 void* allocSingletonBuffer(size_t size) { return fastMalloc(size); }
 void* allocSingletonNewBuffer(size_t size) { return malloc(size); }
@@ -871,15 +854,11 @@ struct HWFeatures
 // Xtensa/ESP32: skip CPU feature detection; no x86/ARM features, avoids
 // complex static-init (getenv + initializeNames) during do_global_ctors.
 #if defined(__XTENSA__)
-static _CvInitProbe _cv_probe_4(4);
 static HWFeatures  featuresEnabled(false), featuresDisabled = HWFeatures(false);
 #else
 static HWFeatures  featuresEnabled(true), featuresDisabled = HWFeatures(false);
 #endif
 static HWFeatures* currentFeatures = &featuresEnabled;
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_5(5);
-#endif
 
 bool checkHardwareSupport(int feature)
 {
@@ -1045,16 +1024,10 @@ public:
         Timestamp::getInstance();
     }
 };
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_6(6);
-#endif
 // Xtensa/ESP32: skip eager timestamp init; Timestamp::getInstance() is lazy,
 // called on first getTimestampNS() after FreeRTOS is fully running.
 #if !defined(__XTENSA__)
 static InitTimestamp g_initialize_timestamp;  // force zero timestamp initialization
-#endif
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_7(7);
 #endif
 
 }  // namespace
@@ -1260,16 +1233,10 @@ static void dumpException(const Exception& exc)
 }
 
 #ifdef CV_ERROR_SET_TERMINATE_HANDLER
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_8(8);
-#endif
 static bool cv_terminate_handler_installed = false;
 static std::terminate_handler cv_old_terminate_handler;
 static cv::Exception cv_terminate_handler_exception;
 static bool param_setupTerminateHandler = utils::getConfigurationParameterBool("OPENCV_SETUP_TERMINATE_HANDLER", true);
-#ifdef __XTENSA__
-static _CvInitProbe _cv_probe_9(9);
-#endif
 static void cv_terminate_handler() {
     std::cerr << "OpenCV: terminate handler is called! The last OpenCV error is:\n";
     dumpException(cv_terminate_handler_exception);

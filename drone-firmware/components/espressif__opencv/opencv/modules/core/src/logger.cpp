@@ -115,11 +115,6 @@ struct GlobalLoggingInitCall
 // LogTagManager constructor now explicitly initializes the mutex via pthread_mutex_init.
 #if !defined(__XTENSA__)
 static GlobalLoggingInitCall globalLoggingInitCall;
-#else
-// Xtensa diagnostic: confirm we reach logger.cpp static init
-namespace { struct _LogInitProbe {
-    _LogInitProbe() { printf("[cv::logger] static init reached\r\n"); fflush(stdout); }
-}; static _LogInitProbe _log_probe; }
 #endif
 
 static LogTagManager& getLogTagManager()

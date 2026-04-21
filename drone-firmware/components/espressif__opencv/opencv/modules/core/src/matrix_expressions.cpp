@@ -12,13 +12,6 @@
 #include "precomp.hpp"
 #include <opencv2/core/utils/logger.hpp>
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _MatExprInitProbe {
-    _MatExprInitProbe() { printf("[cv::matrix_expressions] TU static init\r\n"); fflush(stdout); }
-}; static _MatExprInitProbe _matexpr_probe; }
-#endif
-
 namespace cv
 {
 

@@ -49,13 +49,6 @@
 
 #include "precomp.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _ImgwarpProbe {
-    _ImgwarpProbe() { printf("[cv::imgproc/imgwarp] TU static init\r\n"); fflush(stdout); }
-}; static _ImgwarpProbe _probe; }
-#endif
-
 #include "opencl_kernels_imgproc.hpp"
 #include "hal_replacement.hpp"
 #include <opencv2/core/utils/configuration.private.hpp>
@@ -3893,11 +3886,5 @@ void cvLogPolar( const CvArr* srcarr, CvArr* dstarr,
 
     cv::logPolar(src, dst, center, M, flags);
 }
-
-#ifdef __XTENSA__
-namespace { struct _ImgwarpExitProbe {
-    _ImgwarpExitProbe() { printf("[cv::imgproc/imgwarp] TU static init DONE\r\n"); fflush(stdout); }
-}; static _ImgwarpExitProbe _imgwarp_exit_probe; }
-#endif
 
 /* End of file. */

@@ -41,13 +41,6 @@
 
 #include "precomp.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _ImgprocUtilsProbe {
-    _ImgprocUtilsProbe() { printf("[cv::imgproc/utils] TU static init\r\n"); fflush(stdout); }
-}; static _ImgprocUtilsProbe _probe; }
-#endif
-
 CV_IMPL CvSeq* cvPointSeqFromMat( int seq_kind, const CvArr* arr,
                                   CvContour* contour_header, CvSeqBlock* block )
 {

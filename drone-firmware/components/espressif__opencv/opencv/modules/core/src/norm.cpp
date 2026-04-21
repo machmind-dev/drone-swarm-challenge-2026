@@ -7,13 +7,6 @@
 #include "opencl_kernels_core.hpp"
 #include "stat.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _NormInitProbe {
-    _NormInitProbe() { printf("[cv::norm] TU static init\r\n"); fflush(stdout); }
-}; static _NormInitProbe _norm_probe; }
-#endif
-
 /****************************************************************************************\
 *                                         norm                                           *
 \****************************************************************************************/

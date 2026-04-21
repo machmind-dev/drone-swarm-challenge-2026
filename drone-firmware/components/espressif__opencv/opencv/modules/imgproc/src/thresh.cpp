@@ -42,13 +42,6 @@
 
 #include "precomp.hpp"
 
-#ifdef __XTENSA__
-#include <cstdio>
-namespace { struct _ImgprocThreshProbe {
-    _ImgprocThreshProbe() { printf("[cv::imgproc/thresh] TU static init\r\n"); fflush(stdout); }
-}; static _ImgprocThreshProbe _probe; }
-#endif
-
 #include "opencl_kernels_imgproc.hpp"
 #include "opencv2/core/hal/intrin.hpp"
 
@@ -1773,11 +1766,5 @@ cvAdaptiveThreshold( const void *srcIm, void *dstIm, double maxValue,
     CV_Assert( src.size == dst.size && src.type() == dst.type() );
     cv::adaptiveThreshold( src, dst, maxValue, method, type, blockSize, delta );
 }
-
-#ifdef __XTENSA__
-namespace { struct _ImgprocThreshExitProbe {
-    _ImgprocThreshExitProbe() { printf("[cv::imgproc/thresh] TU static init DONE\r\n"); fflush(stdout); }
-}; static _ImgprocThreshExitProbe _exit_probe; }
-#endif
 
 /* End of file. */
