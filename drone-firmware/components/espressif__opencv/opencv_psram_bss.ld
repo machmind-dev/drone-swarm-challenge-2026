@@ -1,63 +1,63 @@
 /*
- * opencv_psram_bss.ld  (WiFi-DMA rescue linker fragment)
+ * opencv_psram_bss.ld
  *
- * Context
- * -------
- * CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y causes the ESP-IDF linker
- * template to generate an .ext_ram.bss output section (in extern_ram_seg /
- * PSRAM) that captures *all* .bss sections — including the WiFi MAC/PHY blobs
- * (libnet80211.a, libpp.a) which keep their DMA ring-buffer descriptors in BSS.
- * Placing those descriptors in PSRAM breaks WiFi DMA, causing TG1WDT_SYS_RST
- * immediately after "Init static tx buffer num: 16".
+ * Routes OpenCV library BSS/COMMON sections to PSRAM (extern_ram_seg) so they
+ * do not consume the limited internal DRAM on ESP32-S3.
  *
- * Without CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY the PSRAM heap starts at
- * SOC_EXTRAM_DATA_LOW (0x3D000000) — the same address where the OpenCV BSS
- * sections are placed by an INSERT BEFORE .dram0.bss rule.  The heap's TLSF
- * metadata overwrites OpenCV BSS at boot, corrupting memory and causing the
- * same WiFi crash by a different path.
+ * Why INSERT BEFORE .dram0.bss (not .ext_ram.bss)
+ * ------------------------------------------------
+ * This script is the FIRST -T argument processed by the linker.  At that point
+ * only the ROM linker files (-T esp32s3.rom.ld etc.) have been read, so only
+ * memory regions defined there (including extern_ram_seg) are available.
+ * dram0_0_seg is declared later in memory.ld and cannot be used here without
+ * triggering an "implicit region" miscompile.
  *
- * Solution
- * --------
- * Keep CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y so _ext_ram_bss_end is
- * properly defined and esp_psram_extram_heap_add() starts the PSRAM heap AFTER
- * all BSS.  OpenCV BSS falls naturally into .ext_ram.bss (PSRAM).
+ * INSERT BEFORE .dram0.bss fires just before the main DRAM-BSS output section,
+ * by which time sections.ld / memory.ld have already been processed and all
+ * memory regions are defined.  Sections consumed here are not re-consumed by
+ * .dram0.bss, so WiFi / LwIP BSS naturally stays in DRAM — DMA-safe.
  *
- * This fragment fires INSERT BEFORE .ext_ram.bss and captures the WiFi/LwIP
- * libraries' .bss sections into internal DRAM (dram0_0_seg) so they remain
- * DMA-reachable.
+ * Why CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y is also required
+ * -------------------------------------------------------------------
+ * Without that config, ESP-IDF's esp_psram_extram_heap_add() starts the PSRAM
+ * heap at SOC_EXTRAM_DATA_LOW (0x3D000000) — the same address where .opencv.bss
+ * is placed below.  The TLSF heap metadata would overwrite OpenCV BSS, causing
+ * memory corruption that manifests as a WiFi crash during init.
  *
- * Note on zero-initialisation
- * ---------------------------
- * The .wifi_dram.bss section is placed in dram0_0_seg but is NOT bracketed by
- * _bss_start/_bss_end (those symbols are defined inside the subsequent
- * .dram0.bss section).  The WiFi blob's esp_wifi_init() explicitly initialises
- * all internal state, so the initial BSS content does not matter.
+ * With the config set, esp_psram_extram_heap_add() uses _ext_ram_bss_end
+ * (defined in the generated .ext_ram.bss section of sections.ld) as the heap
+ * start.  .ext_ram.bss is placed after .opencv.bss in extern_ram_seg, so
+ * _ext_ram_bss_end points just past our BSS — no overlap.
+ *
+ * Zero-initialisation
+ * -------------------
+ * .opencv.bss is placed before .ext_ram.bss in extern_ram_seg and is therefore
+ * NOT covered by the [_ext_ram_bss_start, _ext_ram_bss_end] range that the
+ * startup code zeros.  app_main() must zero [_opencv_psram_bss_start,
+ * _opencv_psram_bss_end] explicitly before any OpenCV function is called.
  */
 
 SECTIONS
 {
-  .wifi_dram.bss (NOLOAD) :
+  .opencv.bss (NOLOAD) :
   {
+    _opencv_psram_bss_start = ABSOLUTE(.);
     . = ALIGN(4);
 
-    /* WiFi MAC / PHY blobs — DMA ring buffers and descriptors live here */
-    *libnet80211.a:(.bss .bss.* COMMON)
-    *libpp.a:(.bss .bss.* COMMON)
+    /* OpenCV modules */
+    *libopencv_core.a:(.bss .bss.* COMMON)
+    *libopencv_imgproc.a:(.bss .bss.* COMMON)
+    *libopencv_objdetect.a:(.bss .bss.* COMMON)
+    *libopencv_calib3d.a:(.bss .bss.* COMMON)
+    *libopencv_features2d.a:(.bss .bss.* COMMON)
+    *libopencv_flann.a:(.bss .bss.* COMMON)
 
-    /* WiFi component API layer */
-    *libesp_wifi.a:(.bss .bss.* COMMON)
-
-    /* WPA supplicant — authentication state */
-    *libwpa_supplicant.a:(.bss .bss.* COMMON)
-
-    /* WiFi / BT coexistence */
-    *libcoexist.a:(.bss .bss.* COMMON)
-
-    /* LwIP TCP/IP stack and network interface */
-    *liblwip.a:(.bss .bss.* COMMON)
-    *libesp_netif.a:(.bss .bss.* COMMON)
+    /* OpenCV bundled 3rd-party libraries */
+    *libzlib.a:(.bss .bss.* COMMON)
+    *liblibjpeg-turbo.a:(.bss .bss.* COMMON)
 
     . = ALIGN(4);
-  } > dram0_0_seg
+    _opencv_psram_bss_end = ABSOLUTE(.);
+  } > extern_ram_seg
 }
-INSERT BEFORE .ext_ram.bss;
+INSERT BEFORE .dram0.bss;

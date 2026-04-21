@@ -1322,6 +1322,16 @@ static void print_current_ip_info(void)
 
 void app_main(void)
 {
+    /* Zero-init OpenCV BSS in PSRAM.
+     *
+     * .opencv.bss is placed by opencv_psram_bss.ld BEFORE .ext_ram.bss in
+     * extern_ram_seg, so it falls outside the [_ext_ram_bss_start,
+     * _ext_ram_bss_end] range that the startup code zeros.  Any OpenCV static
+     * table left with garbage values would corrupt detection results or panic.
+     */
+    extern uint8_t _opencv_psram_bss_start, _opencv_psram_bss_end;
+    memset(&_opencv_psram_bss_start, 0,
+           (size_t)(&_opencv_psram_bss_end - &_opencv_psram_bss_start));
 
   printf("app_main started\r\n"); fflush(stdout);
 
