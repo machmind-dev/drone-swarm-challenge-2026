@@ -8,7 +8,10 @@ idf_component_register(
                        SRCS dummy.c
                        # OpenCV librarires depend on some of the IDF libraries,
                        # add them here:
-                       PRIV_REQUIRES ${deps})
+                       PRIV_REQUIRES ${deps}
+                       # Routes OpenCV BSS to .ext_ram.bss (PSRAM) via the
+                       # official ESP-IDF linker fragment mechanism.
+                       LDFRAGMENTS "linker.lf")
 
 # Determine compilation flags used for building OpenCV
 # Flags inherited from IDF build system and other IDF components:
@@ -205,10 +208,8 @@ ExternalProject_Add(opencv_proj
 # Attach header files to the component library:
 set_target_properties(${COMPONENT_LIB} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${BINARY_DIR}/install/include/opencv4)
 
-# Route OpenCV BSS to PSRAM (extern_ram_seg) to avoid DRAM overflow.
-# INSERT BEFORE .dram0.bss ensures these patterns are consumed before the
-# main linker script places them in internal DRAM.
-idf_build_set_property(LINK_OPTIONS "-T${CMAKE_CURRENT_LIST_DIR}/opencv_psram_bss.ld" APPEND)
+# OpenCV BSS → PSRAM routing is done via linker.lf (see LDFRAGMENTS above).
+# The custom opencv_psram_bss.ld is intentionally no longer used.
 
 # Make sure the subproject is built before the component library:
 add_dependencies(${COMPONENT_LIB} opencv_proj)

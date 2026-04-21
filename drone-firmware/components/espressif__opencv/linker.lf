@@ -1,0 +1,76 @@
+#
+# linker.lf — OpenCV PSRAM BSS mapping
+#
+# Routes all OpenCV library BSS/COMMON sections to .ext_ram.bss (PSRAM) so
+# they do not consume the limited internal DRAM on ESP32-S3.
+#
+# Uses the extram_bss scheme (defined in esp_wifi/linker.lf):
+#   bss    -> extern_ram  (.ext_ram.bss output section)
+#   common -> extern_ram
+#
+# Why this is better than a custom INSERT linker script
+# -------------------------------------------------------
+# A custom -T script with "INSERT BEFORE .ext_ram.bss" places the section in
+# extern_ram_seg BEFORE the .ext_ram.dummy placeholder has advanced the pointer
+# past the flash-mapped DROM content, putting BSS at read-only flash addresses.
+# Even when the INSERT target is correct, the OpenCV BSS falls OUTSIDE the
+# [_ext_ram_bss_start, _ext_ram_bss_end] range that esp_psram.c uses to compute
+# the PSRAM heap start — the heap ends up inside the BSS, corrupting it.
+#
+# By adding OpenCV BSS as input sections to .ext_ram.bss through linker
+# fragments, the sections.ld generator places them WITHIN [_ext_ram_bss_start,
+# _ext_ram_bss_end]. esp_psram.c then correctly advances the heap start past
+# all BSS (OpenCV + WiFi/LwIP), and the startup zero-init covers the full
+# range — no explicit memset in app_main required.
+#
+# Required sdkconfig:
+#   CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+#
+
+[mapping:opencv_core_psram]
+archive: libopencv_core.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_imgproc_psram]
+archive: libopencv_imgproc.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_objdetect_psram]
+archive: libopencv_objdetect.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_calib3d_psram]
+archive: libopencv_calib3d.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_features2d_psram]
+archive: libopencv_features2d.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_flann_psram]
+archive: libopencv_flann.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_zlib_psram]
+archive: libzlib.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
+
+[mapping:opencv_libjpeg_psram]
+archive: liblibjpeg-turbo.a
+entries:
+    if ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss)
