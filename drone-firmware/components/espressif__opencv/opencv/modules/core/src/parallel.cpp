@@ -153,6 +153,13 @@
 
 #include "parallel_impl.hpp"
 
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _ParallelCppInitProbe {
+    _ParallelCppInitProbe() { printf("[cv::parallel.cpp] TU static init\r\n"); fflush(stdout); }
+}; static _ParallelCppInitProbe _parallel_cpp_probe; }
+#endif
+
 #include "opencv2/core/detail/exception_ptr.hpp"  // CV__EXCEPTION_PTR = 1 if std::exception_ptr is available
 
 #include <opencv2/core/utils/fp_control_utils.hpp>

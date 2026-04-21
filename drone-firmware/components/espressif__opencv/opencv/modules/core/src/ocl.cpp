@@ -123,6 +123,13 @@
 
 #include "umatrix.hpp"
 
+#ifdef __XTENSA__
+#include <cstdio>
+namespace { struct _OclInitProbe {
+    _OclInitProbe() { printf("[cv::ocl] TU static init\r\n"); fflush(stdout); }
+}; static _OclInitProbe _ocl_probe; }
+#endif
+
 namespace cv { namespace ocl {
 
 #define IMPLEMENT_REFCOUNTABLE() \
