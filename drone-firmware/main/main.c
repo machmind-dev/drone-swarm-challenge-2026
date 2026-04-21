@@ -1324,6 +1324,36 @@ void app_main(void)
 {
   printf("app_main started\r\n"); fflush(stdout);
 
+    /* Camera DMA ring buffer (30 KB, must be contiguous in internal DRAM) must
+     * be allocated before WiFi initialises.  WiFi static TX/RX buffers fragment
+     * the DRAM heap and leave the largest free block smaller than what the
+     * camera driver needs.  Initialising the camera first guarantees the block
+     * is available from the fresh, unfragmented heap.
+     *
+     * camera_config is a static const global; no runtime dependencies exist
+     * before this point.  SCCB uses its own I2C port (port 0, pins 40/39),
+     * independent of the VL53/MAVLink I2C initialised later.
+     */
+    if (esp_camera_init(&camera_config) != ESP_OK) {
+        ESP_LOGE(TAG, "Camera init failed — black-frame mode only");
+        camera_streaming = false;
+    } else {
+        ESP_LOGI(TAG, "Camera OK");
+        sensor_t *s = esp_camera_sensor_get();
+        if (s) {
+            s->set_vflip(s, 1); s->set_hmirror(s, 1); // 180° rotation
+            s->set_gain_ctrl(s, 0);     // disable AGC — reduce RF-coupled noise amplification
+            s->set_agc_gain(s, 1);      // minimum effective gain (0 zeros the register → black image)
+            s->set_exposure_ctrl(s, 0); // disable AEC
+            s->set_aec_value(s, 400);   // tune 200–600 to ambient lighting
+            s->set_contrast(s, 2);      // max contrast for ArUco edge detection
+            s->set_sharpness(s, 2);
+            s->set_bpc(s, 1);           // black pixel correction
+            s->set_wpc(s, 1);           // white pixel correction
+        }
+        aruco_task_start();   // OpenCV
+    }
+
 #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
     ESP_ERROR_CHECK(uros_network_interface_initialize());
     set_device_hostname_from_drone_id();
@@ -1374,28 +1404,6 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(esp_timer_create(&tof_timer_args, &tof_sensor_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(tof_sensor_timer, TIMER_PERIODIC_MS * 1000));
-
-    if (esp_camera_init(&camera_config) != ESP_OK) {
-        ESP_LOGE(TAG, "Camera init failed — black-frame mode only");
-        camera_streaming = false;
-    } else {
-        ESP_LOGI(TAG, "Camera OK");
-        sensor_t *s = esp_camera_sensor_get();
-        if (s) {
-            s->set_vflip(s, 1); s->set_hmirror(s, 1); // 180° rotation
-            s->set_gain_ctrl(s, 0);     // disable AGC — reduce RF-coupled noise amplification
-            s->set_agc_gain(s, 1);      // minimum effective gain (0 zeros the register → black image)
-            s->set_exposure_ctrl(s, 0); // disable AEC
-            s->set_aec_value(s, 400);   // tune 200–600 to ambient lighting
-            s->set_contrast(s, 2);      // max contrast for ArUco edge detection
-            s->set_sharpness(s, 2);
-            s->set_bpc(s, 1);           // black pixel correction
-            s->set_wpc(s, 1);           // white pixel correction
-        }
-
-        aruco_task_start();   // OpenCV
-
-    }
 
     const float ix = get_initial_x_from_drone_id();
     const float iy = get_initial_y_from_drone_id();
