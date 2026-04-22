@@ -7,4 +7,4 @@ Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-swa
 Path=/home/pihas/drone-swarm-challenge-2026/
 Name=Mach Mind - Swarm Mission
 Comment=Forward / rotate 180° / back flight path for drone 1
-Icon=/home/pihas/drone-swarm-challenge-2026/launchers/GCS_GUI_ico.png
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/swarm_ico.png
