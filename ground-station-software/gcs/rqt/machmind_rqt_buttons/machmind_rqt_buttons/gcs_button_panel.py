@@ -7,7 +7,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from geometry_msgs.msg import Point
-from std_msgs.msg import String
+from std_msgs.msg import String, Int8
 from visualization_msgs.msg import Marker, MarkerArray
 
 from python_qt_binding.QtCore import Qt, QTimer
@@ -36,12 +36,14 @@ class GcsButtonPanel(Plugin):
 
         self.drone_states = {}
         self.drone_roles = {}
+        self.drone_battery = {}
         self.ui_refs = {}
         self._arm_sent_times: dict[int, float] = {}  # monotonic time when ARM was sent per drone
         self.command_publishers = {}
         self.config_publishers = {}
         self.state_subscribers = {}
         self.role_subscribers = {}
+        self.battery_subscribers = {}
 
         # Global emergency countdown
         self.global_emergency_counter = self.EMERGENCY_HOLD_SECONDS
@@ -76,6 +78,10 @@ class GcsButtonPanel(Plugin):
             self.role_subscribers[i] = self.node.create_subscription(
                 String, f"/drone_{i}/role",
                 lambda msg, drone_id=i: self._role_callback(msg, drone_id), 10
+            )
+            self.battery_subscribers[i] = self.node.create_subscription(
+                Int8, f"/drone_{i}/battery",
+                lambda msg, drone_id=i: self._battery_callback(msg, drone_id), 10
             )
 
             timer = QTimer()
@@ -344,6 +350,7 @@ class GcsButtonPanel(Plugin):
             "role": role_label,
             "strip": strip,
             "emergency": emergency_btn,
+            "title": title,
         }
 
         container.setLayout(layout)
@@ -842,6 +849,19 @@ class GcsButtonPanel(Plugin):
         ui = self.ui_refs.get(drone_id)
         if ui:
             ui["role"].setText(role[:10])
+
+    def _battery_callback(self, msg: Int8, drone_id: int):
+        pct = msg.data
+        self.drone_battery[drone_id] = pct
+        ui = self.ui_refs.get(drone_id)
+        if not ui:
+            return
+        if pct < 0:
+            ui["title"].setText(f"D{drone_id}")
+        else:
+            color = "#cc3300" if pct < 20 else "#cc8800" if pct < 40 else "#d0d0d0"
+            ui["title"].setStyleSheet(f"font-weight:bold; font-size:10px; color:{color};")
+            ui["title"].setText(f"D{drone_id}  BAT:{pct}%")
 
     def _publish(self, drone_id, command):
         msg = String()

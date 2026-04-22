@@ -10,6 +10,7 @@
  *   /drone_{ID}/camera/image_raw   sensor_msgs/Image       — mono8 160×120
  *   /drone_{ID}/state              std_msgs/String         — state machine
  *   /drone_{ID}/role               std_msgs/String         — role (idle)
+ *   /drone_{ID}/battery            std_msgs/Int8           — battery % (0–100, -1=unknown)
  *   /visualization_marker          visualization_msgs/Marker
  *
  * MAVLink → PX4 (UART1 57600):
@@ -71,6 +72,7 @@
 
 #include <sensor_msgs/msg/image.h>
 #include <std_msgs/msg/string.h>
+#include <std_msgs/msg/int8.h>
 #include <geometry_msgs/msg/pose_stamped.h>
 #include <visualization_msgs/msg/marker.h>
 #include <uros_network_interfaces.h>
@@ -178,6 +180,9 @@ static const char * const state_names[] = {
 
 /* Home position (NED, captured on ARM when vision is valid) */
 static volatile float home_x = 0.0f, home_y = 0.0f, home_z = 0.0f;
+
+/* Battery status from PX4 BATTERY_STATUS MAVLink message (0–100, -1 = unknown) */
+static volatile int8_t battery_remaining_pct = -1;
 
 /* Mission setpoint from /gcs/drone_{ID}/control (positive-up Z, yaw in radians) */
 static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
@@ -512,6 +517,7 @@ static bool               publisher_image_ok = false;
 static rcl_publisher_t    publisher_marker;
 static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
+static rcl_publisher_t    publisher_battery;
 
 static visualization_msgs__msg__Marker   waypoint_arrow_msg;
 static visualization_msgs__msg__Marker   waypoint_label_msg;
@@ -540,6 +546,7 @@ static geometry_msgs__msg__PoseStamped   control_msg;
 static geometry_msgs__msg__PoseStamped   vision_pose_msg;
 static std_msgs__msg__String             state_pub_msg;
 static std_msgs__msg__String             role_pub_msg;
+static std_msgs__msg__Int8               battery_pub_msg;
 
 static struct timespec ts;
 
@@ -551,6 +558,7 @@ static char topic_vision_pose[64];
 static char topic_camera_frame[64];
 static char topic_state[64];
 static char topic_role[64];
+static char topic_battery[64];
 static char drone_ns[16];
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1106,6 +1114,14 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         if (state_changed) ESP_LOGI(TAG, "State → %s", s);
     }
 
+    /* Publish battery every 5 s (50 × 100 ms ticks) */
+    static uint32_t bat_tick = 0;
+    if (++bat_tick >= 50) {
+        bat_tick = 0;
+        battery_pub_msg.data = battery_remaining_pct;
+        RCSOFTCHECK(rcl_publish(&publisher_battery, &battery_pub_msg, NULL));
+    }
+
     /* Camera — publish live frames; on streaming→off transition send one black frame */
     static bool prev_camera_streaming = false;
     static uint8_t img_skip = 0;
@@ -1220,6 +1236,40 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * MAVLink UART RX task — parses incoming PX4 telemetry
+ *
+ * Runs independently of micro-ROS.  Reads raw bytes from the shared UART
+ * (UART_NUM_1) that we also use for TX.  The UART driver's internal RX ring
+ * buffer (2 KB) decouples this task from the TX path so there is no locking.
+ *
+ * Currently handles:
+ *   BATTERY_STATUS — stores battery_remaining_pct (0–100, -1=unknown)
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static void mavlink_rx_task_fn(void *arg)
+{
+    mavlink_message_t rx_msg;
+    mavlink_status_t  rx_status;
+    uint8_t           byte;
+
+    ESP_LOGI(TAG, "MAVLink RX task started");
+    while (true) {
+        /* Block up to 100 ms for a byte; loop keeps the task alive when idle */
+        int n = uart_read_bytes(UART_NUM_1, &byte, 1, pdMS_TO_TICKS(100));
+        if (n <= 0) continue;
+
+        if (mavlink_parse_char(MAVLINK_COMM_0, byte, &rx_msg, &rx_status)) {
+            if (rx_msg.msgid == MAVLINK_MSG_ID_BATTERY_STATUS) {
+                mavlink_battery_status_t bat;
+                mavlink_msg_battery_status_decode(&rx_msg, &bat);
+                battery_remaining_pct = bat.battery_remaining;
+                ESP_LOGD(TAG, "Battery: %d%%", (int)bat.battery_remaining);
+            }
+        }
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
  * micro-ROS task
  * ══════════════════════════════════════════════════════════════════════════ */
 
@@ -1269,6 +1319,9 @@ static void micro_ros_task(void *arg)
 
     RCCHECK(rclc_publisher_init_default(&publisher_role, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_role));
+
+    RCCHECK(rclc_publisher_init_default(&publisher_battery, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int8), topic_battery));
 
     /* ── Subscribers ─────────────────────────────────────────────────────── */
     RCCHECK(rclc_subscription_init_best_effort(&command_sub, &node,
@@ -1375,10 +1428,11 @@ static void micro_ros_task(void *arg)
         usleep(10000);
     }
 
-    if (publisher_image_ok) RCCHECK(rcl_publisher_fini(&publisher_image,  &node));
-    RCCHECK(rcl_publisher_fini(&publisher_marker, &node));
-    RCCHECK(rcl_publisher_fini(&publisher_state,  &node));
-    RCCHECK(rcl_publisher_fini(&publisher_role,   &node));
+    if (publisher_image_ok) RCCHECK(rcl_publisher_fini(&publisher_image,   &node));
+    RCCHECK(rcl_publisher_fini(&publisher_marker,  &node));
+    RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
+    RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
+    RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
     RCCHECK(rcl_subscription_fini(&command_sub,      &node));
     RCCHECK(rcl_subscription_fini(&config_sub,        &node));
     RCCHECK(rcl_subscription_fini(&control_sub,       &node));
@@ -1514,6 +1568,7 @@ void app_main(void)
     snprintf(topic_gcs_control,  sizeof(topic_gcs_control),   "/gcs/drone_%d/control",      DRONE_ID);
     snprintf(topic_state,        sizeof(topic_state),          "/drone_%d/state",            DRONE_ID);
     snprintf(topic_role,         sizeof(topic_role),           "/drone_%d/role",             DRONE_ID);
+    snprintf(topic_battery,      sizeof(topic_battery),        "/drone_%d/battery",          DRONE_ID);
 
     ESP_LOGI(TAG, "==============================");
     ESP_LOGI(TAG, "DRONE ID   : %d",           DRONE_ID);
@@ -1540,6 +1595,7 @@ void app_main(void)
 
     i2c_init();
     uart_mavlink_init();
+    xTaskCreate(mavlink_rx_task_fn, "mav_rx", 2048, NULL, 4, NULL);
     VL53L1X_InitSensorArray(tof_array, sensor_count);
 
     const esp_timer_create_args_t tof_timer_args = {
