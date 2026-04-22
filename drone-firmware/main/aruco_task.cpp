@@ -121,16 +121,30 @@ static void aruco_task_fn(void *arg)
            0, 0, 1);
     cv::Mat dist_coeffs = cv::Mat(1, 5, CV_64F, (void *)DIST_COEFFS);
 
-    /* ArUco detector — tuned for 80×60 */
+    /* ArUco detector — base params tuned for 80×60 */
     auto dictionary = cv::aruco::getPredefinedDictionary(ARUCO_DICT);
     cv::aruco::DetectorParameters params;
-    params.minMarkerPerimeterRate      = 0.05;  /* ≥3 px at 60px height */
+    params.minMarkerPerimeterRate      = 0.10;  /* ≥8 px perimeter — rejects noise clusters */
     params.maxMarkerPerimeterRate      = 4.0;
     params.polygonalApproxAccuracyRate = 0.08;
     params.minCornerDistanceRate       = 0.02;
     params.adaptiveThreshWinSizeMin    = 3;
     params.adaptiveThreshWinSizeMax    = 15;
     params.adaptiveThreshWinSizeStep   = 4;
+
+    /* Per-sensor tuning: OV3660 downscales 2048×1536 → 80×60 (heavy binning),
+     * producing noisier bit patterns than OV2640.  Tighten errorCorrectionRate
+     * to reject marginal bit matches that produce ghost IDs (e.g. ID 17). */
+    sensor_t *cam_sensor = esp_camera_sensor_get();
+    if (cam_sensor && cam_sensor->id.PID == OV3660_PID) {
+        params.errorCorrectionRate     = 0.3f;  /* strict: fewer corrected bits accepted */
+        params.adaptiveThreshWinSizeMax = 11;   /* smaller window suits OV3660 noise profile */
+        ESP_LOGI(TAG, "ArUco: OV3660 params (errorCorrectionRate=0.3)");
+    } else {
+        params.errorCorrectionRate     = 0.6f;  /* OpenCV default — OV2640 is clean enough */
+        ESP_LOGI(TAG, "ArUco: OV2640 params (errorCorrectionRate=0.6)");
+    }
+
     cv::aruco::ArucoDetector detector(dictionary, params);
 
     /* 3D object points for solvePnP (marker corners in marker-local frame) */
