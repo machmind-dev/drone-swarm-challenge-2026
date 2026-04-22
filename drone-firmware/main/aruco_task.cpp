@@ -114,17 +114,6 @@ static void aruco_task_fn(void *arg)
     if (!fast_frame)
         ESP_LOGW(TAG, "fast_frame alloc failed — using PSRAM (slow)");
 
-    /* Second internal DRAM buffer for CLAHE output (OV3660 only).
-     * CLAHE's default allocator uses PSRAM (SPIRAM_USE_MALLOC=y).  If detectMarkers
-     * runs on a PSRAM-backed Mat, each pixel access costs ~10× more and ties up the
-     * PSRAM bus — starving Core 0 micro-ROS of bandwidth and causing ping timeouts.
-     * Writing CLAHE output into internal DRAM keeps detectMarkers fast. */
-    uint8_t *clahe_buf = is_ov3660
-        ? (uint8_t *)heap_caps_malloc(DET_W * DET_H, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-        : nullptr;
-    if (is_ov3660 && !clahe_buf)
-        ESP_LOGW(TAG, "clahe_buf alloc failed — CLAHE output in PSRAM (slow)");
-
     /* Camera matrix and dist coeffs */
     cv::Mat camera_matrix = (cv::Mat_<double>(3,3)
         << CAM_FX, 0, CAM_CX,
@@ -154,6 +143,19 @@ static void aruco_task_fn(void *arg)
     sensor_t *cam_sensor = esp_camera_sensor_get();
     const bool is_ov3660 = (cam_sensor && cam_sensor->id.PID == OV3660_PID);
     params.errorCorrectionRate = 0.6f;
+
+    /* Second internal DRAM buffer for CLAHE output (OV3660 only).
+     * CLAHE's default allocator uses PSRAM (SPIRAM_USE_MALLOC=y).  If detectMarkers
+     * runs on a PSRAM-backed Mat, each pixel access costs ~10× more and ties up the
+     * PSRAM bus — starving Core 0 micro-ROS of bandwidth and causing ping timeouts.
+     * Writing CLAHE output into internal DRAM keeps detectMarkers fast.
+     * Declared after is_ov3660 so the conditional allocation compiles correctly. */
+    uint8_t *clahe_buf = is_ov3660
+        ? (uint8_t *)heap_caps_malloc(DET_W * DET_H, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+        : nullptr;
+    if (is_ov3660 && !clahe_buf)
+        ESP_LOGW(TAG, "clahe_buf alloc failed — CLAHE output in PSRAM (slow)");
+
     ESP_LOGI(TAG, "ArUco: %s params (errCorr=%.1f blur=%s clahe=%s dram=%s)",
              is_ov3660 ? "OV3660" : "OV2640",
              params.errorCorrectionRate,
