@@ -31,13 +31,27 @@ The ESP32-S3 is not responsible for low-level flight stabilization. That remains
 
 Current target hardware:
 - **Seeed Studio XIAO ESP32-S3 Sense**
-- **OV2640 camera**
+- **OV2640 or OV3660 camera** (per-drone, auto-detected at boot)
 - **VL53L1X laser range sensors**
 - optional multiplexer for sensor expansion
 - UART link for MAVLink-related communication
 - Wi-Fi connection to the Ground Control Station
 
 This firmware is developed for the **Mach Mind drone prototype** used in the Swarm Drone Challenge 2026 qualification phase.
+
+### Camera Sensor Configuration
+
+Both OV2640 and OV3660 are supported. The sensor is auto-detected at boot and the firmware applies per-sensor settings automatically. No rebuild is required when swapping sensors.
+
+The OV3660 is mounted 180° rotated on the drone frame — the firmware corrects this via hardware flip registers (`set_vflip` + `set_hmirror`) so the ArUco detection pipeline requires no changes.
+
+| Parameter | OV2640 | OV3660 | Reason |
+|---|---|---|---|
+| `errorCorrectionRate` | 0.6 | 0.3 | OV3660 heavy downscaling (2048×1536 → 80×60) produces noisier bit patterns; stricter threshold prevents ghost IDs |
+| `adaptiveThreshWinSizeMax` | 15 | 11 | Smaller window matches OV3660 noise profile |
+| `minMarkerPerimeterRate` | 0.10 | 0.10 | Rejects noise clusters smaller than 8 px perimeter |
+| `aec_value` | 400 | 200 | OV3660 exposure register has different scale |
+| Hardware flip | None | vflip + hmirror | OV3660 mounted 180° rotated |
 
 ---
 
