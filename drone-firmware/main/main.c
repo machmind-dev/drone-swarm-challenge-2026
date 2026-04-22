@@ -139,11 +139,11 @@ static const char *TAG = "drone";
 #define C2_FAIL_THRESHOLD    2     /* consecutive failures before ELAND */
 
 /* ── Mission parameters ────────────────────────────────────────────────── */
-#define MISSION_TAKEOFF_ALT_M      1.5f   /* Option B — change to 2.0 for tight swarm */
+#define MISSION_TAKEOFF_ALT_M      1.5f            /* Option B — change to 2.0 for tight swarm */
 #define MISSION_TAKEOFF_WAIT_MS    5000
-#define MISSION_SETPOINT_DWELL_MS  3000
+#define MISSION_MAX_HOVER_MS       (15UL * 60UL * 1000UL)  /* 15 min safety timeout */
 #define MISSION_LAND_DESCEND_MS    5000
-#define OFFBOARD_STREAM_PERIOD_MS  50     /* 20 Hz setpoint stream */
+#define OFFBOARD_STREAM_PERIOD_MS  50              /* 20 Hz setpoint stream */
 
 /* ── micro-ROS macros ──────────────────────────────────────────────────── */
 #define RCCHECK(fn) \
@@ -179,8 +179,9 @@ static const char * const state_names[] = {
 /* Home position (NED, captured on ARM when vision is valid) */
 static volatile float home_x = 0.0f, home_y = 0.0f, home_z = 0.0f;
 
-/* Mission setpoint from /gcs/drone_{ID}/control (positive-up Z) */
+/* Mission setpoint from /gcs/drone_{ID}/control (positive-up Z, yaw in radians) */
 static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
+static volatile float setpoint_yaw = 0.0f;   /* radians, 0 = North, CW positive */
 static volatile bool  setpoint_received = false;
 
 /* Feature flags */
@@ -286,11 +287,29 @@ static void mav_set_position_ned(float x, float y, float z_ned)
         (uint32_t)(esp_timer_get_time() / 1000),
         PX4_SYSID, PX4_COMPID,
         MAV_FRAME_LOCAL_NED,
-        0b0000111111111000,   /* type_mask: position only */
+        0b0000111111111000,   /* type_mask: position only, yaw ignored */
         x, y, z_ned,
         0, 0, 0,
         0, 0, 0,
         0, 0);
+    mav_send(&msg);
+}
+
+/* SET_POSITION_TARGET_LOCAL_NED — position + yaw, NED frame.
+ * yaw: radians, 0 = North, positive = clockwise (NED convention). */
+static void mav_set_position_yaw_ned(float x, float y, float z_ned, float yaw)
+{
+    mavlink_message_t msg;
+    mavlink_msg_set_position_target_local_ned_pack(
+        GCS_SYSID, GCS_COMPID, &msg,
+        (uint32_t)(esp_timer_get_time() / 1000),
+        PX4_SYSID, PX4_COMPID,
+        MAV_FRAME_LOCAL_NED,
+        0b0000101111111000,   /* type_mask: position + yaw, yaw_rate ignored */
+        x, y, z_ned,
+        0, 0, 0,
+        0, 0, 0,
+        yaw, 0);
     mav_send(&msg);
 }
 
@@ -672,10 +691,12 @@ static void prearm_stream_task_fn(void *arg)
  * Sequence:
  *   1. Stream idle setpoints 1 s  → PX4 accepts OFFBOARD switch (prearm stream
  *      has been running since ARM, so EKF2 convergence time = ARM→MISSION + 1 s)
- *   2. ARM + switch to OFFBOARD
+ *   2. OFFBOARD → ARM
  *   3. Climb to MISSION_TAKEOFF_ALT_M (5 s)
- *   4. Fly to setpoint, dwell (3 s)
- *   5. Return above home, send NAV_LAND, wait, disarm
+ *   4. Hover and follow /gcs/drone_X/control setpoints for up to 15 min.
+ *      Re-reads setpoint_x/y/z every 50 ms — new waypoints take effect within
+ *      one tick.  Hovers at home if no setpoint received yet.
+ *   5. Auto-land after 15 min timeout (or on ELAND/KILL command)
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static void mission_task_fn(void *arg)
@@ -717,18 +738,22 @@ static void mission_task_fn(void *arg)
         elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
     } while (elapsed < MISSION_TAKEOFF_WAIT_MS);
 
-    /* Phase 4: fly to setpoint and dwell */
-    float sp_x = setpoint_received ? setpoint_x : home_x;
-    float sp_y = setpoint_received ? setpoint_y : home_y;
-    float sp_z = setpoint_received ? -setpoint_z : -MISSION_TAKEOFF_ALT_M;
-
+    /* Phase 4: hover and follow setpoints for up to MISSION_MAX_HOVER_MS.
+     * setpoint_x/y/z are re-read every tick so a new waypoint published to
+     * /gcs/drone_X/control takes effect within 50 ms.
+     * Falls back to (home_x, home_y, cruise_alt) if no setpoint received yet. */
     t0 = xTaskGetTickCount();
     do {
         if (drone_state != DRONE_MISSION) goto mission_abort;
-        mav_set_position_ned(sp_x, sp_y, sp_z);
+        float sp_x   = setpoint_received ? setpoint_x   : home_x;
+        float sp_y   = setpoint_received ? setpoint_y   : home_y;
+        float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
+        float sp_yaw = setpoint_received ? setpoint_yaw : 0.0f;
+        mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
         elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
-    } while (elapsed < MISSION_SETPOINT_DWELL_MS);
+    } while (elapsed < MISSION_MAX_HOVER_MS);
+    ESP_LOGW(TAG, "Mission 15 min timeout — auto-landing");
 
     /* Phase 5: land on spot */
     drone_state = DRONE_LANDING;
@@ -855,6 +880,8 @@ static void command_callback(const void *msg_in)
             vTaskDelete(return_home_task_handle);
             return_home_task_handle = NULL;
         }
+        setpoint_received = false;   /* clear stale setpoint/yaw from previous mission */
+        setpoint_yaw = 0.0f;
         drone_state = DRONE_MISSION;
         state_dirty = true;
         xTaskCreate(mission_task_fn, "mission", 4096, NULL, 5, &mission_task_handle);
@@ -950,6 +977,13 @@ static void control_callback(const void *msg_in)
     setpoint_x = (float)msg->pose.position.x;
     setpoint_y = (float)msg->pose.position.y;
     setpoint_z = (float)msg->pose.position.z;   /* positive up */
+    /* Extract yaw from quaternion (rotation around Z axis, NED convention).
+     * Identity quaternion (w=1) gives yaw=0 — facing North. */
+    float qx = (float)msg->pose.orientation.x;
+    float qy = (float)msg->pose.orientation.y;
+    float qz = (float)msg->pose.orientation.z;
+    float qw = (float)msg->pose.orientation.w;
+    setpoint_yaw = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
     setpoint_received = true;
 
     /* Update waypoint arrow tip to new setpoint */

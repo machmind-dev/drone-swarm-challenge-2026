@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=true
+Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-swarm-mission.sh
+Path=/home/pihas/drone-swarm-challenge-2026/
+Name=Mach Mind - Swarm Mission
+Comment=Forward / rotate 180° / back flight path for drone 1
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/GCS_GUI_ico.png
