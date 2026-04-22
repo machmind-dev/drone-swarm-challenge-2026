@@ -200,6 +200,7 @@ volatile int64_t last_vision_pose_ms = 0;
 static TaskHandle_t mission_task_handle     = NULL;
 static TaskHandle_t return_home_task_handle = NULL;
 static TaskHandle_t eland_task_handle       = NULL;
+static TaskHandle_t prearm_stream_handle    = NULL;
 
 /* ══════════════════════════════════════════════════════════════════════════
  * UART / MAVLink
@@ -645,10 +646,32 @@ static void update_obstacle_markers(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * Pre-arm setpoint stream task
+ *
+ * Streams SET_POSITION_TARGET_LOCAL_NED at 20 Hz from the moment COMMAND_ARM
+ * is received until the drone transitions out of DRONE_ARMED (→ MISSION or
+ * DISARM).  This gives PX4 EKF2 the maximum possible convergence time between
+ * ARM and MISSION_START, regardless of how quickly the operator presses the
+ * buttons.  mission_task_fn Phase 1 then overlaps for its own 3 s window.
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void prearm_stream_task_fn(void *arg)
+{
+    ESP_LOGI("mission", "Prearm stream started");
+    while (drone_state == DRONE_ARMED) {
+        mav_set_position_ned(home_x, home_y, -0.1f);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+    }
+    ESP_LOGI("mission", "Prearm stream stopped (state→%d)", (int)drone_state);
+    prearm_stream_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
  * Mission FreeRTOS task
  *
  * Sequence:
- *   1. Stream idle setpoints 1 s  → PX4 accepts OFFBOARD switch
+ *   1. Stream idle setpoints 1 s  → PX4 accepts OFFBOARD switch (prearm stream
+ *      has been running since ARM, so EKF2 convergence time = ARM→MISSION + 1 s)
  *   2. ARM + switch to OFFBOARD
  *   3. Climb to MISSION_TAKEOFF_ALT_M (5 s)
  *   4. Fly to setpoint, dwell (3 s)
@@ -669,10 +692,21 @@ static void mission_task_fn(void *arg)
         elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
     } while (elapsed < 1000);
 
-    /* Phase 2: arm + OFFBOARD */
-    mav_arm(true);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    /* Phase 2: OFFBOARD → arm.
+     * PX4 requires OFFBOARD mode to ARM without GPS — the GPS pre-arm check is
+     * waived once the external position setpoints are flowing.  Setpoints must
+     * keep streaming during the switch; a bare vTaskDelay would let PX4 time
+     * out of OFFBOARD and fall back to its default mode where ARM is rejected. */
     mav_set_mode(PX4_MODE_OFFBOARD);
+    {
+        TickType_t t_ob = xTaskGetTickCount();
+        while ((uint32_t)((xTaskGetTickCount() - t_ob) * portTICK_PERIOD_MS) < 500) {
+            if (drone_state != DRONE_MISSION) goto mission_abort;
+            mav_set_position_ned(home_x, home_y, -0.1f);
+            vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+        }
+    }
+    mav_arm(true);
 
     /* Phase 3: climb */
     t0 = xTaskGetTickCount();
@@ -795,11 +829,19 @@ static void command_callback(const void *msg_in)
             home_x = vp_x; home_y = vp_y; home_z = vp_z;
             ESP_LOGI(TAG, "Home captured: (%.2f, %.2f, %.2f)", home_x, home_y, home_z);
         }
-        mav_arm(true);
+        /* Do NOT call mav_arm here — PX4 is not in OFFBOARD yet and will reject it.
+         * The real arm happens in mission_task_fn Phase 2, after the prestream converges EKF2. */
         drone_state = DRONE_ARMED;
         state_dirty = true;
+        /* Start streaming setpoints immediately so EKF2 converges during ARM→MISSION window */
+        if (!prearm_stream_handle)
+            xTaskCreate(prearm_stream_task_fn, "prearm", 2048, NULL, 4, &prearm_stream_handle);
 
     } else if (strcmp(buf, "COMMAND_DISARM") == 0) {
+        if (prearm_stream_handle) {
+            vTaskDelete(prearm_stream_handle);
+            prearm_stream_handle = NULL;
+        }
         mav_arm(false);
         drone_state = DRONE_DISARMED;
         state_dirty = true;
@@ -1017,13 +1059,17 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         ESP_LOGW(TAG, "Vision pose timeout");
     }
 
-    /* Publish state on change */
-    if (state_dirty) {
+    /* Publish state on change, and every 5 s regardless so late subscribers
+     * (rqt opened after drone boot) see the current state within 5 seconds. */
+    static uint32_t state_tick = 0;
+    bool state_changed = state_dirty;
+    if (state_dirty || (++state_tick >= 50)) {
         state_dirty = false;
+        state_tick  = 0;
         const char *s = state_names[(int)drone_state];
         rosidl_runtime_c__String__assign(&state_pub_msg.data, s);
         RCSOFTCHECK(rcl_publish(&publisher_state, &state_pub_msg, NULL));
-        ESP_LOGI(TAG, "State → %s", s);
+        if (state_changed) ESP_LOGI(TAG, "State → %s", s);
     }
 
     /* Camera — publish live frames; on streaming→off transition send one black frame */
