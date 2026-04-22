@@ -93,6 +93,6 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 
 # esp32-camera internal DMA task stack.
 # Default 2048 B overflows when cam_hal handles FB-OVF (partial frame) events.
-# 4096 B gives enough headroom for OVF error-handling code paths.
-CONFIG_CAMERA_TASK_STACK_SIZE=4096
+# 6144 B handles bursts of consecutive OVF events without overflow.
+CONFIG_CAMERA_TASK_STACK_SIZE=6144
 

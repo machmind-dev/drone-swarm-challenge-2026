@@ -267,14 +267,21 @@ static void aruco_cam_task_fn(void *arg)
                      drain_count, (unsigned)fb->len, (int)vision_enabled);
 
         /* Feed detector at ~8 FPS (every 3rd frame at ~25 FPS) when enabled.
-         * Downsample 160×120 → 80×60 by taking every other pixel in x and y.
-         * This reduces detectMarkers cost by 4× and fits in 4800 bytes. */
+         * Downsample 160×120 → 80×60 using 2×2 box-filter averaging.
+         * Each output pixel = mean of the corresponding 2×2 input block.
+         * Averaging suppresses OV3660 point noise at source — better than
+         * point sampling followed by a Gaussian blur on the result. */
         if (vision_enabled && fb->len == (size_t)(CAM_W * CAM_H) && (drain_count % 3) == 0) {
             const uint8_t *src = (const uint8_t *)fb->buf;
             uint8_t *dst = s_frame_copy;
             for (int y = 0; y < DET_H; y++)
-                for (int x = 0; x < DET_W; x++)
-                    dst[y * DET_W + x] = src[(y * 2) * CAM_W + (x * 2)];
+                for (int x = 0; x < DET_W; x++) {
+                    unsigned sum = (unsigned)src[(y*2)   * CAM_W + (x*2)]
+                                 + (unsigned)src[(y*2)   * CAM_W + (x*2+1)]
+                                 + (unsigned)src[(y*2+1) * CAM_W + (x*2)]
+                                 + (unsigned)src[(y*2+1) * CAM_W + (x*2+1)];
+                    dst[y * DET_W + x] = (uint8_t)(sum >> 2);
+                }
             esp_camera_fb_return(fb);
 
             frame_msg_t msg = { .buf = s_frame_copy, .len = (size_t)(DET_W * DET_H) };
