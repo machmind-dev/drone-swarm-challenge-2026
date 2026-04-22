@@ -1372,15 +1372,14 @@ void app_main(void)
             s->set_sharpness(s, 2);
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
-            /* Apply flip LAST — some OV3660 register writes (gain, exposure) reset
-             * image option registers, clearing previously set flip bits. */
-            if (s->id.PID == OV3660_PID) {
-                s->set_vflip(s, 1);
-                s->set_hmirror(s, 1);
-                ESP_LOGI(TAG, "Camera: OV3660 — 180° flip applied");
-            } else {
-                ESP_LOGI(TAG, "Camera: OV2640 — no flip");
-            }
+            /* Both OV2640 and OV3660 are physically mounted 180° rotated on
+             * the drone frame.  Apply flip LAST — some register writes above
+             * (gain, exposure) trigger set_image_options internally on OV3660,
+             * which clears flip bits set earlier. */
+            s->set_vflip(s, 1);
+            s->set_hmirror(s, 1);
+            ESP_LOGI(TAG, "Camera: %s — 180° flip applied",
+                     s->id.PID == OV3660_PID ? "OV3660" : "OV2640");
         }
         /* Camera hardware ready — ArUco will start after WiFi.
          * Image streaming (camera_streaming) stays false until GCS sends

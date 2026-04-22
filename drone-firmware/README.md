@@ -43,7 +43,7 @@ This firmware is developed for the **Mach Mind drone prototype** used in the Swa
 
 Both OV2640 and OV3660 are supported. The sensor is auto-detected at boot and the firmware applies per-sensor settings automatically. No rebuild is required when swapping sensors.
 
-The OV3660 is mounted 180° rotated on the drone frame — the firmware corrects this via hardware flip registers (`set_vflip` + `set_hmirror`) so the ArUco detection pipeline requires no changes.
+Both OV2640 and OV3660 are mounted 180° rotated on the drone frame — the firmware corrects this via hardware flip registers (`set_vflip` + `set_hmirror`) applied last in the sensor init sequence so the ArUco detection pipeline requires no changes.
 
 | Parameter | OV2640 | OV3660 | Reason |
 |---|---|---|---|
@@ -51,7 +51,7 @@ The OV3660 is mounted 180° rotated on the drone frame — the firmware corrects
 | `adaptiveThreshWinSizeMax` | 15 | 11 | Smaller window matches OV3660 noise profile |
 | `minMarkerPerimeterRate` | 0.10 | 0.10 | Rejects noise clusters smaller than 8 px perimeter |
 | `aec_value` | 400 | 200 | OV3660 exposure register has different scale |
-| Hardware flip | None | vflip + hmirror | OV3660 mounted 180° rotated |
+| Hardware flip | vflip + hmirror | vflip + hmirror | Both sensors mounted 180° rotated on drone frame |
 
 ---
 
