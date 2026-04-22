@@ -1357,16 +1357,6 @@ void app_main(void)
         ESP_LOGI(TAG, "Camera OK");
         sensor_t *s = esp_camera_sensor_get();
         if (s) {
-            /* OV3660 is mounted 180° rotated on this frame — correct via hardware
-             * flip registers so the ArUco pipeline needs no changes.
-             * OV2640 is mounted correctly — no flip applied. */
-            if (s->id.PID == OV3660_PID) {
-                s->set_vflip(s, 1);
-                s->set_hmirror(s, 1);
-                ESP_LOGI(TAG, "Camera: OV3660 — 180° flip applied");
-            } else {
-                ESP_LOGI(TAG, "Camera: OV2640 — no flip");
-            }
             s->set_gain_ctrl(s, 0);     // disable AGC — reduce RF-coupled noise amplification
             s->set_agc_gain(s, 1);      // minimum effective gain (0 zeros the register → black image)
             /* OV3660: leave AEC enabled — its exposure register scale differs from
@@ -1382,6 +1372,15 @@ void app_main(void)
             s->set_sharpness(s, 2);
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
+            /* Apply flip LAST — some OV3660 register writes (gain, exposure) reset
+             * image option registers, clearing previously set flip bits. */
+            if (s->id.PID == OV3660_PID) {
+                s->set_vflip(s, 1);
+                s->set_hmirror(s, 1);
+                ESP_LOGI(TAG, "Camera: OV3660 — 180° flip applied");
+            } else {
+                ESP_LOGI(TAG, "Camera: OV2640 — no flip");
+            }
         }
         /* Camera hardware ready — ArUco will start after WiFi.
          * Image streaming (camera_streaming) stays false until GCS sends
