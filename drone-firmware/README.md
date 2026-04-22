@@ -47,11 +47,11 @@ Both OV2640 and OV3660 are mounted 180° rotated on the drone frame — the firm
 
 | Parameter | OV2640 | OV3660 | Reason |
 |---|---|---|---|
-| `errorCorrectionRate` | 0.6 | 0.3 | OV3660 heavy downscaling (2048×1536 → 80×60) produces noisier bit patterns; stricter threshold prevents ghost IDs |
+| `errorCorrectionRate` | 0.6 | 0.5 | OV3660 noisy downscaling produces more bit errors; stricter threshold reduces ghost IDs |
 | `adaptiveThreshWinSizeMax` | 15 | 11 | Smaller window matches OV3660 noise profile |
-| `minMarkerPerimeterRate` | 0.10 | 0.10 | Rejects noise clusters smaller than 8 px perimeter |
-| `aec_value` | 400 | 200 | OV3660 exposure register has different scale |
-| Hardware flip | vflip + hmirror | vflip + hmirror | Both sensors mounted 180° rotated on drone frame |
+| `minMarkerPerimeterRate` | 0.10 | 0.12 | Rejects sub-10 px perimeter noise blobs on OV3660 |
+| `aec_value` | 400 | 300 | OV3660 exposure register has different scale |
+| Hardware flip | vflip + hmirror | hmirror only (hardware) + vflip (software) | OV3660 AEC clears vflip bit; applied in streaming loop instead |
 
 ---
 

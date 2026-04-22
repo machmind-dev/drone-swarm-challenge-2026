@@ -133,15 +133,27 @@ static void aruco_task_fn(void *arg)
     params.adaptiveThreshWinSizeStep   = 4;
 
     /* Per-sensor tuning.
-     * OV3660 note: errorCorrectionRate is kept at 0.6 (OpenCV default) because
-     * the heavy downscaling (2048×1536 → 80×60) blurs edges and legitimate markers
-     * already need the full correction budget.  False positives are better handled
-     * by filtering on expected IDs at the application level rather than tightening
-     * detection params and losing real detections. */
+     * OV3660: 2048×1536 → 80×60 is aggressive downscaling — images are noisier
+     * than OV2640 at the same resolution.  Tighter params reduce false positives
+     * (ghost IDs from noise clusters) at a small cost to max detection distance.
+     *   adaptiveThreshWinSizeMax 11 vs 15 — smaller window tracks OV3660 noise profile
+     *   minMarkerPerimeterRate 0.12 vs 0.10 — rejects sub-10 px perimeter noise blobs
+     *   errorCorrectionRate 0.5 vs 0.6 — stricter bit-pattern matching
+     * OV2640 params unchanged — sensor is well-behaved at QQVGA. */
     sensor_t *cam_sensor = esp_camera_sensor_get();
     const bool is_ov3660 = (cam_sensor && cam_sensor->id.PID == OV3660_PID);
-    params.errorCorrectionRate = 0.6f;
-    ESP_LOGI(TAG, "ArUco: %s params", is_ov3660 ? "OV3660" : "OV2640");
+    if (is_ov3660) {
+        params.adaptiveThreshWinSizeMax = 11;
+        params.minMarkerPerimeterRate   = 0.12f;
+        params.errorCorrectionRate      = 0.5f;
+    } else {
+        params.errorCorrectionRate      = 0.6f;
+    }
+    ESP_LOGI(TAG, "ArUco: %s params (errCorr=%.1f winMax=%d minPerim=%.2f)",
+             is_ov3660 ? "OV3660" : "OV2640",
+             params.errorCorrectionRate,
+             params.adaptiveThreshWinSizeMax,
+             params.minMarkerPerimeterRate);
 
     cv::aruco::ArucoDetector detector(dictionary, params);
 
