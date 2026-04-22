@@ -1378,8 +1378,20 @@ void app_main(void)
              * OV3660 aec_value=300 is a starting point; tune 150–500 to ambient. */
             s->set_exposure_ctrl(s, 0);
             s->set_aec_value(s, s->id.PID == OV3660_PID ? 300 : 400);
-            s->set_contrast(s, 2);      // max contrast for ArUco edge detection
-            s->set_sharpness(s, 2);
+            if (s->id.PID == OV3660_PID) {
+                /* OV3660 ships with digital noise reduction (DNR) active via
+                 * default register 0x5306=0x1c.  DNR blurs image edges — exactly
+                 * what ArUco's adaptive threshold needs to find markers.  OV2640
+                 * has no DNR block, which is why it appears higher-contrast.
+                 * Disable DNR and push contrast/sharpness to max (3) to match
+                 * OV2640 edge definition as closely as possible. */
+                s->set_denoise(s, 0);   /* disable DNR — reg 0x5308 bit 0x10 cleared */
+                s->set_contrast(s, 3);  /* max: reg 0x5586 = 0x38 */
+                s->set_sharpness(s, 3); /* max: mt_offset regs 0x5302/0x5303 = 0x31/0x30 */
+            } else {
+                s->set_contrast(s, 2);
+                s->set_sharpness(s, 2);
+            }
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
             /* Both sensors are physically mounted 180° rotated on the drone frame.
