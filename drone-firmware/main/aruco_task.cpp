@@ -133,27 +133,20 @@ static void aruco_task_fn(void *arg)
     params.adaptiveThreshWinSizeStep   = 4;
 
     /* Per-sensor tuning.
-     * OV3660: 2048×1536 → 80×60 is aggressive downscaling — images are noisier
-     * than OV2640 at the same resolution.  Tighter params reduce false positives
-     * (ghost IDs from noise clusters) at a small cost to max detection distance.
-     *   adaptiveThreshWinSizeMax 11 vs 15 — smaller window tracks OV3660 noise profile
-     *   minMarkerPerimeterRate 0.12 vs 0.10 — rejects sub-10 px perimeter noise blobs
-     *   errorCorrectionRate 0.5 vs 0.6 — stricter bit-pattern matching
-     * OV2640 params unchanged — sensor is well-behaved at QQVGA. */
+     * OV3660: 2048×1536 → 80×60 aggressive downscaling blurs marker edges and
+     * adds noise.  Tighter detection params alone hurt real detections more than
+     * they help — root fix is a 3×3 Gaussian blur applied before detectMarkers.
+     * Blur smooths noise so adaptive threshold finds real edges, not noise spikes.
+     * Detector params kept identical to OV2640 so the full correction budget is
+     * available for markers blurred by downscaling.
+     * OV2640: no blur needed — sensor is clean at QQVGA. */
     sensor_t *cam_sensor = esp_camera_sensor_get();
     const bool is_ov3660 = (cam_sensor && cam_sensor->id.PID == OV3660_PID);
-    if (is_ov3660) {
-        params.adaptiveThreshWinSizeMax = 11;
-        params.minMarkerPerimeterRate   = 0.12f;
-        params.errorCorrectionRate      = 0.5f;
-    } else {
-        params.errorCorrectionRate      = 0.6f;
-    }
-    ESP_LOGI(TAG, "ArUco: %s params (errCorr=%.1f winMax=%d minPerim=%.2f)",
+    params.errorCorrectionRate = 0.6f;
+    ESP_LOGI(TAG, "ArUco: %s params (errCorr=%.1f blur=%s)",
              is_ov3660 ? "OV3660" : "OV2640",
              params.errorCorrectionRate,
-             params.adaptiveThreshWinSizeMax,
-             params.minMarkerPerimeterRate);
+             is_ov3660 ? "3x3" : "off");
 
     cv::aruco::ArucoDetector detector(dictionary, params);
 
@@ -185,6 +178,13 @@ static void aruco_task_fn(void *arg)
             memcpy(fast_frame, msg.buf, DET_W * DET_H);
 
         cv::Mat frame(DET_H, DET_W, CV_8UC1, pixel_buf);
+
+        /* OV3660: 3×3 Gaussian blur before detection.
+         * Removes high-frequency noise introduced by 2048×1536 → 80×60 downscaling
+         * so adaptive threshold finds real marker edges, not noise spikes.
+         * In-place on the same Mat — no extra allocation needed. */
+        if (is_ov3660)
+            cv::GaussianBlur(frame, frame, cv::Size(3, 3), 0);
 
         std::vector<int> ids;
         std::vector<std::vector<cv::Point2f>> corners, rejected;
