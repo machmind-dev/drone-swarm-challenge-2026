@@ -1357,7 +1357,16 @@ void app_main(void)
         ESP_LOGI(TAG, "Camera OK");
         sensor_t *s = esp_camera_sensor_get();
         if (s) {
-            s->set_vflip(s, 1); s->set_hmirror(s, 1); // 180° rotation
+            /* OV3660 is mounted 180° rotated on this frame — correct via hardware
+             * flip registers so the ArUco pipeline needs no changes.
+             * OV2640 is mounted correctly — no flip applied. */
+            if (s->id.PID == OV3660_PID) {
+                s->set_vflip(s, 1);
+                s->set_hmirror(s, 1);
+                ESP_LOGI(TAG, "Camera: OV3660 — 180° flip applied");
+            } else {
+                ESP_LOGI(TAG, "Camera: OV2640 — no flip");
+            }
             s->set_gain_ctrl(s, 0);     // disable AGC — reduce RF-coupled noise amplification
             s->set_agc_gain(s, 1);      // minimum effective gain (0 zeros the register → black image)
             s->set_exposure_ctrl(s, 0); // disable AEC
