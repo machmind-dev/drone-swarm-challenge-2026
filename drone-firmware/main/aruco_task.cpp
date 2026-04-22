@@ -179,12 +179,26 @@ static void aruco_task_fn(void *arg)
 
         cv::Mat frame(DET_H, DET_W, CV_8UC1, pixel_buf);
 
-        /* OV3660: 3×3 Gaussian blur before detection.
-         * Removes high-frequency noise introduced by 2048×1536 → 80×60 downscaling
-         * so adaptive threshold finds real marker edges, not noise spikes.
-         * In-place on the same Mat — no extra allocation needed. */
-        if (is_ov3660)
+        /* OV3660 preprocessing — two-stage pipeline:
+         *
+         * 1. 3×3 Gaussian blur: removes high-frequency noise from 2048×1536→80×60
+         *    downscaling so the CLAHE step doesn't amplify noise spikes.
+         *    In-place on the internal DRAM buffer.
+         *
+         * 2. CLAHE (Contrast Limited Adaptive Histogram Equalization):
+         *    The heavy downscaling collapses local contrast — marker edges that were
+         *    sharp at 2048px become nearly invisible at 80px.  CLAHE redistributes
+         *    intensity locally so those edges become detectable again.
+         *    clipLimit=2.0 caps noise amplification; tileSize 8×8 gives ~10×7 tiles
+         *    at 80×60, appropriate for the expected marker scale.
+         *    CLAHE writes to a new Mat; detectMarkers runs on the enhanced image. */
+        if (is_ov3660) {
             cv::GaussianBlur(frame, frame, cv::Size(3, 3), 0);
+            static cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(2.0, cv::Size(8, 8));
+            cv::Mat enhanced;
+            clahe->apply(frame, enhanced);
+            frame = enhanced;
+        }
 
         std::vector<int> ids;
         std::vector<std::vector<cv::Point2f>> corners, rejected;
