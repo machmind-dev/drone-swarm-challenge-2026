@@ -186,6 +186,7 @@ static volatile bool  setpoint_received = false;
 /* Feature flags */
 static volatile bool camera_streaming    = false; /* GCS-controlled image streaming over micro-ROS */
 static bool          camera_hw_ok        = false; /* camera hardware initialised successfully */
+static bool          camera_sw_rotate    = false; /* OV3660: hardware flip ineffective, rotate in software */
 volatile bool vision_enabled = false;
 static volatile bool gcs_control_active  = false;
 
@@ -1043,16 +1044,23 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                     img_msg.header.frame_id =
                         micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
                     /* Downsample 160×120 → 80×60 to fit micro-ROS serialization buffer.
-                     * 180° rotation handled by hardware flip registers (AEC disabled
-                     * so flip bits are not overwritten after init). */
+                     * OV3660: hardware flip registers are ineffective — reverse pixel
+                     * indices to rotate 180° in software (negligible CPU cost at 5 FPS).
+                     * OV2640: hardware flip handles rotation, normal index order. */
                     img_msg.width  = 80; img_msg.height = 60; img_msg.step = 80;
                     img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
                     img_msg.data.size = 80 * 60;
                     const uint8_t *src = (const uint8_t *)pic->buf;
                     uint8_t       *dst = img_msg.data.data;
-                    for (int y = 0; y < 60; y++)
-                        for (int x = 0; x < 80; x++)
-                            dst[y * 80 + x] = src[(y * 2) * 160 + (x * 2)];
+                    if (camera_sw_rotate) {
+                        for (int y = 0; y < 60; y++)
+                            for (int x = 0; x < 80; x++)
+                                dst[y * 80 + x] = src[(119 - y * 2) * 160 + (159 - x * 2)];
+                    } else {
+                        for (int y = 0; y < 60; y++)
+                            for (int x = 0; x < 80; x++)
+                                dst[y * 80 + x] = src[(y * 2) * 160 + (x * 2)];
+                    }
                     RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
                 }
                 esp_camera_fb_return(pic);
@@ -1372,12 +1380,15 @@ void app_main(void)
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
             /* Both sensors are physically mounted 180° rotated on the drone frame.
-             * Applied last — AEC disabled above so timing registers are not
-             * overwritten after this point, flip bits persist. */
+             * OV2640: hardware flip works reliably.
+             * OV3660: hardware flip registers are ineffective in this configuration —
+             *         rotation applied in software during streaming downsampling. */
             s->set_vflip(s, 1);
             s->set_hmirror(s, 1);
-            ESP_LOGI(TAG, "Camera: %s — 180° flip applied",
-                     s->id.PID == OV3660_PID ? "OV3660" : "OV2640");
+            camera_sw_rotate = (s->id.PID == OV3660_PID);
+            ESP_LOGI(TAG, "Camera: %s — 180° rotation via %s",
+                     camera_sw_rotate ? "OV3660" : "OV2640",
+                     camera_sw_rotate ? "software" : "hardware flip");
         }
         /* Camera hardware ready — ArUco will start after WiFi.
          * Image streaming (camera_streaming) stays false until GCS sends
