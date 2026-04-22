@@ -132,36 +132,17 @@ static void aruco_task_fn(void *arg)
     params.adaptiveThreshWinSizeMax    = 15;
     params.adaptiveThreshWinSizeStep   = 4;
 
-    /* Per-sensor tuning.
-     * OV3660: 2048×1536 → 80×60 aggressive downscaling blurs marker edges and
-     * adds noise.  Tighter detection params alone hurt real detections more than
-     * they help — root fix is a 3×3 Gaussian blur applied before detectMarkers.
-     * Blur smooths noise so adaptive threshold finds real edges, not noise spikes.
-     * Detector params kept identical to OV2640 so the full correction budget is
-     * available for markers blurred by downscaling.
-     * OV2640: no blur needed — sensor is clean at QQVGA. */
+    /* OV3660: DNR disabled and contrast/sharpness set to max in hardware (main.c).
+     * Software preprocessing (Gaussian blur, CLAHE) is no longer needed and
+     * actively hurts — blurring an already-hardware-sharpened image degrades
+     * the edges that detectMarkers relies on.  Both sensors use identical params. */
     sensor_t *cam_sensor = esp_camera_sensor_get();
     const bool is_ov3660 = (cam_sensor && cam_sensor->id.PID == OV3660_PID);
     params.errorCorrectionRate = 0.6f;
 
-    /* Second internal DRAM buffer for CLAHE output (OV3660 only).
-     * CLAHE's default allocator uses PSRAM (SPIRAM_USE_MALLOC=y).  If detectMarkers
-     * runs on a PSRAM-backed Mat, each pixel access costs ~10× more and ties up the
-     * PSRAM bus — starving Core 0 micro-ROS of bandwidth and causing ping timeouts.
-     * Writing CLAHE output into internal DRAM keeps detectMarkers fast.
-     * Declared after is_ov3660 so the conditional allocation compiles correctly. */
-    uint8_t *clahe_buf = is_ov3660
-        ? (uint8_t *)heap_caps_malloc(DET_W * DET_H, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-        : nullptr;
-    if (is_ov3660 && !clahe_buf)
-        ESP_LOGW(TAG, "clahe_buf alloc failed — CLAHE output in PSRAM (slow)");
-
-    ESP_LOGI(TAG, "ArUco: %s params (errCorr=%.1f blur=%s clahe=%s dram=%s)",
+    ESP_LOGI(TAG, "ArUco: %s  errCorr=%.1f  no SW preprocessing",
              is_ov3660 ? "OV3660" : "OV2640",
-             params.errorCorrectionRate,
-             is_ov3660 ? "3x3" : "off",
-             is_ov3660 ? "on" : "off",
-             clahe_buf ? "OK" : "fallback");
+             params.errorCorrectionRate);
 
     cv::aruco::ArucoDetector detector(dictionary, params);
 
@@ -194,34 +175,7 @@ static void aruco_task_fn(void *arg)
 
         cv::Mat frame(DET_H, DET_W, CV_8UC1, pixel_buf);
 
-        /* OV3660 preprocessing — two-stage pipeline:
-         *
-         * 1. 3×3 Gaussian blur: removes high-frequency noise from 2048×1536→80×60
-         *    downscaling so the CLAHE step doesn't amplify noise spikes.
-         *    In-place on the internal DRAM buffer.
-         *
-         * 2. CLAHE (Contrast Limited Adaptive Histogram Equalization):
-         *    The heavy downscaling collapses local contrast — marker edges that were
-         *    sharp at 2048px become nearly invisible at 80px.  CLAHE redistributes
-         *    intensity locally so those edges become detectable again.
-         *    clipLimit=2.0 caps noise amplification; tileSize 8×8 gives ~10×7 tiles
-         *    at 80×60, appropriate for the expected marker scale.
-         *    CLAHE writes to a new Mat; detectMarkers runs on the enhanced image. */
-        if (is_ov3660) {
-            cv::GaussianBlur(frame, frame, cv::Size(3, 3), 0);
-            static cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(2.0, cv::Size(8, 8));
-            if (clahe_buf) {
-                /* Write CLAHE output directly into internal DRAM buffer so
-                 * detectMarkers runs on fast memory, not PSRAM. */
-                cv::Mat clahe_out(DET_H, DET_W, CV_8UC1, clahe_buf);
-                clahe->apply(frame, clahe_out);
-                frame = clahe_out;
-            } else {
-                cv::Mat enhanced;          /* PSRAM fallback — slow but correct */
-                clahe->apply(frame, enhanced);
-                frame = enhanced;
-            }
-        }
+
 
         std::vector<int> ids;
         std::vector<std::vector<cv::Point2f>> corners, rejected;
@@ -304,21 +258,15 @@ static void aruco_cam_task_fn(void *arg)
                      drain_count, (unsigned)fb->len, (int)vision_enabled);
 
         /* Feed detector at ~8 FPS (every 3rd frame at ~25 FPS) when enabled.
-         * Downsample 160×120 → 80×60 using 2×2 box-filter averaging.
-         * Each output pixel = mean of the corresponding 2×2 input block.
-         * Averaging suppresses OV3660 point noise at source — better than
-         * point sampling followed by a Gaussian blur on the result. */
+         * Downsample 160×120 → 80×60 by point sampling (every other pixel).
+         * Hardware sharpening + DNR disabled in main.c ensures sharp edges;
+         * no software averaging needed. */
         if (vision_enabled && fb->len == (size_t)(CAM_W * CAM_H) && (drain_count % 3) == 0) {
             const uint8_t *src = (const uint8_t *)fb->buf;
             uint8_t *dst = s_frame_copy;
             for (int y = 0; y < DET_H; y++)
-                for (int x = 0; x < DET_W; x++) {
-                    unsigned sum = (unsigned)src[(y*2)   * CAM_W + (x*2)]
-                                 + (unsigned)src[(y*2)   * CAM_W + (x*2+1)]
-                                 + (unsigned)src[(y*2+1) * CAM_W + (x*2)]
-                                 + (unsigned)src[(y*2+1) * CAM_W + (x*2+1)];
-                    dst[y * DET_W + x] = (uint8_t)(sum >> 2);
-                }
+                for (int x = 0; x < DET_W; x++)
+                    dst[y * DET_W + x] = src[(y * 2) * CAM_W + (x * 2)];
             esp_camera_fb_return(fb);
 
             frame_msg_t msg = { .buf = s_frame_copy, .len = (size_t)(DET_W * DET_H) };
