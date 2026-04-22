@@ -1323,9 +1323,14 @@ static void micro_ros_task(void *arg)
                 ESP_LOGW(TAG, "C2 ping failed (%d/%d)", c2_failures, C2_FAIL_THRESHOLD);
                 if (c2_failures >= C2_FAIL_THRESHOLD) {
                     c2_failures = 0;
-                    if (drone_state != DRONE_LANDING &&
-                        drone_state != DRONE_DISARMED &&
-                        drone_state != DRONE_KILLED) {
+                    if (drone_state == DRONE_DISARMED || drone_state == DRONE_KILLED) {
+                        /* Safe to restart — drone is on the ground.
+                         * esp_restart gives a clean micro-ROS session so rqt
+                         * sees the drone online without needing a power cycle. */
+                        ESP_LOGE(TAG, "C2 link lost while disarmed — restarting for clean reconnect");
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        esp_restart();
+                    } else if (drone_state != DRONE_LANDING) {
                         ESP_LOGE(TAG, "C2 link lost — initiating emergency landing");
                         trigger_eland();
                     }
