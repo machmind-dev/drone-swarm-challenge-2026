@@ -1042,7 +1042,10 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                     img_msg.header.stamp.nanosec = ts.tv_nsec;
                     img_msg.header.frame_id =
                         micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
-                    /* Downsample 160×120 → 80×60 to fit micro-ROS serialization buffer */
+                    /* Downsample 160×120 → 80×60 to fit micro-ROS serialization buffer.
+                     * Read from the opposite end of the source buffer to rotate 180°:
+                     * both sensors are physically mounted 180° rotated on the frame
+                     * and hardware flip registers do not reliably affect streamed frames. */
                     img_msg.width  = 80; img_msg.height = 60; img_msg.step = 80;
                     img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
                     img_msg.data.size = 80 * 60;
@@ -1050,7 +1053,7 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                     uint8_t       *dst = img_msg.data.data;
                     for (int y = 0; y < 60; y++)
                         for (int x = 0; x < 80; x++)
-                            dst[y * 80 + x] = src[(y * 2) * 160 + (x * 2)];
+                            dst[y * 80 + x] = src[(119 - y * 2) * 160 + (159 - x * 2)];
                     RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
                 }
                 esp_camera_fb_return(pic);
