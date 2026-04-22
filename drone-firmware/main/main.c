@@ -1053,9 +1053,12 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                     const uint8_t *src = (const uint8_t *)pic->buf;
                     uint8_t       *dst = img_msg.data.data;
                     if (camera_sw_rotate) {
+                        /* OV3660: hardware hmirror persists (AEC only clears vflip bit).
+                         * Reverse only y to supply the missing vflip in software.
+                         * Do NOT reverse x — hmirror is already applied by hardware. */
                         for (int y = 0; y < 60; y++)
                             for (int x = 0; x < 80; x++)
-                                dst[y * 80 + x] = src[(119 - y * 2) * 160 + (159 - x * 2)];
+                                dst[y * 80 + x] = src[(119 - y * 2) * 160 + (x * 2)];
                     } else {
                         for (int y = 0; y < 60; y++)
                             for (int x = 0; x < 80; x++)
@@ -1380,9 +1383,10 @@ void app_main(void)
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
             /* Both sensors are physically mounted 180° rotated on the drone frame.
-             * OV2640: hardware flip works reliably.
-             * OV3660: hardware flip registers are ineffective in this configuration —
-             *         rotation applied in software during streaming downsampling. */
+             * OV2640: hardware vflip + hmirror work reliably.
+             * OV3660: AEC continuously clears the vflip bit (TIMING_TC_REG20) but
+             *         hmirror persists.  Supply the missing vflip in software only;
+             *         camera_sw_rotate=true triggers y-only reversal in the pixel loops. */
             s->set_vflip(s, 1);
             s->set_hmirror(s, 1);
             camera_sw_rotate = (s->id.PID == OV3660_PID);
