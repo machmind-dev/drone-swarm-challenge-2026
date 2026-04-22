@@ -1369,10 +1369,15 @@ void app_main(void)
             }
             s->set_gain_ctrl(s, 0);     // disable AGC — reduce RF-coupled noise amplification
             s->set_agc_gain(s, 1);      // minimum effective gain (0 zeros the register → black image)
-            s->set_exposure_ctrl(s, 0); // disable AEC
-            /* OV3660 and OV2640 have different exposure register scales.
-             * OV3660 needs a lower value for equivalent brightness at QQVGA. */
-            s->set_aec_value(s, s->id.PID == OV3660_PID ? 200 : 400);
+            /* OV3660: leave AEC enabled — its exposure register scale differs from
+             * OV2640 and the correct manual value is unknown without calibration.
+             * OV2640: disable AEC and use a known-good fixed value. */
+            if (s->id.PID == OV3660_PID) {
+                s->set_exposure_ctrl(s, 1); // AEC on — let sensor find correct exposure
+            } else {
+                s->set_exposure_ctrl(s, 0); // AEC off
+                s->set_aec_value(s, 400);   // tune 200–600 to ambient lighting
+            }
             s->set_contrast(s, 2);      // max contrast for ArUco edge detection
             s->set_sharpness(s, 2);
             s->set_bpc(s, 1);           // black pixel correction

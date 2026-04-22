@@ -132,18 +132,16 @@ static void aruco_task_fn(void *arg)
     params.adaptiveThreshWinSizeMax    = 15;
     params.adaptiveThreshWinSizeStep   = 4;
 
-    /* Per-sensor tuning: OV3660 downscales 2048×1536 → 80×60 (heavy binning),
-     * producing noisier bit patterns than OV2640.  Tighten errorCorrectionRate
-     * to reject marginal bit matches that produce ghost IDs (e.g. ID 17). */
+    /* Per-sensor tuning.
+     * OV3660 note: errorCorrectionRate is kept at 0.6 (OpenCV default) because
+     * the heavy downscaling (2048×1536 → 80×60) blurs edges and legitimate markers
+     * already need the full correction budget.  False positives are better handled
+     * by filtering on expected IDs at the application level rather than tightening
+     * detection params and losing real detections. */
     sensor_t *cam_sensor = esp_camera_sensor_get();
-    if (cam_sensor && cam_sensor->id.PID == OV3660_PID) {
-        params.errorCorrectionRate     = 0.3f;  /* strict: fewer corrected bits accepted */
-        params.adaptiveThreshWinSizeMax = 11;   /* smaller window suits OV3660 noise profile */
-        ESP_LOGI(TAG, "ArUco: OV3660 params (errorCorrectionRate=0.3)");
-    } else {
-        params.errorCorrectionRate     = 0.6f;  /* OpenCV default — OV2640 is clean enough */
-        ESP_LOGI(TAG, "ArUco: OV2640 params (errorCorrectionRate=0.6)");
-    }
+    const bool is_ov3660 = (cam_sensor && cam_sensor->id.PID == OV3660_PID);
+    params.errorCorrectionRate = 0.6f;
+    ESP_LOGI(TAG, "ArUco: %s params", is_ov3660 ? "OV3660" : "OV2640");
 
     cv::aruco::ArucoDetector detector(dictionary, params);
 
