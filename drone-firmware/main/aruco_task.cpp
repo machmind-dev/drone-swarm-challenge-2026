@@ -48,7 +48,7 @@ static const char *TAG = "aruco";
 #define DET_H    60
 
 #define ARUCO_DICT        cv::aruco::DICT_4X4_50
-#define MARKER_SIZE_M     0.15f          /* physical marker side length, metres */
+#define MARKER_SIZE_M     0.50f          /* physical marker side length, metres */
 #define QUEUE_LEN         1              /* drop frames, never block camera */
 
 /* ── Camera intrinsics for XIAO OV2640 at 80×60 ───────────────────────────
@@ -205,8 +205,14 @@ static void aruco_task_fn(void *arg)
                 mav_send_vision_estimate(px, py, pz, roll, pitch, yaw);
             }
 
-            ESP_LOGI(TAG, "ID:%d  pos=(%.3f, %.3f, %.3f)  frames:%lu det:%lu",
-                     ids[i], px, py, pz, frame_count, detect_count);
+            /* Viewing angles: where the marker appears in the camera frame.
+             * tvec is in camera frame (X right, Y down, Z forward). */
+            float dist    = sqrtf(px*px + py*py + pz*pz);
+            float v_yaw   = atan2f((float)tvec[0], (float)tvec[2]) * (180.0f / (float)M_PI);
+            float v_pitch = atan2f(-(float)tvec[1], (float)tvec[2]) * (180.0f / (float)M_PI);
+
+            ESP_LOGI(TAG, "ID:%d  dist=%.2fm  yaw=%+.1f°  pitch=%+.1f°  det=%lu/%lu",
+                     ids[i], dist, v_yaw, v_pitch, detect_count, frame_count);
 
             break;  /* use first marker only */
         }

@@ -739,8 +739,6 @@ class GcsButtonPanel(Plugin):
         else:
             self.mission_all_btn.setChecked(False)
             self.mission_all_btn.setText("MISSION ALL")
-        else:
-            self.mission_all_btn.setText("MISSION ALL")
 
     def _kill_all(self):
         for drone_id in range(1, self.DRONE_COUNT + 1):
