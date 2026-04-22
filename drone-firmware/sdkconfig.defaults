@@ -66,12 +66,28 @@ CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 # (16 × 1600 = 25 600 B) + static RX (10 × 1600 = 16 000 B) + camera DMA (30 720 B) the
 # total exceeds available DRAM and WiFi rx buffer malloc fails.
 #
-# Switching TX to dynamic (allocated from the general heap on demand, PSRAM-eligible) frees
-# ~25 600 B of upfront DMA reservation.  Static RX buffers are kept (they do need DMA-capable
-# DRAM) but the count is reduced to 6 and compensated by more dynamic RX buffers:
-#   camera DMA  (30 720) + static RX (6 × 1600 = 9 600) = 40 320 B  — fits with headroom.
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=y
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+# Dynamic TX is blocked when AMPDU TX is enabled (menuconfig shows it red).
+# Instead, reduce static TX from 16 → 6 buffers:
+#   camera DMA  (30 720) + static TX (6 × 1600 = 9 600) + static RX (6 × 1600 = 9 600)
+#   = 49 920 B — fits in 64 KB DMA pool with ~14 KB headroom.
+#
+# NOTE: These values must also be set via idf.py menuconfig inside Docker because the
+# cached sdkconfig overrides sdkconfig.defaults on incremental builds.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+
+# WiFi credentials
+CONFIG_ESP_WIFI_SSID="mach-mind-wifi-2G"
+CONFIG_ESP_WIFI_PASSWORD="QQM5CYED8C"
+CONFIG_ESP_MAXIMUM_RETRY=5
+
+# micro-ROS agent
+CONFIG_MICRO_ROS_AGENT_IP="192.168.178.45"
+CONFIG_MICRO_ROS_AGENT_PORT="8888"
+
+# Task watchdog — ArUco detectMarkers at 80×60 in internal DRAM takes ~0.5 s.
+# Default 5 s is too short if PSRAM fallback is needed (~5 s/frame).
+# 30 s gives comfortable headroom even in the worst case.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 

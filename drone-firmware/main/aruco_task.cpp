@@ -16,6 +16,8 @@
 #include "esp_log.h"
 #include "esp_camera.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -32,37 +34,56 @@
 
 static const char *TAG = "aruco";
 
-/* ── Tuning ────────────────────────────────────────────────────────────── */
+/* ── Resolution constants ──────────────────────────────────────────────────
+ * CAM_W/H: what the OV2640 produces (QQVGA = 160×120).
+ * DET_W/H: what the detector receives (2× downsampled = 80×60).
+ *
+ * Downsampling 4× fewer pixels makes adaptiveThreshold and warpPerspective
+ * ~4× faster, keeping detectMarkers well under the 5-second task-WDT window
+ * even when all pixel data lives in PSRAM.
+ * ─────────────────────────────────────────────────────────────────────── */
+#define CAM_W   160
+#define CAM_H   120
+#define DET_W    80   /* detection resolution (2× downsampled from 160×120) */
+#define DET_H    60
+
 #define ARUCO_DICT        cv::aruco::DICT_4X4_50
 #define MARKER_SIZE_M     0.15f          /* physical marker side length, metres */
-#define FRAME_W           160
-#define FRAME_H           120
 #define QUEUE_LEN         1              /* drop frames, never block camera */
 
-/* ── Camera intrinsics for XIAO OV2640 at 160×120 ─────────────────────
- * These are approximate — calibrate with a checkerboard for best accuracy.
- * fx = fy ≈ (sensor_fx / full_res_w) * capture_w
- * OV2640 full-res focal ≈ 2.8 mm, pixel pitch ≈ 2.2 µm → ~1273 px at 1600
- * Scaled to 160px: 1273 * (160/1600) = 127.3
- * cx/cy = half frame size
+/* ── Camera intrinsics for XIAO OV2640 at 80×60 ───────────────────────────
+ * Halved from 160×120 values: fx/fy scale linearly with resolution,
+ * cx/cy are the new image half-size.
  * ─────────────────────────────────────────────────────────────────────── */
-static const double CAM_FX = 127.3, CAM_FY = 127.3;
-static const double CAM_CX = 80.0,  CAM_CY = 60.0;
-/* Distortion: OV2640 has mild barrel — treat as zero for QQVGA ArUco use */
+static const double CAM_FX = 63.65, CAM_FY = 63.65;
+static const double CAM_CX = 40.0,  CAM_CY = 30.0;
+/* Distortion: OV2640 has mild barrel — treat as zero for this resolution */
 static const double DIST_COEFFS[5] = {0, 0, 0, 0, 0};
 
 
 /* ── Internal queue: camera task → aruco task ───────────────────────────── */
 static QueueHandle_t s_frame_queue = NULL;
 
-/* We pass the raw buffer pointer + length, not the fb_t, to avoid holding
- * the camera DMA buffer across tasks. aruco_task owns a static copy buffer. */
+/* Static PSRAM stacks for both ArUco tasks.
+ * At boot, only ~22 KB of internal DRAM is free — even a 4 KB cam task stack
+ * is too expensive.  EXT_RAM_BSS_ATTR forces these into .ext_ram.bss (PSRAM)
+ * at link time; the linker.lf fragment only covers OpenCV libs, not libmain.a.
+ * xTaskCreateStaticPinnedToCore accepts PSRAM stacks when
+ * CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y. */
+EXT_RAM_BSS_ATTR static StackType_t  s_cam_stack[4096 / sizeof(StackType_t)];
+static StaticTask_t s_cam_tcb;   /* TCB must be in internal DRAM (xPortCheckValidTCBMem) */
+EXT_RAM_BSS_ATTR static StackType_t  s_det_stack[32768 / sizeof(StackType_t)];
+static StaticTask_t s_det_tcb;   /* TCB must be in internal DRAM (xPortCheckValidTCBMem) */
+
+/* Frame copy buffer (PSRAM): cam task writes 80×60 downsampled pixels here.
+ * Only 4800 bytes — small enough to copy quickly to the fast internal buffer
+ * before each detectMarkers call. */
 typedef struct {
-    uint8_t *buf;   /* points into the static copy buffer below */
+    uint8_t *buf;   /* points into s_frame_copy */
     size_t   len;
 } frame_msg_t;
 
-static uint8_t s_frame_copy[FRAME_W * FRAME_H];  /* single static copy buffer */
+EXT_RAM_BSS_ATTR static uint8_t s_frame_copy[DET_W * DET_H];
 
 /* ── Rotation vector → quaternion ──────────────────────────────────────── */
 static void rvec_to_quat(const cv::Vec3d &rvec,
@@ -80,6 +101,19 @@ static void rvec_to_quat(const cv::Vec3d &rvec,
 /* ── ArUco detection task (Core 1) ────────────────────────────────────── */
 static void aruco_task_fn(void *arg)
 {
+    ESP_LOGI(TAG, "ArUco det task entry, core=%d stack=%u",
+             xPortGetCoreID(), (unsigned)uxTaskGetStackHighWaterMark(NULL));
+
+    /* Fast frame buffer in internal DRAM.
+     * OpenCV's adaptiveThreshold/warpPerspective loop over every pixel with
+     * random access — each PSRAM access has ~10× the latency of internal SRAM.
+     * Copying the 4800-byte frame to internal DRAM before calling detectMarkers
+     * reduces per-call time from ~5 s to ~0.5–1 s. */
+    uint8_t *fast_frame = (uint8_t *)heap_caps_malloc(DET_W * DET_H,
+                              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!fast_frame)
+        ESP_LOGW(TAG, "fast_frame alloc failed — using PSRAM (slow)");
+
     /* Camera matrix and dist coeffs */
     cv::Mat camera_matrix = (cv::Mat_<double>(3,3)
         << CAM_FX, 0, CAM_CX,
@@ -87,17 +121,16 @@ static void aruco_task_fn(void *arg)
            0, 0, 1);
     cv::Mat dist_coeffs = cv::Mat(1, 5, CV_64F, (void *)DIST_COEFFS);
 
-    /* ArUco detector */
+    /* ArUco detector — tuned for 80×60 */
     auto dictionary = cv::aruco::getPredefinedDictionary(ARUCO_DICT);
     cv::aruco::DetectorParameters params;
-    /* Loosen defaults slightly for low-res 160×120 */
-    params.minMarkerPerimeterRate  = 0.03;
-    params.maxMarkerPerimeterRate  = 4.0;
+    params.minMarkerPerimeterRate      = 0.05;  /* ≥3 px at 60px height */
+    params.maxMarkerPerimeterRate      = 4.0;
     params.polygonalApproxAccuracyRate = 0.08;
-    params.minCornerDistanceRate   = 0.02;
-    params.adaptiveThreshWinSizeMin  = 5;
-    params.adaptiveThreshWinSizeMax  = 21;
-    params.adaptiveThreshWinSizeStep = 4;
+    params.minCornerDistanceRate       = 0.02;
+    params.adaptiveThreshWinSizeMin    = 3;
+    params.adaptiveThreshWinSizeMax    = 15;
+    params.adaptiveThreshWinSizeStep   = 4;
     cv::aruco::ArucoDetector detector(dictionary, params);
 
     /* 3D object points for solvePnP (marker corners in marker-local frame) */
@@ -110,34 +143,42 @@ static void aruco_task_fn(void *arg)
     frame_msg_t msg;
     uint32_t frame_count = 0, detect_count = 0;
 
-    ESP_LOGI(TAG, "ArUco task started on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "ArUco det task started on core %d", xPortGetCoreID());
 
     while (true) {
-        /* Block until a frame arrives (camera task sends at ~10 Hz) */
+        /* Block until a frame arrives */
         if (xQueueReceive(s_frame_queue, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
-            /* Timeout — invalidate vision if no frames */
             vision_pose_valid = false;
             continue;
         }
 
         frame_count++;
 
-        /* Wrap raw buffer in cv::Mat — no copy, zero heap alloc */
-        cv::Mat frame(FRAME_H, FRAME_W, CV_8UC1, msg.buf);
+        /* Copy PSRAM frame → fast internal DRAM, then wrap in cv::Mat.
+         * If allocation failed, fall back to the PSRAM buffer directly. */
+        uint8_t *pixel_buf = fast_frame ? fast_frame : msg.buf;
+        if (fast_frame)
+            memcpy(fast_frame, msg.buf, DET_W * DET_H);
+
+        cv::Mat frame(DET_H, DET_W, CV_8UC1, pixel_buf);
 
         std::vector<int> ids;
         std::vector<std::vector<cv::Point2f>> corners, rejected;
         detector.detectMarkers(frame, corners, ids, rejected);
 
+        /* Brief yield after heavy computation so IDLE1 can reset its watchdog.
+         * detectMarkers at 80×60 in internal DRAM takes ~300–600 ms.
+         * 1 ms yield every frame keeps IDLE1 well within the 30 s WDT window. */
+        vTaskDelay(pdMS_TO_TICKS(1));
+
         if (ids.empty()) {
-            /* No markers in this frame */
+            if (frame_count % 5 == 0)
+                ESP_LOGI(TAG, "No marker — frame %lu", frame_count);
             continue;
         }
 
         detect_count++;
 
-        /* Use the first detected marker (extend to multi-marker EKF later) */
-        std::vector<cv::Vec3d> rvecs, tvecs;
         for (size_t i = 0; i < ids.size(); i++) {
             cv::Vec3d rvec, tvec;
             cv::solvePnP(obj_pts, corners[i], camera_matrix, dist_coeffs,
@@ -152,13 +193,11 @@ static void aruco_task_fn(void *arg)
             float qx, qy, qz, qw;
             rvec_to_quat(rvec, &qx, &qy, &qz, &qw);
 
-            /* Write shared volatile state — same vars vision_pose_callback uses */
             vp_x = px; vp_y = py; vp_z = pz;
             vp_qx = qx; vp_qy = qy; vp_qz = qz; vp_qw = qw;
             vision_pose_valid   = true;
             last_vision_pose_ms = esp_timer_get_time() / 1000;
 
-            /* Forward to PX4 EKF2 directly over MAVLink UART — no ROS round-trip */
             if (vision_enabled) {
                 float roll  = atan2f(2.0f*(qw*qx + qy*qz), 1.0f - 2.0f*(qx*qx + qy*qy));
                 float pitch = asinf( 2.0f*(qw*qy - qz*qx));
@@ -166,48 +205,54 @@ static void aruco_task_fn(void *arg)
                 mav_send_vision_estimate(px, py, pz, roll, pitch, yaw);
             }
 
-            ESP_LOGD(TAG, "ID:%d  pos=(%.3f, %.3f, %.3f)  frames:%lu det:%lu",
+            ESP_LOGI(TAG, "ID:%d  pos=(%.3f, %.3f, %.3f)  frames:%lu det:%lu",
                      ids[i], px, py, pz, frame_count, detect_count);
 
-            /* Only use the first marker per frame for now */
-            break;
+            break;  /* use first marker only */
         }
     }
 }
 
-/* ── Camera feed task (Core 0, alongside existing main loop) ───────────── */
+/* ── Camera feed task (Core 0) ─────────────────────────────────────────── */
 static void aruco_cam_task_fn(void *arg)
 {
     ESP_LOGI(TAG, "ArUco cam task started on core %d", xPortGetCoreID());
 
-    while (true) {
-        /* Only grab frames when vision detection is active */
-        if (!vision_enabled) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
+    uint32_t drain_count = 0;
+    ESP_LOGI(TAG, "ArUco cam drain loop starting");
 
+    while (true) {
+        /* Always drain at full camera rate.  fb_get blocks until a frame is
+         * ready, so this loop naturally matches the sensor frame rate (~25 FPS).
+         * Draining slower causes DMA OVF and corrupted half-frames. */
         camera_fb_t *fb = esp_camera_fb_get();
         if (!fb) {
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
-        if (fb->len == FRAME_W * FRAME_H) {
-            /* Copy frame into static buffer, return DMA buffer immediately */
-            memcpy(s_frame_copy, fb->buf, fb->len);
+        drain_count++;
+        if (drain_count % 100 == 0)
+            ESP_LOGI(TAG, "Cam drain: count=%lu len=%u vision=%d",
+                     drain_count, (unsigned)fb->len, (int)vision_enabled);
+
+        /* Feed detector at ~8 FPS (every 3rd frame at ~25 FPS) when enabled.
+         * Downsample 160×120 → 80×60 by taking every other pixel in x and y.
+         * This reduces detectMarkers cost by 4× and fits in 4800 bytes. */
+        if (vision_enabled && fb->len == (size_t)(CAM_W * CAM_H) && (drain_count % 3) == 0) {
+            const uint8_t *src = (const uint8_t *)fb->buf;
+            uint8_t *dst = s_frame_copy;
+            for (int y = 0; y < DET_H; y++)
+                for (int x = 0; x < DET_W; x++)
+                    dst[y * DET_W + x] = src[(y * 2) * CAM_W + (x * 2)];
             esp_camera_fb_return(fb);
 
-            frame_msg_t msg = { .buf = s_frame_copy, .len = fb->len };
-            /* Overwrite any stale frame — QUEUE_LEN=1, don't block */
+            frame_msg_t msg = { .buf = s_frame_copy, .len = (size_t)(DET_W * DET_H) };
             xQueueOverwrite(s_frame_queue, &msg);
         } else {
             esp_camera_fb_return(fb);
         }
-
-        /* ~10 FPS feed to detection — camera timer callback still runs at 10 Hz
-         * for streaming, so this doesn't starve it */
-        vTaskDelay(pdMS_TO_TICKS(100));
+        /* No vTaskDelay — let fb_get block naturally to prevent OVF */
     }
 }
 
@@ -217,13 +262,29 @@ void aruco_task_start(void)
     s_frame_queue = xQueueCreate(QUEUE_LEN, sizeof(frame_msg_t));
     configASSERT(s_frame_queue);
 
-    /* Cam feeder on Core 0, same core as the existing main loop */
-    xTaskCreatePinnedToCore(aruco_cam_task_fn, "aruco_cam",
-                            4096, NULL, 4, NULL, 0);
+    ESP_LOGI(TAG, "Free internal DRAM before task create: %u B",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 
-    /* Detector on Core 1, separate from micro-ROS task */
-    xTaskCreatePinnedToCore(aruco_task_fn, "aruco_det",
-                            8192, NULL, 4, NULL, 1);
+    /* Cam feeder on Core 0 — priority 4 (below micro_ros prio 5).
+     * fb_count=8 gives 320 ms OVF tolerance without needing elevated priority. */
+    TaskHandle_t cam_handle = xTaskCreateStaticPinnedToCore(
+        aruco_cam_task_fn, "aruco_cam",
+        sizeof(s_cam_stack) / sizeof(StackType_t),
+        NULL, 4,
+        s_cam_stack, &s_cam_tcb, 0);
+    if (!cam_handle)
+        ESP_LOGE(TAG, "aruco_cam task creation FAILED");
 
-    ESP_LOGI(TAG, "ArUco tasks launched");
+    /* Detector on Core 1 — PSRAM stack, internal DRAM TCB. */
+    TaskHandle_t det_handle = xTaskCreateStaticPinnedToCore(
+        aruco_task_fn, "aruco_det",
+        sizeof(s_det_stack) / sizeof(StackType_t),
+        NULL, 4,
+        s_det_stack, &s_det_tcb, 1);
+    if (!det_handle)
+        ESP_LOGE(TAG, "aruco_det task creation FAILED");
+
+    ESP_LOGI(TAG, "ArUco tasks launched (cam=%s det=%s)",
+             cam_handle ? "OK" : "FAIL",
+             det_handle ? "OK" : "FAIL");
 }

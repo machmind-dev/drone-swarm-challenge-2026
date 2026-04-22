@@ -184,7 +184,8 @@ static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
 static volatile bool  setpoint_received = false;
 
 /* Feature flags */
-static volatile bool camera_streaming    = false;
+static volatile bool camera_streaming    = false; /* GCS-controlled image streaming over micro-ROS */
+static bool          camera_hw_ok        = false; /* camera hardware initialised successfully */
 volatile bool vision_enabled = false;
 static volatile bool gcs_control_active  = false;
 
@@ -430,7 +431,7 @@ static const camera_config_t camera_config = {
     .ledc_timer   = LEDC_TIMER_0, .ledc_channel = LEDC_CHANNEL_0,
     .pixel_format = PIXFORMAT_GRAYSCALE,
     .frame_size   = FRAMESIZE_QQVGA,
-    .jpeg_quality = 63, .fb_count = 2,
+    .jpeg_quality = 63, .fb_count = 8,
     .fb_location  = CAMERA_FB_IN_PSRAM,
     .grab_mode    = CAMERA_GRAB_LATEST,
 };
@@ -460,22 +461,22 @@ static void bf_draw_char(uint8_t *buf, int cx, int cy, int fi, int scale)
                 for (int sx = 0; sx < scale; sx++) {
                     int px = cx + col * scale + sx;
                     int py = cy + row * scale + sy;
-                    if (px >= 0 && px < 160 && py >= 0 && py < 120)
-                        buf[py * 160 + px] = 0xFF;
+                    if (px >= 0 && px < 80 && py >= 0 && py < 60)
+                        buf[py * 80 + px] = 0xFF;
                 }
             }
         }
     }
 }
 
-/* Fill 160×120 mono8 buffer with black frame + centred "D{id}" */
+/* Fill 80×60 mono8 buffer with black frame + centred "D{id}" */
 static void generate_black_frame(uint8_t *buf, int id)
 {
-    memset(buf, 0, 160 * 120);
-    const int scale  = 4;
+    memset(buf, 0, 80 * 60);
+    const int scale  = 2;
     const int char_w = 3 * scale + scale;   /* char width + 1 px gap */
-    int x0 = 80 - char_w;                   /* centre two chars */
-    int y0 = 60 - (5 * scale) / 2;
+    int x0 = 40 - char_w;                   /* centre two chars */
+    int y0 = 30 - (5 * scale) / 2;
     int fi = (id >= 1 && id <= 5) ? id : 1;
     bf_draw_char(buf, x0,          y0, 0,  scale);   /* D      */
     bf_draw_char(buf, x0 + char_w, y0, fi, scale);   /* digit  */
@@ -1026,38 +1027,50 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
 
     /* Camera — publish live frames; on streaming→off transition send one black frame */
     static bool prev_camera_streaming = false;
+    static uint8_t img_skip = 0;
     if (publisher_image_ok && camera_streaming) {
         prev_camera_streaming = true;
-        camera_fb_t *pic = esp_camera_fb_get();
-        if (pic) {
-            if (pic->len <= img_msg.data.capacity) {
-                clock_gettime(CLOCK_REALTIME, &ts);
-                img_msg.header.stamp.sec     = ts.tv_sec;
-                img_msg.header.stamp.nanosec = ts.tv_nsec;
-                img_msg.header.frame_id =
-                    micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
-                img_msg.width    = 160; img_msg.height = 120; img_msg.step = 160;
-                img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
-                img_msg.data.size = pic->len;
-                memcpy(img_msg.data.data, pic->buf, pic->len);
-                RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
+        /* Publish at 5 FPS (every 2nd 100ms callback) — keeps reliable output
+         * stream free so marker/state publishers are not blocked */
+        if (++img_skip >= 2) {
+            img_skip = 0;
+            camera_fb_t *pic = esp_camera_fb_get();
+            if (pic) {
+                if (pic->len <= img_msg.data.capacity) {
+                    clock_gettime(CLOCK_REALTIME, &ts);
+                    img_msg.header.stamp.sec     = ts.tv_sec;
+                    img_msg.header.stamp.nanosec = ts.tv_nsec;
+                    img_msg.header.frame_id =
+                        micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
+                    /* Downsample 160×120 → 80×60 to fit micro-ROS serialization buffer */
+                    img_msg.width  = 80; img_msg.height = 60; img_msg.step = 80;
+                    img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
+                    img_msg.data.size = 80 * 60;
+                    const uint8_t *src = (const uint8_t *)pic->buf;
+                    uint8_t       *dst = img_msg.data.data;
+                    for (int y = 0; y < 60; y++)
+                        for (int x = 0; x < 80; x++)
+                            dst[y * 80 + x] = src[(y * 2) * 160 + (x * 2)];
+                    RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
+                }
+                esp_camera_fb_return(pic);
+            } else {
+                ESP_LOGW(TAG, "Camera capture failed");
             }
-            esp_camera_fb_return(pic);
-        } else {
-            ESP_LOGW(TAG, "Camera capture failed");
         }
     } else if (publisher_image_ok && prev_camera_streaming) {
         /* One-shot: streaming just turned off — push black frame with drone ID */
         prev_camera_streaming = false;
-        if (img_msg.data.capacity >= 160 * 120) {
+        img_skip = 0;
+        if (img_msg.data.capacity >= 80 * 60) {
             clock_gettime(CLOCK_REALTIME, &ts);
             img_msg.header.stamp.sec     = ts.tv_sec;
             img_msg.header.stamp.nanosec = ts.tv_nsec;
             img_msg.header.frame_id =
                 micro_ros_string_utilities_set(img_msg.header.frame_id, topic_camera_frame);
-            img_msg.width    = 160; img_msg.height = 120; img_msg.step = 160;
+            img_msg.width    = 80; img_msg.height = 60; img_msg.step = 80;
             img_msg.encoding = micro_ros_string_utilities_set(img_msg.encoding, "mono8");
-            img_msg.data.size = 160 * 120;
+            img_msg.data.size = 80 * 60;
             generate_black_frame(img_msg.data.data, DRONE_ID);
             RCSOFTCHECK(rcl_publish(&publisher_image, &img_msg, NULL));
             ESP_LOGI(TAG, "Camera off — black frame sent");
@@ -1132,6 +1145,8 @@ static void micro_ros_task(void *arg)
         CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
 #endif
 
+    ESP_LOGI(TAG, "uros_task running, agent=%s:%s",
+             CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT);
     ESP_LOGI(TAG, "Waiting for micro-ROS agent...");
     while (rclc_support_init_with_options(&support, 0, NULL,
                                            &init_options, &allocator) != RCL_RET_OK) {
@@ -1146,7 +1161,8 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_node_init_default(&node, node_name, "", &support));
 
     /* ── Publishers ──────────────────────────────────────────────────────── */
-    publisher_image_ok = (rclc_publisher_init_best_effort(&publisher_image, &node,
+    /* Use reliable QoS — best_effort streams don't fragment and fail for messages > MTU (512 B) */
+    publisher_image_ok = (rclc_publisher_init_default(&publisher_image, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Image), topic_image) == RCL_RET_OK);
     if (!publisher_image_ok)
         ESP_LOGW(TAG, "Image publisher init failed — camera streaming disabled (XML buffer too small, rebuild libmicroros)");
@@ -1335,8 +1351,8 @@ void app_main(void)
      * independent of the VL53/MAVLink I2C initialised later.
      */
     if (esp_camera_init(&camera_config) != ESP_OK) {
-        ESP_LOGE(TAG, "Camera init failed — black-frame mode only");
-        camera_streaming = false;
+        ESP_LOGE(TAG, "Camera init failed — ArUco and streaming disabled");
+        camera_hw_ok = false;
     } else {
         ESP_LOGI(TAG, "Camera OK");
         sensor_t *s = esp_camera_sensor_get();
@@ -1351,9 +1367,10 @@ void app_main(void)
             s->set_bpc(s, 1);           // black pixel correction
             s->set_wpc(s, 1);           // white pixel correction
         }
-        /* NOTE: aruco_task_start() is intentionally deferred to after WiFi init.
-         * ArUco task stacks consume DMA-capable DRAM; starting them here would
-         * exhaust the heap before WiFi's static RX buffer allocation. */
+        /* Camera hardware ready — ArUco will start after WiFi.
+         * Image streaming (camera_streaming) stays false until GCS sends
+         * CONFIG_CAMERA_ENABLE, keeping micro-ROS bandwidth free by default. */
+        camera_hw_ok = true;
     }
 
 #if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
@@ -1565,13 +1582,31 @@ void app_main(void)
     /* Start ArUco detection tasks now that WiFi has allocated its static
      * buffers.  Camera DMA was reserved early (before WiFi), but task stacks
      * are allocated here to avoid competing with WiFi's RX buffer malloc. */
-    if (camera_streaming) {
+    if (camera_hw_ok) {
         aruco_task_start();
     }
 
-    xTaskCreate(micro_ros_task, "uros_task",
+    /* micro-ROS task stack must come from PSRAM — internal DRAM is exhausted
+     * by WiFi, camera DMA, ArUco tasks and FreeRTOS overhead.
+     * xTaskCreate tries internal DRAM first (SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+     * covers the 16000-byte stack) and fails with no PSRAM fallback.
+     * xTaskCreateStatic with explicit PSRAM allocation bypasses this. */
+    ESP_LOGI(TAG, "Free heap: %u B PSRAM, %u B internal",
+             heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    static StaticTask_t uros_tcb;   /* TCB in BSS → PSRAM (SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY) */
+    static StackType_t  uros_stack[CONFIG_MICRO_ROS_APP_STACK]; /* stack in BSS → PSRAM */
+    TaskHandle_t uros_handle = xTaskCreateStatic(
+                micro_ros_task, "uros_task",
                 CONFIG_MICRO_ROS_APP_STACK, NULL,
-                CONFIG_MICRO_ROS_APP_TASK_PRIO, NULL);
+                CONFIG_MICRO_ROS_APP_TASK_PRIO,
+                uros_stack, &uros_tcb);
+    if (!uros_handle) {
+        ESP_LOGE(TAG, "uros_task creation FAILED — micro-ROS will not run");
+    } else {
+        ESP_LOGI(TAG, "uros_task created OK (stack=%d words, PSRAM)",
+                 CONFIG_MICRO_ROS_APP_STACK);
+    }
 
     while (1) {
         drone_id_led_update();
