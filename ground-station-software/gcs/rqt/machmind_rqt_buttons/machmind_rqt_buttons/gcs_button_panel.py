@@ -24,7 +24,8 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     EMERGENCY_HOLD_SECONDS = 3
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
-    VERSION = "1.3.1"
+    DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
+    VERSION = "1.3.2"
 
     def __init__(self, context):
         super().__init__(context)
@@ -38,6 +39,7 @@ class GcsButtonPanel(Plugin):
         self.drone_states = {}
         self.drone_roles = {}
         self.drone_battery = {}
+        self.drone_last_seen: dict[int, float] = {}  # monotonic time of last state message per drone
         self.ui_refs = {}
         self._arm_sent_times: dict[int, float] = {}  # monotonic time when ARM was sent per drone
         self.command_publishers = {}
@@ -146,6 +148,12 @@ class GcsButtonPanel(Plugin):
         self.timer = QTimer()
         self.timer.timeout.connect(lambda: rclpy.spin_once(self.node, timeout_sec=0))
         self.timer.start(50)
+
+        # Heartbeat watchdog — marks drones OFFLINE when state messages stop
+        self._online_timer = QTimer()
+        self._online_timer.setInterval(1000)
+        self._online_timer.timeout.connect(self._check_drone_staleness)
+        self._online_timer.start()
 
     # ================= Global Controls =================
     def _build_global_controls(self):
@@ -805,10 +813,15 @@ class GcsButtonPanel(Plugin):
     def _state_callback(self, msg: String, drone_id: int):
         state = msg.data.lower()
         self.drone_states[drone_id] = state
+        self.drone_last_seen[drone_id] = time.monotonic()
         ui = self.ui_refs.get(drone_id)
         if not ui:
             return
 
+        # Re-enable controls that were locked while drone was OFFLINE
+        if not ui["arm"].isEnabled():
+            ui["arm"].setEnabled(True)
+        ui["state"].setStyleSheet("font-size:9px;")
         ui["state"].setText(state.upper())
         color_map = {
             "disarmed": "#555",
@@ -854,6 +867,28 @@ class GcsButtonPanel(Plugin):
         self.mission_all_btn.setStyleSheet(
             self._mission_all_base_style + f"QPushButton {{ background-color: {mission_all_color}; }}"
         )
+
+    def _check_drone_staleness(self):
+        """Called every second — marks drones as OFFLINE when no state message arrives."""
+        now = time.monotonic()
+        for drone_id in range(1, self.DRONE_COUNT + 1):
+            ui = self.ui_refs.get(drone_id)
+            if not ui:
+                continue
+            last = self.drone_last_seen.get(drone_id)
+            stale = last is None or (now - last) > self.DRONE_OFFLINE_TIMEOUT_S
+            if stale and self.drone_states.get(drone_id) != "__offline__":
+                self.drone_states[drone_id] = "__offline__"
+                ui["state"].setText("OFFLINE")
+                ui["state"].setStyleSheet("font-size:9px; color:#888;")
+                ui["strip"].setStyleSheet("background-color: #333; border-radius: 2px;")
+                ui["arm"].setEnabled(False)
+                ui["mission"].setEnabled(False)
+                ui["home"].setEnabled(False)
+            elif not stale and self.drone_states.get(drone_id) == "__offline__":
+                # Back online — re-enable controls; next state callback will fill in real state
+                ui["arm"].setEnabled(True)
+                ui["state"].setStyleSheet("font-size:9px;")
 
     def _role_callback(self, msg: String, drone_id: int):
         role = msg.data.upper()
@@ -941,6 +976,7 @@ class GcsButtonPanel(Plugin):
 
     def shutdown_plugin(self):
         self.timer.stop()
+        self._online_timer.stop()
         self.global_emergency_timer.stop()
         for t in self.drone_emergency_timers.values():
             t.stop()
