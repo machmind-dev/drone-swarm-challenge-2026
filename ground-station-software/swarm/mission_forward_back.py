@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-mission_forward_back.py — Forward / rotate / back flight path.
+mission_forward_back.py — L-loop flight path.
 
 Usage:
     python3 mission_forward_back.py [DRONE_ID]   (default: 1)
 
 Sequence (executes once drone enters MISSION state):
-    1. Hold at home   — waits for Phase 3 climb to complete
-    2. Fly 1 m forward (+X in PX4 local frame, facing North)
-    3. Rotate 180° in place
-    4. Fly 1 m back to start (facing South)
-    5. Send COMMAND_RETURN_HOME
+    0. Hold at home   — waits for Phase 3 climb to complete
+    1. Fly 1 m forward (facing North, +X)
+    2. Rotate -90° left (facing West, yaw=270°)
+    3. Fly 2 m forward (facing West, -Y)
+    4. Climb to 3 m altitude
+    5. Rotate -90° left (facing South, yaw=180°)
+    6. Fly 1 m forward (facing South, -X)
+    7. Rotate -90° left (facing East, yaw=90°)
+    8. Fly 2 m forward (facing East, +Y) — returns over home XY
+    9. Descend to 0.5 m altitude
+   10. Send COMMAND_RETURN_HOME
 
 Publishes:
     /gcs/drone_{ID}/control   geometry_msgs/PoseStamped
@@ -37,18 +43,19 @@ from std_msgs.msg import String
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 DRONE_ID       = int(sys.argv[1]) if len(sys.argv) > 1 else 1
-CRUISE_ALT_M   = 1.5   # must match MISSION_TAKEOFF_ALT_M in firmware
-FORWARD_DIST_M = 1.0   # metres along +X (PX4 local North)
-CLIMB_WAIT_S   = 6.0   # seconds to wait after MISSION detected (Phase 3 = 5 s)
-DWELL_S        = 5.0   # seconds to hold each waypoint before proceeding
-STATE_TIMEOUT_S = 120  # abort if drone doesn't enter mission within this time
+CRUISE_ALT_M    = 1.5   # must match MISSION_TAKEOFF_ALT_M in firmware
+HIGH_ALT_M      = 3.0   # altitude for steps 4–8
+LOW_ALT_M       = 0.5   # altitude for step 9 before return home
+CLIMB_WAIT_S    = 6.0   # seconds to wait after MISSION detected (Phase 3 = 5 s)
+DWELL_S         = 5.0   # seconds to hold each waypoint before proceeding
+STATE_TIMEOUT_S = 120   # abort if drone doesn't enter mission within this time
 
 
 # ── Node ─────────────────────────────────────────────────────────────────────
 class MissionNode(Node):
 
     def __init__(self):
-        super().__init__('swarm_mission_forward_back')
+        super().__init__(f'swarm_mission_forward_back_d{DRONE_ID}')
         self.state = ''
 
         self._control_pub = self.create_publisher(
@@ -139,18 +146,48 @@ def run_mission(node: MissionNode):
         node.send_setpoint(0.0, 0.0, CRUISE_ALT_M, 0.0)
         rclpy.spin_once(node, timeout_sec=0.05)
 
-    # Step 1 — fly 1 m forward (face North, move +X)
-    ok = dwell(node, FORWARD_DIST_M, 0.0, CRUISE_ALT_M, 0.0,  DWELL_S, 'Step 1 — Forward 1 m')
+    # Step 1 — fly 1 m forward (facing North, +X)
+    ok = dwell(node,  1.0,  0.0, CRUISE_ALT_M,   0.0, DWELL_S, 'Step 1 — Forward 1 m (North)')
     if not ok:
         return
 
-    # Step 2 — rotate 180° in place
-    ok = dwell(node, FORWARD_DIST_M, 0.0, CRUISE_ALT_M, 180.0, DWELL_S, 'Step 2 — Rotate 180°')
+    # Step 2 — rotate -90° left (now facing West, yaw=270°)
+    ok = dwell(node,  1.0,  0.0, CRUISE_ALT_M, 270.0, DWELL_S, 'Step 2 — Rotate -90° (West)')
     if not ok:
         return
 
-    # Step 3 — fly back 1 m (facing South, moving -X toward home)
-    ok = dwell(node, 0.0, 0.0, CRUISE_ALT_M, 180.0, DWELL_S, 'Step 3 — Back 1 m')
+    # Step 3 — fly 2 m forward (facing West, -Y)
+    ok = dwell(node,  1.0, -2.0, CRUISE_ALT_M, 270.0, DWELL_S, 'Step 3 — Forward 2 m (West)')
+    if not ok:
+        return
+
+    # Step 4 — climb to 3 m
+    ok = dwell(node,  1.0, -2.0, HIGH_ALT_M,   270.0, DWELL_S, 'Step 4 — Climb to 3 m')
+    if not ok:
+        return
+
+    # Step 5 — rotate -90° left (now facing South, yaw=180°)
+    ok = dwell(node,  1.0, -2.0, HIGH_ALT_M,   180.0, DWELL_S, 'Step 5 — Rotate -90° (South)')
+    if not ok:
+        return
+
+    # Step 6 — fly 1 m forward (facing South, -X)
+    ok = dwell(node,  0.0, -2.0, HIGH_ALT_M,   180.0, DWELL_S, 'Step 6 — Forward 1 m (South)')
+    if not ok:
+        return
+
+    # Step 7 — rotate -90° left (now facing East, yaw=90°)
+    ok = dwell(node,  0.0, -2.0, HIGH_ALT_M,    90.0, DWELL_S, 'Step 7 — Rotate -90° (East)')
+    if not ok:
+        return
+
+    # Step 8 — fly 2 m forward (facing East, +Y) — returns over home XY
+    ok = dwell(node,  0.0,  0.0, HIGH_ALT_M,    90.0, DWELL_S, 'Step 8 — Forward 2 m (East)')
+    if not ok:
+        return
+
+    # Step 9 — descend to 0.5 m
+    ok = dwell(node,  0.0,  0.0, LOW_ALT_M,     90.0, DWELL_S, 'Step 9 — Descend to 0.5 m')
     if not ok:
         return
 

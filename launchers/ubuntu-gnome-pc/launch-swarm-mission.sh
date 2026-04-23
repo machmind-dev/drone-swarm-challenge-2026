@@ -32,12 +32,11 @@ cat << "EOF"
 EOF
 
 echo -e "${WHITE}"
-echo -e "                   [Swarm Mission — Forward / Rotate / Back]"
+echo -e "                   [Swarm Mission — L-Loop Flight Path]"
 echo -e "${RESET}"
 echo ""
 
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
-DRONE_ID="${1:-1}"
 
 if [ ! -f "$MISSION_SCRIPT" ]; then
     echo "[ERROR] Mission script not found: $MISSION_SCRIPT"
@@ -55,12 +54,19 @@ fi
 source "$ROS_SETUP"
 echo "[INFO] ROS 2 sourced: $ROS_DISTRO"
 echo ""
-echo -e "${YELLOW}[INFO] Drone ID: ${DRONE_ID}${RESET}"
-echo "[INFO] Mission: fly 1 m forward → rotate 180° → fly back 1 m"
-echo "[INFO] ARM the drone and press MISSION in rqt to start the flight path."
+echo -e "${YELLOW}[INFO] Drones: 1 and 2 (running in parallel)${RESET}"
+echo "[INFO] Mission: L-loop — fwd 1m → left 90° → fwd 2m → climb 3m → left 90° → fwd 1m → left 90° → fwd 2m → descend 0.5m"
+echo "[INFO] ARM both drones and press MISSION in rqt to start the flight path."
 echo ""
 
-python3 "$MISSION_SCRIPT" "$DRONE_ID"
+# Launch both drone missions in parallel; prefix each line so output is readable
+python3 "$MISSION_SCRIPT" 1 2>&1 | sed -u 's/^/[D1] /' &
+PID1=$!
+python3 "$MISSION_SCRIPT" 2 2>&1 | sed -u 's/^/[D2] /' &
+PID2=$!
+
+wait $PID1
+wait $PID2
 
 echo ""
 read -rp "Mission finished. Press Enter to close..."
