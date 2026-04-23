@@ -94,7 +94,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          2
+#define DRONE_ID          1
 #define DRONE_ID_LED_PIN  GPIO_NUM_1
 
 /* ── RViz marker dimensions ────────────────────────────────────────────── */
@@ -1101,11 +1101,12 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         ESP_LOGW(TAG, "Vision pose timeout");
     }
 
-    /* Publish state on change, and every 5 s regardless so late subscribers
-     * (rqt opened after drone boot) see the current state within 5 seconds. */
+    /* Publish state on change, and every 2 s regardless so late subscribers
+     * (rqt opened after drone boot) see the current state within 2 seconds.
+     * Must be < GCS DRONE_OFFLINE_TIMEOUT_S (3 s) to avoid false OFFLINE. */
     static uint32_t state_tick = 0;
     bool state_changed = state_dirty;
-    if (state_dirty || (++state_tick >= 50)) {
+    if (state_dirty || (++state_tick >= 20)) {
         state_dirty = false;
         state_tick  = 0;
         const char *s = state_names[(int)drone_state];
