@@ -94,7 +94,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          1
+#define DRONE_ID          2
 #define DRONE_ID_LED_PIN  GPIO_NUM_1
 
 /* ── RViz marker dimensions ────────────────────────────────────────────── */
@@ -1286,6 +1286,7 @@ static void micro_ros_task(void *arg)
         rcl_init_options_get_rmw_init_options(&init_options);
     RCCHECK(rmw_uros_options_set_udp_address(
         CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
+    RCCHECK(rmw_uros_options_set_client_key((uint32_t)DRONE_ID, rmw_options));
 #endif
 
     ESP_LOGI(TAG, "uros_task running, agent=%s:%s",
