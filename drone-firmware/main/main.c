@@ -109,6 +109,12 @@ static const char *TAG = "drone";
 #define MARKER_ID_TOP(id)      ((id)*100+11)
 #define MARKER_ID_LEFT(id)     ((id)*100+12)
 #define MARKER_ID_FRONT(id)    ((id)*100+13)
+#define MARKER_ID_WP_ARROW(id)      ((id)*100+20)
+#define MARKER_ID_WP_TEXT(id)       ((id)*100+21)
+#define MARKER_ID_TAKEOFF_ARROW(id) ((id)*100+30)
+#define MARKER_ID_TAKEOFF_TEXT(id)  ((id)*100+31)
+#define MARKER_ID_LAND_ARROW(id)    ((id)*100+32)
+#define MARKER_ID_LAND_TEXT(id)     ((id)*100+33)
 
 /* ── Network ───────────────────────────────────────────────────────────── */
 #define DRONE_IP_BASE_OCTET 100
@@ -129,6 +135,12 @@ static const char *TAG = "drone";
 #define PX4_MODE_OFFBOARD    0x00060000UL   /* onboard computer control */
 
 /* ── C2 watchdog ───────────────────────────────────────────────────────── */
+/* C2_PING_TIMEOUT_MS must be kept short: rmw_uros_ping_agent() is a
+ * blocking call that stalls the executor (and therefore vision_pose_callback /
+ * mav_send_vision_estimate) for up to TIMEOUT × ATTEMPTS.  500 ms × 2 = 1 s
+ * was enough to drop PX4 EKF2's external-position lock when several drones
+ * connect simultaneously and the agent is under load — causing ARM rejection.
+ * 100 ms × 2 = 200 ms max block; well within EKF2 tolerance on local WiFi. */
 #define C2_PING_TIMEOUT_MS   100   /* per ping attempt */
 #define C2_PING_ATTEMPTS     2     /* attempts per check */
 #define C2_CHECK_INTERVAL_MS 1000  /* interval between checks */
@@ -177,6 +189,17 @@ static volatile float home_x = 0.0f, home_y = 0.0f, home_z = 0.0f;
 
 /* Battery status from PX4 BATTERY_STATUS MAVLink message (0–100, -1 = unknown) */
 static volatile int8_t battery_remaining_pct = -1;
+
+/* PX4 local position (LOCAL_POSITION_NED, z negated to up-positive for RViz).
+ * Written by mavlink_rx_task_fn, read by timer_callback. */
+static volatile float px4_pos_x = 0.0f, px4_pos_y = 0.0f, px4_pos_z = 0.0f;
+static volatile bool  px4_pos_valid = false;
+
+/* PX4 home position captured at ARM time (px4 local frame, up-positive z). */
+static volatile float px4_home_x = 0.0f, px4_home_y = 0.0f, px4_home_z = 0.0f;
+
+/* RViz map position of this drone at boot (initial layout position). */
+static float map_home_x = 0.0f, map_home_y = 0.0f, map_home_z = 0.0f;
 
 /* Mission setpoint from /gcs/drone_{ID}/control (positive-up Z, yaw in radians) */
 static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
@@ -822,6 +845,19 @@ static void trigger_eland(void)
 }
 
 
+/* Publish state immediately — called after any state transition inside the
+ * executor so the GCS receives the new state without waiting up to 100 ms
+ * for the next timer_callback tick.  Safe to call from executor callbacks
+ * (publisher is initialised before the executor loop starts). */
+static void publish_state_now(void)
+{
+    state_dirty = false;
+    const char *s = state_names[(int)drone_state];
+    rosidl_runtime_c__String__assign(&state_pub_msg.data, s);
+    RCSOFTCHECK(rcl_publish(&publisher_state, &state_pub_msg, NULL));
+    ESP_LOGI(TAG, "State → %s (immediate)", s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * GCS command callback  (/gcs/drone_{ID}/command)
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -846,8 +882,14 @@ static void command_callback(const void *msg_in)
         }
         /* Do NOT call mav_arm here — PX4 is not in OFFBOARD yet and will reject it.
          * The real arm happens in mission_task_fn Phase 2, after the prestream converges EKF2. */
+        /* Capture PX4 home for RViz disc tracking (inertial-only flight). */
+        if (px4_pos_valid) {
+            px4_home_x = px4_pos_x;
+            px4_home_y = px4_pos_y;
+            px4_home_z = px4_pos_z;
+        }
         drone_state = DRONE_ARMED;
-        state_dirty = true;
+        publish_state_now();   /* immediate — GCS needs "armed" before sending MISSION_START */
         /* Start streaming setpoints immediately so EKF2 converges during ARM→MISSION window */
         if (!prearm_stream_handle)
             xTaskCreate(prearm_stream_task_fn, "prearm", 2048, NULL, 4, &prearm_stream_handle);
@@ -859,7 +901,7 @@ static void command_callback(const void *msg_in)
         }
         mav_arm(false);
         drone_state = DRONE_DISARMED;
-        state_dirty = true;
+        publish_state_now();
 
     } else if (strcmp(buf, "COMMAND_MISSION_START") == 0) {
         if (drone_state != DRONE_ARMED && drone_state != DRONE_RETURNING_HOME) {
@@ -873,7 +915,7 @@ static void command_callback(const void *msg_in)
         setpoint_received = false;   /* clear stale setpoint/yaw from previous mission */
         setpoint_yaw = 0.0f;
         drone_state = DRONE_MISSION;
-        state_dirty = true;
+        publish_state_now();
         xTaskCreate(mission_task_fn, "mission", 4096, NULL, 5, &mission_task_handle);
 
     } else if (strcmp(buf, "COMMAND_RETURN_HOME") == 0) {
@@ -886,7 +928,7 @@ static void command_callback(const void *msg_in)
             mission_task_handle = NULL;
         }
         drone_state = DRONE_RETURNING_HOME;
-        state_dirty = true;
+        publish_state_now();
         mav_set_mode(PX4_MODE_OFFBOARD);
         xTaskCreate(return_home_task_fn, "return_home", 4096, NULL, 5, &return_home_task_handle);
 
@@ -898,7 +940,7 @@ static void command_callback(const void *msg_in)
         if (return_home_task_handle) { vTaskDelete(return_home_task_handle); return_home_task_handle = NULL; }
         mav_kill();
         drone_state = DRONE_KILLED;
-        state_dirty = true;
+        publish_state_now();
 
     } else {
         ESP_LOGW(TAG, "CMD: unknown '%s'", buf);
@@ -1045,18 +1087,18 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         ESP_LOGW(TAG, "Vision pose timeout");
     }
 
-    /* Publish state on change, and every 2 s regardless so late subscribers
-     * (rqt opened after drone boot) see the current state within 2 seconds.
-     * Must be < GCS DRONE_OFFLINE_TIMEOUT_S (3 s) to avoid false OFFLINE. */
+    /* Publish state every 2 s so late subscribers (rqt opened after drone boot)
+     * see the current state within 2 seconds.  State transitions are now
+     * published immediately via publish_state_now() in command_callback, so
+     * state_dirty is cleared there; the periodic re-publish here keeps rqt in
+     * sync and must be < GCS DRONE_OFFLINE_TIMEOUT_S (3 s). */
     static uint32_t state_tick = 0;
-    bool state_changed = state_dirty;
     if (state_dirty || (++state_tick >= 20)) {
         state_dirty = false;
         state_tick  = 0;
         const char *s = state_names[(int)drone_state];
         rosidl_runtime_c__String__assign(&state_pub_msg.data, s);
         RCSOFTCHECK(rcl_publish(&publisher_state, &state_pub_msg, NULL));
-        if (state_changed) ESP_LOGI(TAG, "State → %s", s);
     }
 
     /* Publish battery every 5 s (50 × 100 ms ticks) */
@@ -1131,6 +1173,17 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         }
     }
 
+    /* Update drone disc from PX4 LOCAL_POSITION_NED when ArUco vision is off.
+     * Displacement is computed relative to the PX4 home captured at ARM time
+     * and added to the drone's initial map position so the disc tracks real
+     * movement without requiring an absolute position reference. */
+    if (!vision_pose_valid && px4_pos_valid) {
+        float disp_x = map_home_x + (px4_pos_x - px4_home_x);
+        float disp_y = map_home_y + (px4_pos_y - px4_home_y);
+        float disp_z = map_home_z + (px4_pos_z - px4_home_z);
+        apply_pose_to_drone_markers(disp_x, disp_y, disp_z, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
     /* RViz markers — drone disc and label at 10 Hz */
     RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
     RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
@@ -1144,7 +1197,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
  * buffer (2 KB) decouples this task from the TX path so there is no locking.
  *
  * Currently handles:
- *   BATTERY_STATUS — stores battery_remaining_pct (0–100, -1=unknown)
+ *   BATTERY_STATUS      — stores battery_remaining_pct (0–100, -1=unknown)
+ *   LOCAL_POSITION_NED  — stores px4_pos_x/y/z (up-positive z) for RViz tracking
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static void mavlink_rx_task_fn(void *arg)
@@ -1165,6 +1219,14 @@ static void mavlink_rx_task_fn(void *arg)
                 mavlink_msg_battery_status_decode(&rx_msg, &bat);
                 battery_remaining_pct = bat.battery_remaining;
                 ESP_LOGD(TAG, "Battery: %d%%", (int)bat.battery_remaining);
+            } else if (rx_msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
+                mavlink_local_position_ned_t lpos;
+                mavlink_msg_local_position_ned_decode(&rx_msg, &lpos);
+                /* NED z is down (positive = down); negate to up-positive for RViz */
+                px4_pos_x = lpos.x;
+                px4_pos_y = lpos.y;
+                px4_pos_z = -lpos.z;
+                px4_pos_valid = true;
             }
         }
     }
@@ -1554,6 +1616,9 @@ void app_main(void)
     init_obstacle_label(&obstacle_labels[2], MARKER_ID_LEFT(DRONE_ID),  obs_ns[2]);
     init_obstacle_label(&obstacle_labels[3], MARKER_ID_FRONT(DRONE_ID), obs_ns[3]);
 
+    map_home_x = ix;
+    map_home_y = iy;
+    map_home_z = iz;
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
     update_obstacle_markers();
 

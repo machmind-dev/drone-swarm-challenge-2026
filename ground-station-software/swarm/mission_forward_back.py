@@ -1,39 +1,53 @@
 #!/usr/bin/env python3
 """
-mission_forward_back.py — L-loop flight path.
+mission_forward_back.py — L-loop flight path with interactive showcase modes.
 
 Usage:
     python3 mission_forward_back.py [DRONE_ID]   (default: 1)
 
-Sequence (executes once drone enters MISSION state):
+After the drone enters MISSION state the script pauses for an Enter press,
+then offers three execution modes:
+
+  1 — Auto      each step runs for DWELL_S seconds, advances automatically
+  2 — Fly       real-time keyboard control of the drone
+  3 — Loop      repeats full auto sequence until Ctrl-C
+
+Keyboard controls in Fly mode:
+  ↑ / W        forward  (in facing direction)
+  ↓ / S        backward
+  ← / A        strafe left
+  → / D        strafe right
+  Q            rotate left  90°
+  E            rotate right 90°
+  R / Page Up  climb   0.5 m
+  F / Page Dn  descend 0.5 m
+  H / Enter    return home
+  Esc / X      abort → return home
+
+Auto sequence (10 steps):
     0. Hold at home   — waits for Phase 3 climb to complete
-    1. Fly 1 m forward (facing North, +X)
-    2. Rotate -90° left (facing West, yaw=270°)
-    3. Fly 2 m forward (facing West, -Y)
+    1. Fly 1 m forward (North, +X)
+    2. Rotate -90° left (West, yaw=270°)
+    3. Fly 2 m forward (West, -Y)
     4. Climb to 3 m altitude
-    5. Rotate -90° left (facing South, yaw=180°)
-    6. Fly 1 m forward (facing South, -X)
-    7. Rotate -90° left (facing East, yaw=90°)
-    8. Fly 2 m forward (facing East, +Y) — returns over home XY
+    5. Rotate -90° left (South, yaw=180°)
+    6. Fly 1 m forward (South, -X)
+    7. Rotate -90° left (East, yaw=90°)
+    8. Fly 2 m forward (East, +Y) — returns over home XY
     9. Descend to 0.5 m altitude
-   10. Send COMMAND_RETURN_HOME
+   10. COMMAND_RETURN_HOME  (skipped in Loop mode — repeats instead)
 
 Publishes:
     /gcs/drone_{ID}/control   geometry_msgs/PoseStamped
-        position.x/y  — NED East/North (m) from PX4 local origin
-        position.z    — altitude, positive up (m)
-        orientation   — quaternion encoding yaw (x=0, y=0, z=sin(yaw/2), w=cos(yaw/2))
-                        yaw=0 → North, yaw=π → South (NED, clockwise positive)
-
     /gcs/drone_{ID}/command   std_msgs/String
-        COMMAND_RETURN_HOME
 
 Subscribes:
-    /drone_{ID}/state         std_msgs/String — waits for "mission"
+    /drone_{ID}/state         std_msgs/String
 """
 
 import math
 import sys
+import threading
 import time
 
 import rclpy
@@ -42,22 +56,29 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-DRONE_ID       = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+DRONE_ID        = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 CRUISE_ALT_M    = 1.5   # must match MISSION_TAKEOFF_ALT_M in firmware
-HIGH_ALT_M      = 3.0   # altitude for steps 4–8
-LOW_ALT_M       = 0.5   # altitude for step 9 before return home
-CLIMB_WAIT_S    = 6.0   # seconds to wait after MISSION detected (Phase 3 = 5 s)
-DWELL_S         = 5.0   # seconds to hold each waypoint before proceeding
-STATE_TIMEOUT_S = 120   # abort if drone doesn't enter mission within this time
+HIGH_ALT_M      = 3.0
+LOW_ALT_M       = 0.5
+CLIMB_WAIT_S    = 6.0
+DWELL_S         = 5.0
+
+STATE_TIMEOUT_S = 120
+
+# Fly-mode increments
+FLY_STEP_M      = 0.5   # metres per forward/back/strafe keypress
+FLY_ALT_STEP_M  = 0.5   # metres per climb/descend keypress
+FLY_ROT_DEG     = 90.0  # degrees per rotate keypress
+FLY_ALT_MIN_M   = 0.3   # safety floor
+FLY_ALT_MAX_M   = 3.0   # safety ceiling
 
 
-# ── Node ─────────────────────────────────────────────────────────────────────
+# ── Node ──────────────────────────────────────────────────────────────────────
 class MissionNode(Node):
 
     def __init__(self):
         super().__init__(f'swarm_mission_forward_back_d{DRONE_ID}')
         self.state = ''
-
         self._control_pub = self.create_publisher(
             PoseStamped, f'/gcs/drone_{DRONE_ID}/control', 10)
         self._command_pub = self.create_publisher(
@@ -70,14 +91,7 @@ class MissionNode(Node):
             self.get_logger().info(f'D{DRONE_ID} state → {msg.data}')
             self.state = msg.data
 
-    # ── Publishers ────────────────────────────────────────────────────────────
     def send_setpoint(self, x: float, y: float, z_up: float, yaw_deg: float = 0.0):
-        """Publish a position + yaw setpoint.
-
-        x, y   : NED frame (m), origin = PX4 home at arming
-        z_up   : altitude (m), positive up
-        yaw_deg: heading in degrees, 0 = North (+X), 90 = East (+Y), clockwise
-        """
         yaw_rad = math.radians(yaw_deg)
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -85,8 +99,6 @@ class MissionNode(Node):
         msg.pose.position.x = float(x)
         msg.pose.position.y = float(y)
         msg.pose.position.z = float(z_up)
-        msg.pose.orientation.x = 0.0
-        msg.pose.orientation.y = 0.0
         msg.pose.orientation.z = math.sin(yaw_rad / 2.0)
         msg.pose.orientation.w = math.cos(yaw_rad / 2.0)
         self._control_pub.publish(msg)
@@ -98,31 +110,68 @@ class MissionNode(Node):
         self.get_logger().info(f'CMD → {cmd}')
 
 
+# ── Raw keyboard reader ───────────────────────────────────────────────────────
+# Token constants
+K_FORWARD  = 'forward'
+K_BACKWARD = 'backward'
+K_LEFT     = 'left'
+K_RIGHT    = 'right'
+K_ROT_L    = 'rot_left'
+K_ROT_R    = 'rot_right'
+K_CLIMB    = 'climb'
+K_DESCEND  = 'descend'
+K_HOME     = 'home'
+K_ABORT    = 'abort'
+
+def _read_keys(queue: list, lock: threading.Lock, stop: threading.Event):
+    """Background thread: reads raw keypresses and appends tokens to queue."""
+    import tty as _tty, termios as _termios, select as _select
+    fd = sys.stdin.fileno()
+    old = _termios.tcgetattr(fd)
+    _tty.setraw(fd)
+    try:
+        while not stop.is_set():
+            if not _select.select([sys.stdin], [], [], 0.05)[0]:
+                continue
+            ch = sys.stdin.read(1)
+            token = None
+            if ch == '\x1b':
+                if _select.select([sys.stdin], [], [], 0.05)[0]:
+                    ch2 = sys.stdin.read(1)
+                    if ch2 == '[' and _select.select([sys.stdin], [], [], 0.05)[0]:
+                        ch3 = sys.stdin.read(1)
+                        token = {
+                            'A': K_FORWARD,
+                            'B': K_BACKWARD,
+                            'D': K_LEFT,
+                            'C': K_RIGHT,
+                            '5': K_CLIMB,
+                            '6': K_DESCEND,
+                        }.get(ch3, K_ABORT)
+                if token is None:
+                    token = K_ABORT
+            else:
+                token = {
+                    'w': K_FORWARD,  'W': K_FORWARD,
+                    's': K_BACKWARD, 'S': K_BACKWARD,
+                    'a': K_LEFT,     'A': K_LEFT,
+                    'd': K_RIGHT,    'D': K_RIGHT,
+                    'q': K_ROT_L,    'Q': K_ROT_L,
+                    'e': K_ROT_R,    'E': K_ROT_R,
+                    'r': K_CLIMB,    'R': K_CLIMB,
+                    'f': K_DESCEND,  'F': K_DESCEND,
+                    'h': K_HOME,     'H': K_HOME,
+                    '\r': K_HOME,
+                    'x': K_ABORT,    'X': K_ABORT,
+                }.get(ch)
+            if token is not None:
+                with lock:
+                    queue.append(token)
+    finally:
+        _termios.tcsetattr(fd, _termios.TCSADRAIN, old)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def spin_for(node: MissionNode, seconds: float):
-    """Spin the ROS executor for the given duration (no setpoint published)."""
-    t0 = time.monotonic()
-    while time.monotonic() - t0 < seconds:
-        rclpy.spin_once(node, timeout_sec=0.05)
-
-
-def dwell(node: MissionNode, x: float, y: float, z_up: float,
-          yaw_deg: float, seconds: float, label: str):
-    """Publish setpoint at 20 Hz for `seconds`, aborting if state leaves mission."""
-    node.get_logger().info(
-        f'{label}  →  ({x:.2f} m, {y:.2f} m, {z_up:.2f} m up, yaw={yaw_deg:.0f}°)'
-        f'  for {seconds:.1f} s'
-    )
-    t0 = time.monotonic()
-    while time.monotonic() - t0 < seconds:
-        if node.state.lower() != 'mission':
-            node.get_logger().warn('State left mission — aborting flight path')
-            return False
-        node.send_setpoint(x, y, z_up, yaw_deg)
-        rclpy.spin_once(node, timeout_sec=0.05)
-    return True
-
-
 def wait_for_state(node: MissionNode, target: str, timeout_s: float) -> bool:
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout_s:
@@ -132,67 +181,151 @@ def wait_for_state(node: MissionNode, target: str, timeout_s: float) -> bool:
     return False
 
 
-# ── Mission ───────────────────────────────────────────────────────────────────
-def run_mission(node: MissionNode):
-    log = node.get_logger()
-
-    # Step 0 — wait for climb to complete
-    log.info(f'Climb wait: holding home for {CLIMB_WAIT_S:.0f} s ...')
+def step_auto(node: MissionNode, x, y, z, yaw, label, dwell=None) -> bool:
+    secs = dwell if dwell is not None else DWELL_S
+    node.get_logger().info(
+        f'{label}  →  ({x:.2f}, {y:.2f}, {z:.2f} m↑, {yaw:.0f}°)  [{secs:.0f} s]')
     t0 = time.monotonic()
-    while time.monotonic() - t0 < CLIMB_WAIT_S:
+    while time.monotonic() - t0 < secs:
         if node.state.lower() != 'mission':
-            log.warn('State left mission during climb wait — aborting')
-            return
-        node.send_setpoint(0.0, 0.0, CRUISE_ALT_M, 0.0)
+            node.get_logger().warn('State left mission — aborting')
+            return False
+        node.send_setpoint(x, y, z, yaw)
         rclpy.spin_once(node, timeout_sec=0.05)
+    return True
 
-    # Step 1 — fly 1 m forward (facing North, +X)
-    ok = dwell(node,  1.0,  0.0, CRUISE_ALT_M,   0.0, DWELL_S, 'Step 1 — Forward 1 m (North)')
-    if not ok:
+
+# ── Auto sequence ─────────────────────────────────────────────────────────────
+STEPS = [
+    ( 0.0,  0.0, CRUISE_ALT_M,   0.0, 'Step 0 — Hold home (climb wait)'),
+    ( 1.0,  0.0, CRUISE_ALT_M,   0.0, 'Step 1 — Forward 1 m (North)'),
+    ( 1.0,  0.0, CRUISE_ALT_M, 270.0, 'Step 2 — Rotate -90° (West)'),
+    ( 1.0, -2.0, CRUISE_ALT_M, 270.0, 'Step 3 — Forward 2 m (West)'),
+    ( 1.0, -2.0, HIGH_ALT_M,   270.0, 'Step 4 — Climb to 3 m'),
+    ( 1.0, -2.0, HIGH_ALT_M,   180.0, 'Step 5 — Rotate -90° (South)'),
+    ( 0.0, -2.0, HIGH_ALT_M,   180.0, 'Step 6 — Forward 1 m (South)'),
+    ( 0.0, -2.0, HIGH_ALT_M,    90.0, 'Step 7 — Rotate -90° (East)'),
+    ( 0.0,  0.0, HIGH_ALT_M,    90.0, 'Step 8 — Forward 2 m (East)'),
+    ( 0.0,  0.0, LOW_ALT_M,     90.0, 'Step 9 — Descend to 0.5 m'),
+]
+
+
+# ── Mode runners ──────────────────────────────────────────────────────────────
+def run_auto(node: MissionNode):
+    node.get_logger().info('Mode: AUTO')
+    for i, (x, y, z, yaw, label) in enumerate(STEPS):
+        dwell = CLIMB_WAIT_S if i == 0 else DWELL_S
+        if not step_auto(node, x, y, z, yaw, label, dwell=dwell):
+            return
+    node.get_logger().info('Sequence complete — sending COMMAND_RETURN_HOME')
+    node.send_command('COMMAND_RETURN_HOME')
+
+
+def run_fly(node: MissionNode):
+    """Real-time keyboard flight control."""
+    log = node.get_logger()
+    log.info('Mode: FLY — keyboard control')
+
+    # Wait for climb
+    print(f'\n  Waiting for climb ({CLIMB_WAIT_S:.0f} s) ...')
+    if not step_auto(node, 0.0, 0.0, CRUISE_ALT_M, 0.0,
+                     'Climb wait', dwell=CLIMB_WAIT_S):
         return
 
-    # Step 2 — rotate -90° left (now facing West, yaw=270°)
-    ok = dwell(node,  1.0,  0.0, CRUISE_ALT_M, 270.0, DWELL_S, 'Step 2 — Rotate -90° (West)')
-    if not ok:
-        return
+    # Position state (NED, yaw in degrees)
+    pos = [0.0, 0.0, CRUISE_ALT_M]   # x, y, z
+    yaw = 0.0
 
-    # Step 3 — fly 2 m forward (facing West, -Y)
-    ok = dwell(node,  1.0, -2.0, CRUISE_ALT_M, 270.0, DWELL_S, 'Step 3 — Forward 2 m (West)')
-    if not ok:
-        return
+    key_queue: list = []
+    lock = threading.Lock()
+    stop_event = threading.Event()
+    reader = threading.Thread(
+        target=_read_keys, args=(key_queue, lock, stop_event), daemon=True)
+    reader.start()
 
-    # Step 4 — climb to 3 m
-    ok = dwell(node,  1.0, -2.0, HIGH_ALT_M,   270.0, DWELL_S, 'Step 4 — Climb to 3 m')
-    if not ok:
-        return
+    def status():
+        yaw_label = {0: 'N', 45: 'NE', 90: 'E', 135: 'SE',
+                     180: 'S', 225: 'SW', 270: 'W', 315: 'NW'}.get(int(yaw) % 360, f'{yaw:.0f}°')
+        print(f'\r  pos ({pos[0]:+.1f}, {pos[1]:+.1f}, {pos[2]:.1f} m)  '
+              f'yaw {yaw_label:<3}  '
+              f'[W/S/A/D=move  Q/E=rotate  R/F=alt  H=home  X=abort]   ',
+              end='', flush=True)
 
-    # Step 5 — rotate -90° left (now facing South, yaw=180°)
-    ok = dwell(node,  1.0, -2.0, HIGH_ALT_M,   180.0, DWELL_S, 'Step 5 — Rotate -90° (South)')
-    if not ok:
-        return
+    print('\n  Keyboard flight active.\n')
+    print('    ↑/W  forward      ↓/S  backward     ←/A  strafe left   →/D  strafe right')
+    print('    Q    rotate left  E    rotate right  R    climb         F    descend')
+    print('    H / Enter  return home               X / Esc  abort\n')
 
-    # Step 6 — fly 1 m forward (facing South, -X)
-    ok = dwell(node,  0.0, -2.0, HIGH_ALT_M,   180.0, DWELL_S, 'Step 6 — Forward 1 m (South)')
-    if not ok:
-        return
+    try:
+        while True:
+            if node.state.lower() != 'mission':
+                log.warn('State left mission — exiting fly mode')
+                break
 
-    # Step 7 — rotate -90° left (now facing East, yaw=90°)
-    ok = dwell(node,  0.0, -2.0, HIGH_ALT_M,    90.0, DWELL_S, 'Step 7 — Rotate -90° (East)')
-    if not ok:
-        return
+            # Drain key queue
+            with lock:
+                tokens = list(key_queue)
+                key_queue.clear()
 
-    # Step 8 — fly 2 m forward (facing East, +Y) — returns over home XY
-    ok = dwell(node,  0.0,  0.0, HIGH_ALT_M,    90.0, DWELL_S, 'Step 8 — Forward 2 m (East)')
-    if not ok:
-        return
+            done = False
+            for token in tokens:
+                yaw_rad = math.radians(yaw)
+                if token == K_FORWARD:
+                    pos[0] += FLY_STEP_M * math.cos(yaw_rad)
+                    pos[1] += FLY_STEP_M * math.sin(yaw_rad)
+                elif token == K_BACKWARD:
+                    pos[0] -= FLY_STEP_M * math.cos(yaw_rad)
+                    pos[1] -= FLY_STEP_M * math.sin(yaw_rad)
+                elif token == K_LEFT:
+                    # strafe left = 90° CCW from heading
+                    pos[0] += FLY_STEP_M * math.cos(yaw_rad - math.pi / 2)
+                    pos[1] += FLY_STEP_M * math.sin(yaw_rad - math.pi / 2)
+                elif token == K_RIGHT:
+                    pos[0] += FLY_STEP_M * math.cos(yaw_rad + math.pi / 2)
+                    pos[1] += FLY_STEP_M * math.sin(yaw_rad + math.pi / 2)
+                elif token == K_ROT_L:
+                    yaw = (yaw - FLY_ROT_DEG) % 360
+                elif token == K_ROT_R:
+                    yaw = (yaw + FLY_ROT_DEG) % 360
+                elif token == K_CLIMB:
+                    pos[2] = min(pos[2] + FLY_ALT_STEP_M, FLY_ALT_MAX_M)
+                elif token == K_DESCEND:
+                    pos[2] = max(pos[2] - FLY_ALT_STEP_M, FLY_ALT_MIN_M)
+                elif token in (K_HOME, K_ABORT):
+                    done = True
+                    break
 
-    # Step 9 — descend to 0.5 m
-    ok = dwell(node,  0.0,  0.0, LOW_ALT_M,     90.0, DWELL_S, 'Step 9 — Descend to 0.5 m')
-    if not ok:
-        return
+            status()
+            node.send_setpoint(pos[0], pos[1], pos[2], yaw)
+            rclpy.spin_once(node, timeout_sec=0.05)
 
-    # Done — return home
-    log.info('Flight path complete — sending COMMAND_RETURN_HOME')
+            if done:
+                break
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_event.set()
+        print()
+
+    log.info('Fly mode ended — sending COMMAND_RETURN_HOME')
+    node.send_command('COMMAND_RETURN_HOME')
+
+
+def run_loop(node: MissionNode):
+    node.get_logger().info('Mode: LOOP — repeating until Ctrl-C')
+    lap = 1
+    try:
+        while True:
+            node.get_logger().info(f'--- Lap {lap} ---')
+            for i, (x, y, z, yaw, label) in enumerate(STEPS):
+                dwell = CLIMB_WAIT_S if i == 0 else DWELL_S
+                if not step_auto(node, x, y, z, yaw, label, dwell=dwell):
+                    return
+            lap += 1
+    except KeyboardInterrupt:
+        pass
+    node.get_logger().info('Loop stopped — sending COMMAND_RETURN_HOME')
     node.send_command('COMMAND_RETURN_HOME')
 
 
@@ -202,9 +335,11 @@ def main():
     node = MissionNode()
     log = node.get_logger()
 
-    log.info(f'Mach Mind — forward/back mission  (drone {DRONE_ID})')
-    log.info(f'Waiting up to {STATE_TIMEOUT_S} s for D{DRONE_ID} to enter MISSION state...')
-    log.info('(ARM the drone and press MISSION in rqt to start)')
+    print()
+    print(f'  Mach Mind — mission script  (drone {DRONE_ID})')
+    print(f'  Waiting up to {STATE_TIMEOUT_S} s for D{DRONE_ID} to enter MISSION state...')
+    print('  (ARM the drone and press MISSION in rqt to start)')
+    print()
 
     if not wait_for_state(node, 'mission', STATE_TIMEOUT_S):
         log.error(f'Timed out — D{DRONE_ID} never entered mission state. Exiting.')
@@ -212,7 +347,26 @@ def main():
         rclpy.shutdown()
         sys.exit(1)
 
-    run_mission(node)
+    print()
+    print(f'  D{DRONE_ID} is in MISSION state.')
+    input('  Press ENTER to begin... ')
+    print()
+
+    print('  Select flight mode:')
+    print('    1 — Auto      (L-loop, each step 5 s)')
+    print('    2 — Fly       (real-time keyboard control)')
+    print('    3 — Loop      (repeat auto sequence until Ctrl-C)')
+    print()
+
+    while True:
+        choice = input('  Enter choice [1/2/3]: ').strip()
+        if choice in ('1', '2', '3'):
+            break
+        print('  Please enter 1, 2, or 3.')
+
+    print()
+
+    {'1': run_auto, '2': run_fly, '3': run_loop}[choice](node)
 
     node.destroy_node()
     rclpy.shutdown()

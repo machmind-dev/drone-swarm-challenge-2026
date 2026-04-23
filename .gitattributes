@@ -1,6 +1,5 @@
 # Git LFS — large binary files
 # Run `git lfs install` once after cloning to activate.
-
 # Images
 *.jpg  filter=lfs diff=lfs merge=lfs -text
 *.jpeg filter=lfs diff=lfs merge=lfs -text
@@ -9,13 +8,11 @@
 *.bmp  filter=lfs diff=lfs merge=lfs -text
 *.tiff filter=lfs diff=lfs merge=lfs -text
 *.webp filter=lfs diff=lfs merge=lfs -text
-
 # Video
 *.mp4  filter=lfs diff=lfs merge=lfs -text
 *.avi  filter=lfs diff=lfs merge=lfs -text
 *.mov  filter=lfs diff=lfs merge=lfs -text
 *.mkv  filter=lfs diff=lfs merge=lfs -text
-
 # CAD / 3D
 *.stl   filter=lfs diff=lfs merge=lfs -text
 *.step  filter=lfs diff=lfs merge=lfs -text
