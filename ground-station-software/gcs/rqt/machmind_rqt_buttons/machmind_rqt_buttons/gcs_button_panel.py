@@ -24,6 +24,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     EMERGENCY_HOLD_SECONDS = 3
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
+    VERSION = "1.3.1"
 
     def __init__(self, context):
         super().__init__(context)
@@ -116,6 +117,14 @@ class GcsButtonPanel(Plugin):
         main_layout.addWidget(self._build_drones_group())
         main_layout.addWidget(self._build_scene_management())
 
+        version_row = QHBoxLayout()
+        version_row.setContentsMargins(0, 2, 2, 0)
+        version_row.addStretch()
+        version_label = QLabel(f"v{self.VERSION}")
+        version_label.setStyleSheet("color: #ffffff; font-size: 8px;")
+        version_row.addWidget(version_label)
+        main_layout.addLayout(version_row)
+
         self._widget.setLayout(main_layout)
 
         # Hardware button override — subscribe after widget is built so button refs exist
@@ -131,6 +140,8 @@ class GcsButtonPanel(Plugin):
         self.node.create_subscription(String, "/gcs/hw_emerg_state",   self._hw_emerg_callback,   hw_qos)
 
         context.add_widget(self._widget)
+        self._widget.raise_()
+        self._widget.activateWindow()
 
         self.timer = QTimer()
         self.timer.timeout.connect(lambda: rclpy.spin_once(self.node, timeout_sec=0))
@@ -733,19 +744,20 @@ class GcsButtonPanel(Plugin):
             else:
                 ready.append(i)
 
-        if pending_ms > 0 and not ready:
+        for drone_id in ready:
+            self._publish(drone_id, "COMMAND_MISSION_START")
+
+        if pending_ms > 0:
+            # Some drones still within ARM guard — retry for them regardless of whether
+            # other drones were already sent (previously they were silently dropped).
             retry_ms = int(pending_ms) + 10
             self.node.get_logger().info(f"ARM guard active, retrying MISSION ALL in {retry_ms} ms")
             QTimer.singleShot(retry_ms, self._mission_all)
-            return
-
-        if ready:
-            for drone_id in ready:
-                self._publish(drone_id, "COMMAND_MISSION_START")
-            self.mission_all_btn.setText("MISSION STARTING (SW)")
-        else:
+        elif not ready:
             self.mission_all_btn.setChecked(False)
             self.mission_all_btn.setText("MISSION ALL")
+        else:
+            self.mission_all_btn.setText("MISSION STARTING (SW)")
 
     def _kill_all(self):
         for drone_id in range(1, self.DRONE_COUNT + 1):
@@ -886,7 +898,7 @@ class GcsButtonPanel(Plugin):
             # Lock per-drone ARM buttons while hardware holds ARM to prevent accidental DISARM
             if drone_id in self.ui_refs:
                 self.ui_refs[drone_id]["arm"].setEnabled(not hw_armed)
-        ARMED_STATES = {"armed", "mission", "landing"}
+        ARMED_STATES = {"armed", "mission", "returning_home", "landing"}
         any_active = any(s in ARMED_STATES for s in self.drone_states.values())
         if any_active:
             self.arm_all_btn.setText("ARMED (ACTIVE)")
