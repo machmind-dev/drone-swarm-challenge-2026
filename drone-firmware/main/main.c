@@ -1492,16 +1492,25 @@ void app_main(void)
 {
   printf("app_main started\r\n"); fflush(stdout);
 
-    /* Camera DMA ring buffer (30 KB, must be contiguous in internal DRAM) must
-     * be allocated before WiFi initialises.  WiFi static TX/RX buffers fragment
-     * the DRAM heap and leave the largest free block smaller than what the
-     * camera driver needs.  Initialising the camera first guarantees the block
-     * is available from the fresh, unfragmented heap.
+    /* WiFi must be initialised BEFORE the camera.
      *
-     * camera_config is a static const global; no runtime dependencies exist
-     * before this point.  SCCB uses its own I2C port (port 0, pins 40/39),
-     * independent of the VL53/MAVLink I2C initialised later.
+     * SPIRAM_MALLOC_RESERVE_INTERNAL carves a 32 KB DMA-capable pool from
+     * internal SRAM at boot.  WiFi static RX buffers (6 × 1 600 B = 9 600 B)
+     * are allocated from this pool during esp_wifi_init(), leaving 22 KB.
+     * The camera DMA ring (30 720 B) does not fit in the remaining 22 KB, so
+     * the allocator falls back to the main DRAM heap (~74 KB, unfragmented at
+     * this point) and succeeds.
+     *
+     * With the old camera-first order, camera consumed 94 % of the 32 KB pool,
+     * leaving < 2 KB — too little for any WiFi RX buffer allocation.
      */
+#if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
+    ESP_ERROR_CHECK(uros_network_interface_initialize());
+    set_device_hostname_from_drone_id();
+    ESP_ERROR_CHECK(set_preferred_ip_from_drone_id());
+    print_current_ip_info();
+#endif
+
     if (esp_camera_init(&camera_config) != ESP_OK) {
         ESP_LOGE(TAG, "Camera init failed — ArUco and streaming disabled");
         camera_hw_ok = false;
@@ -1545,18 +1554,9 @@ void app_main(void)
                      camera_sw_rotate ? "OV3660" : "OV2640",
                      camera_sw_rotate ? "software" : "hardware flip");
         }
-        /* Camera hardware ready — ArUco will start after WiFi.
-         * Image streaming (camera_streaming) stays false until GCS sends
-         * CONFIG_CAMERA_ENABLE, keeping micro-ROS bandwidth free by default. */
+        /* Camera hardware ready — ArUco will start after micro-ROS connects. */
         camera_hw_ok = true;
     }
-
-#if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
-    ESP_ERROR_CHECK(uros_network_interface_initialize());
-    set_device_hostname_from_drone_id();
-    ESP_ERROR_CHECK(set_preferred_ip_from_drone_id());
-    print_current_ip_info();
-#endif
 
     /* Build per-drone topic strings */
     snprintf(drone_ns,           sizeof(drone_ns),           "drone_%d",                   DRONE_ID);
@@ -1595,7 +1595,7 @@ void app_main(void)
 
     i2c_init();
     uart_mavlink_init();
-    xTaskCreate(mavlink_rx_task_fn, "mav_rx", 2048, NULL, 4, NULL);
+    xTaskCreate(mavlink_rx_task_fn, "mav_rx", 4096, NULL, 4, NULL);
     VL53L1X_InitSensorArray(tof_array, sensor_count);
 
     const esp_timer_create_args_t tof_timer_args = {

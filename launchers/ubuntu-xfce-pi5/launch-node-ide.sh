@@ -1,16 +1,18 @@
 #!/bin/bash
 
 if [ -z "$MACHMIND_NODE_DEV_TERMINAL" ]; then
-    export MACHMIND_NODE_DEV_TERMINAL=1
     export NO_AT_BRIDGE=1
+    SCRIPT_ABS="$(readlink -f "$0")"
 
     if command -v xfce4-terminal >/dev/null 2>&1; then
-        exec xfce4-terminal --title="Mach Mind Node Development" --hold --command="bash '$0'"
+        exec xfce4-terminal --title="Mach Mind Node Development" \
+            -e "bash -c 'export MACHMIND_NODE_DEV_TERMINAL=1 NO_AT_BRIDGE=1; bash \"$SCRIPT_ABS\"; exec bash'"
     fi
 fi
 
 clear
 export NO_AT_BRIDGE=1
+trap 'rc=$?; echo ""; read -rp "[Exited with code $rc. Press Enter to close] " _' EXIT
 
 TEAL=$'\033[38;2;51;117;110m'
 WHITE=$'\033[38;2;220;220;220m'
@@ -35,7 +37,7 @@ echo ""
 echo "[INFO] Initializing micro-ROS environment ..."
 sleep 1
 
-PROJECT_DIR="$HOME/esp32s3-microros"
+PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-firmware"
 COMPOSE_FILE="docker/docker-compose.yml"
 SERVICE_NAME="esp32s3_camera"
 
@@ -66,11 +68,11 @@ fi
 if [ "${REBUILD:-0}" = "1" ]; then
     echo "[INFO] Building docker container ..."
     sleep 1
-    sudo docker compose -f "$COMPOSE_FILE" up -d --build
+    docker compose -f "$COMPOSE_FILE" up -d --build
 else
     echo "[INFO] Starting existing docker container ..."
     sleep 1
-    sudo docker compose -f "$COMPOSE_FILE" up -d
+    docker compose -f "$COMPOSE_FILE" up -d
 fi
 
 if [ $? -ne 0 ]; then
@@ -81,7 +83,10 @@ fi
 echo "[INFO] Entering running container ..."
 sleep 1
 
-sudo docker compose -f "$COMPOSE_FILE" exec -it "$SERVICE_NAME" bash -ic '
+TTY_FLAG=""
+[ -t 1 ] && TTY_FLAG="-t"
+
+docker compose -f "$COMPOSE_FILE" exec -i $TTY_FLAG "$SERVICE_NAME" bash -ic '
 cd /code || exit 1
 
 if [ -f /opt/esp/idf/export.sh ]; then

@@ -27,6 +27,12 @@ typedef struct {
 
 I2C_Master_t *I2C_Master = (I2C_Master_t *) NULL;
 
+/* Static buffer for I2C command links — eliminates heap allocation from the
+ * periodic ToF timer callback.  512 B covers the largest VL53L1X transaction
+ * (2 start + 3 write_byte + 1 read + 1 stop = ~8 nodes × ~20 B ≈ 180 B). */
+#define I2C_CMD_STATIC_BUF_BYTES 512
+static uint8_t s_i2c_cmd_buf[I2C_CMD_STATIC_BUF_BYTES];
+
 void i2c_scan()
 {
     printf("\r\nI2C device scan: ");
@@ -120,20 +126,21 @@ void i2c_upgrade( uint32_t upgrade_freq )
 
 bool i2c_start( uint8_t i2c_device_address, i2c_rw_t read_write )
 {
-    // be thread-safe
     if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) {
-        // I2C_MASTER was not processing a command, so start a new one
         I2C_Master->dev_address = i2c_device_address;
-        I2C_Master->cmd_handle = i2c_cmd_link_create();
+        I2C_Master->cmd_handle = i2c_cmd_link_create_static(s_i2c_cmd_buf, sizeof(s_i2c_cmd_buf));
+        if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) return false;
     }
     else if ( I2C_Master->dev_address != i2c_device_address ) {
-        // check for the case where a second thread is attempting to start a command on a second device
-        // while a first device is processing a command, and reject it
         return false;
-        // start() may legitimately be called multiple times, e.g. to write a command then read the result
     }
-    ESP_ERROR_CHECK( i2c_master_start( I2C_Master->cmd_handle ) );
-    ESP_ERROR_CHECK( i2c_master_write_byte( I2C_Master->cmd_handle, I2C_Master->dev_address | read_write, ACK_CHECK_EN ) );
+    if ( i2c_master_start(I2C_Master->cmd_handle) != ESP_OK ||
+         i2c_master_write_byte(I2C_Master->cmd_handle, I2C_Master->dev_address | read_write, ACK_CHECK_EN) != ESP_OK ) {
+        i2c_cmd_link_delete_static(I2C_Master->cmd_handle);
+        I2C_Master->cmd_handle = (i2c_cmd_handle_t) NULL;
+        I2C_Master->dev_address = I2C_NO_DEVICE;
+        return false;
+    }
     return true;
 }
 
@@ -171,9 +178,11 @@ size_t i2c_read( uint8_t *pByteBuffer, size_t NumByteToRead )
 
 esp_err_t i2c_transmit()
 {
-    ESP_ERROR_CHECK( i2c_master_stop( I2C_Master->cmd_handle ) );
-    esp_err_t i2c_error = i2c_master_cmd_begin(I2C_Master->port, I2C_Master->cmd_handle, 1000 / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete( I2C_Master->cmd_handle );
+    if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) return ESP_FAIL;
+    esp_err_t i2c_error = i2c_master_stop( I2C_Master->cmd_handle );
+    if ( i2c_error == ESP_OK )
+        i2c_error = i2c_master_cmd_begin(I2C_Master->port, I2C_Master->cmd_handle, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete_static( I2C_Master->cmd_handle );
     I2C_Master->dev_address = I2C_NO_DEVICE;
     I2C_Master->cmd_handle = (i2c_cmd_handle_t) NULL;
     return i2c_error;
