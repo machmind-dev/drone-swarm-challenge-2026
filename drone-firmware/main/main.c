@@ -109,12 +109,6 @@ static const char *TAG = "drone";
 #define MARKER_ID_TOP(id)      ((id)*100+11)
 #define MARKER_ID_LEFT(id)     ((id)*100+12)
 #define MARKER_ID_FRONT(id)    ((id)*100+13)
-#define MARKER_ID_WP_ARROW(id)      ((id)*100+20)
-#define MARKER_ID_WP_TEXT(id)       ((id)*100+21)
-#define MARKER_ID_TAKEOFF_ARROW(id) ((id)*100+30)
-#define MARKER_ID_TAKEOFF_TEXT(id)  ((id)*100+31)
-#define MARKER_ID_LAND_ARROW(id)    ((id)*100+32)
-#define MARKER_ID_LAND_TEXT(id)     ((id)*100+33)
 
 /* ── Network ───────────────────────────────────────────────────────────── */
 #define DRONE_IP_BASE_OCTET 100
@@ -135,7 +129,7 @@ static const char *TAG = "drone";
 #define PX4_MODE_OFFBOARD    0x00060000UL   /* onboard computer control */
 
 /* ── C2 watchdog ───────────────────────────────────────────────────────── */
-#define C2_PING_TIMEOUT_MS   500   /* per ping attempt */
+#define C2_PING_TIMEOUT_MS   100   /* per ping attempt */
 #define C2_PING_ATTEMPTS     2     /* attempts per check */
 #define C2_CHECK_INTERVAL_MS 1000  /* interval between checks */
 #define C2_FAIL_THRESHOLD    2     /* consecutive failures before ELAND */
@@ -518,18 +512,6 @@ static rcl_publisher_t    publisher_marker;
 static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 static rcl_publisher_t    publisher_battery;
-
-static visualization_msgs__msg__Marker   waypoint_arrow_msg;
-static visualization_msgs__msg__Marker   waypoint_label_msg;
-static geometry_msgs__msg__Point         wp_arrow_points[2];
-
-static visualization_msgs__msg__Marker   takeoff_arrow_msg;
-static visualization_msgs__msg__Marker   takeoff_label_msg;
-static geometry_msgs__msg__Point         takeoff_arrow_points[2];
-
-static visualization_msgs__msg__Marker   land_arrow_msg;
-static visualization_msgs__msg__Marker   land_label_msg;
-static geometry_msgs__msg__Point         land_arrow_points[2];
 
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
@@ -994,11 +976,6 @@ static void control_callback(const void *msg_in)
     setpoint_yaw = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
     setpoint_received = true;
 
-    /* Update waypoint arrow tip to new setpoint */
-    wp_arrow_points[1].x = setpoint_x;
-    wp_arrow_points[1].y = setpoint_y;
-    wp_arrow_points[1].z = setpoint_z;
-
     ESP_LOGI(TAG, "Setpoint: (%.2f, %.2f, %.2f up)", setpoint_x, setpoint_y, setpoint_z);
 
     /* In GCS OFFBOARD mode, forward immediately to PX4 */
@@ -1038,39 +1015,6 @@ static void vision_pose_callback(const void *msg_in)
         quat_to_euler(qx, qy, qz, qw, &roll, &pitch, &yaw);
         mav_send_vision_estimate(px, py, pz, roll, pitch, yaw);
     }
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
- * Phase-arrow helpers — publish or delete an arrow + midpoint label pair
- * ══════════════════════════════════════════════════════════════════════════ */
-
-static void publish_phase_arrow(
-    visualization_msgs__msg__Marker *arrow,
-    visualization_msgs__msg__Marker *label,
-    float tail_x, float tail_y, float tail_z,
-    float tip_x,  float tip_y,  float tip_z,
-    float label_z_offset)
-{
-    geometry_msgs__msg__Point *pts = arrow->points.data;
-    pts[0].x = tail_x; pts[0].y = tail_y; pts[0].z = tail_z;
-    pts[1].x = tip_x;  pts[1].y = tip_y;  pts[1].z = tip_z;
-    label->pose.position.x = (tail_x + tip_x) * 0.5f;
-    label->pose.position.y = (tail_y + tip_y) * 0.5f;
-    label->pose.position.z = (tail_z + tip_z) * 0.5f + label_z_offset;
-    arrow->action = visualization_msgs__msg__Marker__ADD;
-    label->action = visualization_msgs__msg__Marker__ADD;
-    RCSOFTCHECK(rcl_publish(&publisher_marker, arrow, NULL));
-    RCSOFTCHECK(rcl_publish(&publisher_marker, label, NULL));
-}
-
-static void hide_phase_arrow(
-    visualization_msgs__msg__Marker *arrow,
-    visualization_msgs__msg__Marker *label)
-{
-    arrow->action = visualization_msgs__msg__Marker__DELETE;
-    label->action = visualization_msgs__msg__Marker__DELETE;
-    RCSOFTCHECK(rcl_publish(&publisher_marker, arrow, NULL));
-    RCSOFTCHECK(rcl_publish(&publisher_marker, label, NULL));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1190,50 +1134,6 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     /* RViz markers — drone disc and label at 10 Hz */
     RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
     RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
-
-    /* ── Phase arrows: takeoff / waypoint / landing ─────────────────────── */
-    static bool takeoff_arrow_visible = false;
-    static bool wp_arrow_visible      = false;
-    static bool land_arrow_visible    = false;
-
-    float takeoff_tip_z = home_z + MISSION_TAKEOFF_ALT_M;
-
-    /* Takeoff arrow (green) — all of DRONE_MISSION phase (shrinks while climbing) */
-    bool show_takeoff = (drone_state == DRONE_MISSION);
-    if (show_takeoff) {
-        publish_phase_arrow(&takeoff_arrow_msg, &takeoff_label_msg,
-                            vp_x, vp_y, vp_z,
-                            home_x, home_y, takeoff_tip_z, 0.0f);
-        takeoff_arrow_visible = true;
-    } else if (takeoff_arrow_visible) {
-        hide_phase_arrow(&takeoff_arrow_msg, &takeoff_label_msg);
-        takeoff_arrow_visible = false;
-    }
-
-    /* Waypoint arrow (amber) — DRONE_MISSION with a known setpoint */
-    bool show_wp = setpoint_received && (drone_state == DRONE_MISSION);
-    if (show_wp) {
-        publish_phase_arrow(&waypoint_arrow_msg, &waypoint_label_msg,
-                            vp_x, vp_y, vp_z,
-                            setpoint_x, setpoint_y, setpoint_z,
-                            DRONE_ID * 0.15f);   /* Z stagger prevents label overlap */
-        wp_arrow_visible = true;
-    } else if (wp_arrow_visible) {
-        hide_phase_arrow(&waypoint_arrow_msg, &waypoint_label_msg);
-        wp_arrow_visible = false;
-    }
-
-    /* Landing arrow (orange) — DRONE_LANDING covers NAV_LAND, ELAND, and C2 loss */
-    bool show_land = (drone_state == DRONE_LANDING);
-    if (show_land) {
-        publish_phase_arrow(&land_arrow_msg, &land_label_msg,
-                            vp_x, vp_y, vp_z,
-                            vp_x, vp_y, home_z, 0.0f);
-        land_arrow_visible = true;
-    } else if (land_arrow_visible) {
-        hide_phase_arrow(&land_arrow_msg, &land_label_msg);
-        land_arrow_visible = false;
-    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1656,110 +1556,6 @@ void app_main(void)
 
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
     update_obstacle_markers();
-
-    /* Waypoint arrow marker (2-point ARROW: tail = drone, tip = setpoint) */
-    visualization_msgs__msg__Marker__init(&waypoint_arrow_msg);
-    rosidl_runtime_c__String__assign(&waypoint_arrow_msg.header.frame_id, "map");
-    rosidl_runtime_c__String__assign(&waypoint_arrow_msg.ns, drone_ns);
-    waypoint_arrow_msg.id                = MARKER_ID_WP_ARROW(DRONE_ID);
-    waypoint_arrow_msg.type              = visualization_msgs__msg__Marker__ARROW;
-    waypoint_arrow_msg.action            = visualization_msgs__msg__Marker__ADD;
-    waypoint_arrow_msg.pose.orientation.w = 1.0f;
-    waypoint_arrow_msg.scale.x           = 0.02f;   /* shaft diameter */
-    waypoint_arrow_msg.scale.y           = 0.05f;   /* arrowhead diameter */
-    waypoint_arrow_msg.scale.z           = 0.0f;    /* auto arrowhead length */
-    waypoint_arrow_msg.color.r           = 1.0f;
-    waypoint_arrow_msg.color.g           = 0.8f;
-    waypoint_arrow_msg.color.b           = 0.0f;
-    waypoint_arrow_msg.color.a           = 0.9f;
-    waypoint_arrow_msg.points.data       = wp_arrow_points;
-    waypoint_arrow_msg.points.size       = 2;
-    waypoint_arrow_msg.points.capacity   = 2;
-
-    /* Waypoint label marker (midpoint + per-drone Z stagger) */
-    visualization_msgs__msg__Marker__init(&waypoint_label_msg);
-    rosidl_runtime_c__String__assign(&waypoint_label_msg.header.frame_id, "map");
-    rosidl_runtime_c__String__assign(&waypoint_label_msg.ns, drone_ns);
-    waypoint_label_msg.id                = MARKER_ID_WP_TEXT(DRONE_ID);
-    waypoint_label_msg.type              = visualization_msgs__msg__Marker__TEXT_VIEW_FACING;
-    waypoint_label_msg.action            = visualization_msgs__msg__Marker__ADD;
-    waypoint_label_msg.pose.orientation.w = 1.0f;
-    waypoint_label_msg.scale.z           = 0.12f;
-    waypoint_label_msg.color.r           = 1.0f;
-    waypoint_label_msg.color.g           = 0.8f;
-    waypoint_label_msg.color.b           = 0.0f;
-    waypoint_label_msg.color.a           = 1.0f;
-    char wp_label[16];
-    snprintf(wp_label, sizeof(wp_label), "D%d WP", DRONE_ID);
-    rosidl_runtime_c__String__assign(&waypoint_label_msg.text, wp_label);
-
-    /* Takeoff arrow marker (green — visible while climbing) */
-    visualization_msgs__msg__Marker__init(&takeoff_arrow_msg);
-    rosidl_runtime_c__String__assign(&takeoff_arrow_msg.header.frame_id, "map");
-    rosidl_runtime_c__String__assign(&takeoff_arrow_msg.ns, drone_ns);
-    takeoff_arrow_msg.id                = MARKER_ID_TAKEOFF_ARROW(DRONE_ID);
-    takeoff_arrow_msg.type              = visualization_msgs__msg__Marker__ARROW;
-    takeoff_arrow_msg.action            = visualization_msgs__msg__Marker__ADD;
-    takeoff_arrow_msg.pose.orientation.w = 1.0f;
-    takeoff_arrow_msg.scale.x           = 0.02f;
-    takeoff_arrow_msg.scale.y           = 0.05f;
-    takeoff_arrow_msg.scale.z           = 0.0f;
-    takeoff_arrow_msg.color.r           = 0.2f;
-    takeoff_arrow_msg.color.g           = 0.9f;
-    takeoff_arrow_msg.color.b           = 0.2f;
-    takeoff_arrow_msg.color.a           = 0.9f;
-    takeoff_arrow_msg.points.data       = takeoff_arrow_points;
-    takeoff_arrow_msg.points.size       = 2;
-    takeoff_arrow_msg.points.capacity   = 2;
-
-    /* Takeoff label marker */
-    visualization_msgs__msg__Marker__init(&takeoff_label_msg);
-    rosidl_runtime_c__String__assign(&takeoff_label_msg.header.frame_id, "map");
-    rosidl_runtime_c__String__assign(&takeoff_label_msg.ns, drone_ns);
-    takeoff_label_msg.id                = MARKER_ID_TAKEOFF_TEXT(DRONE_ID);
-    takeoff_label_msg.type              = visualization_msgs__msg__Marker__TEXT_VIEW_FACING;
-    takeoff_label_msg.action            = visualization_msgs__msg__Marker__ADD;
-    takeoff_label_msg.pose.orientation.w = 1.0f;
-    takeoff_label_msg.scale.z           = 0.12f;
-    takeoff_label_msg.color.r           = 0.2f;
-    takeoff_label_msg.color.g           = 0.9f;
-    takeoff_label_msg.color.b           = 0.2f;
-    takeoff_label_msg.color.a           = 1.0f;
-    rosidl_runtime_c__String__assign(&takeoff_label_msg.text, drone_label);
-
-    /* Landing arrow marker (orange — visible during DRONE_LANDING) */
-    visualization_msgs__msg__Marker__init(&land_arrow_msg);
-    rosidl_runtime_c__String__assign(&land_arrow_msg.header.frame_id, "map");
-    rosidl_runtime_c__String__assign(&land_arrow_msg.ns, drone_ns);
-    land_arrow_msg.id                = MARKER_ID_LAND_ARROW(DRONE_ID);
-    land_arrow_msg.type              = visualization_msgs__msg__Marker__ARROW;
-    land_arrow_msg.action            = visualization_msgs__msg__Marker__ADD;
-    land_arrow_msg.pose.orientation.w = 1.0f;
-    land_arrow_msg.scale.x           = 0.02f;
-    land_arrow_msg.scale.y           = 0.05f;
-    land_arrow_msg.scale.z           = 0.0f;
-    land_arrow_msg.color.r           = 1.0f;
-    land_arrow_msg.color.g           = 0.3f;
-    land_arrow_msg.color.b           = 0.0f;
-    land_arrow_msg.color.a           = 0.9f;
-    land_arrow_msg.points.data       = land_arrow_points;
-    land_arrow_msg.points.size       = 2;
-    land_arrow_msg.points.capacity   = 2;
-
-    /* Landing label marker */
-    visualization_msgs__msg__Marker__init(&land_label_msg);
-    rosidl_runtime_c__String__assign(&land_label_msg.header.frame_id, "map");
-    rosidl_runtime_c__String__assign(&land_label_msg.ns, drone_ns);
-    land_label_msg.id                = MARKER_ID_LAND_TEXT(DRONE_ID);
-    land_label_msg.type              = visualization_msgs__msg__Marker__TEXT_VIEW_FACING;
-    land_label_msg.action            = visualization_msgs__msg__Marker__ADD;
-    land_label_msg.pose.orientation.w = 1.0f;
-    land_label_msg.scale.z           = 0.12f;
-    land_label_msg.color.r           = 1.0f;
-    land_label_msg.color.g           = 0.3f;
-    land_label_msg.color.b           = 0.0f;
-    land_label_msg.color.a           = 1.0f;
-    rosidl_runtime_c__String__assign(&land_label_msg.text, drone_label);
 
     /* Start ArUco detection tasks now that WiFi has allocated its static
      * buffers.  Camera DMA was reserved early (before WiFi), but task stacks
