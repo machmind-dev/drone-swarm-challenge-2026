@@ -346,21 +346,16 @@ void aruco_pose_start(void)
         }
 
         if (ids.empty()) {
-            printf("\r\033[K--- %.0ffps", fps_now > 0 ? fps_now : 0.0f);
+            printf("\r\033[K---");
             fflush(stdout);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
-        /* ── Per-marker: distance + horizontal/vertical angles ───────────
-         * Uses single-marker solvePnP with IPPE_SQUARE (optimal for squares).
+        /* ── Per-marker: distance via single-marker solvePnP ─────────────
          * tvec in camera frame: X=right, Y=down, Z=forward.
+         * dist = Euclidean distance from camera to marker centre.
          * ─────────────────────────────────────────────────────────────── */
-        std::vector<cv::Point3f> obj_pts_world;
-        std::vector<cv::Point2f> img_pts_world;
-        int matched = 0;
-
-        /* Build marker substring: "M1:1.8m(-4/+13) M3:2.1m(+2/-3)" */
         static char mbuf[160];
         int mpos = 0;
 
@@ -375,56 +370,16 @@ void aruco_pose_start(void)
             float tx = (float)tvec_s.at<double>(0);
             float ty = (float)tvec_s.at<double>(1);
             float tz = (float)tvec_s.at<double>(2);
-            float dist  = sqrtf(tx*tx + ty*ty + tz*tz);
-            float h_deg = atan2f(tx,  tz) * 180.0f / (float)M_PI;
-            float v_deg = atan2f(-ty, tz) * 180.0f / (float)M_PI;
+            float dist = sqrtf(tx*tx + ty*ty + tz*tz);
 
-            const world_marker_t *wm = find_marker(mid);
             mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
-                             "M%d:%.1f(%+.0f/%+.0f) ",
-                             mid, dist, h_deg, v_deg);
-
-            /* Accumulate world points for multi-marker solvePnP */
-            if (wm) {
-                cv::Point3f wc[4];
-                marker_world_corners(wm, s, wc);
-                for (int j = 0; j < 4; j++) {
-                    obj_pts_world.push_back(wc[j]);
-                    img_pts_world.push_back(c[j]);
-                }
-                matched++;
-            }
+                             "M%d:%.2fm ", mid, dist);
         }
 
-        /* ── World pose via multi-marker solvePnP ────────────────────────
-         * solvePnP gives T_cam_world (world→camera).
-         * Invert → T_world_cam: camera (= drone) position in world frame.
-         * ─────────────────────────────────────────────────────────────── */
-        if (matched > 0) {
-            cv::Mat rvec, tvec;
-            bool ok = cv::solvePnP(obj_pts_world, img_pts_world,
-                                   K, D, rvec, tvec,
-                                   false, cv::SOLVEPNP_ITERATIVE);
-            if (ok) {
-                cv::Mat R;
-                cv::Rodrigues(rvec, R);
-                cv::Mat R_inv = R.t();
-                cv::Mat t_inv = -R_inv * tvec;
+        /* Trim trailing space */
+        if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
 
-                float wx = (float)t_inv.at<double>(0);
-                float wy = (float)t_inv.at<double>(1);
-                float wz = (float)t_inv.at<double>(2);
-                float qx, qy, qz, qw;
-                rot_to_quat(R_inv, &qx, &qy, &qz, &qw);
-
-                printf("\r\033[K%s> %.2f,%.2f,%.2f %.0ffps",
-                       mbuf, wx, wy, wz, fps_now > 0 ? fps_now : 0.0f);
-            } else {
-                printf("\r\033[K%s> ?pose", mbuf);
-            }
-        } else {
-            printf("\r\033[K%s> ?map", mbuf);
-        }
+        printf("\r\033[K%s", mbuf);
         fflush(stdout);
 
         /* Yield so IDLE1 can reset the task watchdog */
