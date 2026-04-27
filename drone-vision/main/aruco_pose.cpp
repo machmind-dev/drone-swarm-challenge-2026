@@ -234,8 +234,14 @@ void aruco_pose_start(void)
         sensor->set_contrast(sensor, 2);
         sensor->set_saturation(sensor, 0);
         if (sensor->id.PID == OV3660_PID) {
+            /* OV3660 ships with horizontal mirror on by default in esp32-camera.
+             * A mirrored ArUco marker has its bit pattern reversed — no rotation
+             * can recover it, so detectMarkers returns nothing.
+             * vflip=1 corrects the vertical orientation on M5Stack-style mounts. */
+            sensor->set_hmirror(sensor, 0);
+            sensor->set_vflip(sensor, 1);
             sensor->set_denoise(sensor, 0);
-            ESP_LOGI(TAG, "OV3660 — DNR off, sharpness=2");
+            ESP_LOGI(TAG, "OV3660 — hmirror=off vflip=on DNR=off sharpness=2");
         }
     }
 
@@ -263,16 +269,21 @@ void aruco_pose_start(void)
         { s, -s, 0.0f}, {-s, -s, 0.0f},
     };
 
-    /* ── ArUco detector (same tuning as vision_bench.cpp) ───────────────── */
+    /* ── ArUco detector — tuned for speed on QQVGA/QVGA ────────────────────
+     * adaptiveThreshWinSizeMax=7 (2 window sizes instead of 6) halves the
+     * adaptive threshold work, which dominates detection time at low res.
+     * minMarkerPerimeterRate=0.10 skips blobs smaller than 10% of image
+     * perimeter, cutting contour work on noise.
+     * ─────────────────────────────────────────────────────────────────── */
     auto dict = cv::aruco::getPredefinedDictionary(
         (cv::aruco::PredefinedDictionaryType)CONFIG_VISION_ARUCO_DICT);
     cv::aruco::DetectorParameters params;
-    params.minMarkerPerimeterRate      = 0.04f;
+    params.minMarkerPerimeterRate      = 0.10f;
     params.maxMarkerPerimeterRate      = 4.0f;
     params.polygonalApproxAccuracyRate = 0.08f;
     params.minCornerDistanceRate       = 0.02f;
     params.adaptiveThreshWinSizeMin    = 3;
-    params.adaptiveThreshWinSizeMax    = 23;
+    params.adaptiveThreshWinSizeMax    = 7;   /* was 23 — 2 sizes instead of 6 */
     params.adaptiveThreshWinSizeStep   = 4;
     params.errorCorrectionRate         = 0.6f;
     cv::aruco::ArucoDetector detector(dict, params);
@@ -288,6 +299,14 @@ void aruco_pose_start(void)
 
     /* ── Detection loop ─────────────────────────────────────────────────── */
     uint64_t frame_n = 0;
+    uint64_t t_fps_start = esp_timer_get_time();
+
+    /* Pre-allocate vectors outside loop to avoid per-frame heap alloc/free */
+    std::vector<int> ids;
+    std::vector<std::vector<cv::Point2f>> corners, rejected;
+    ids.reserve(8);
+    corners.reserve(8);
+    rejected.reserve(64);
 
     while (1) {
         camera_fb_t *fb = esp_camera_fb_get();
@@ -303,17 +322,25 @@ void aruco_pose_start(void)
         esp_camera_fb_return(fb);
         frame_n++;
 
+        uint64_t t0 = esp_timer_get_time();
         cv::Mat frame(POSE_H, POSE_W, CV_8UC1, pixels);
 
         /* ── Detect ─────────────────────────────────────────────────────── */
-        std::vector<int> ids;
-        std::vector<std::vector<cv::Point2f>> corners, rejected;
+        ids.clear();
+        corners.clear();
+        rejected.clear();
         detector.detectMarkers(frame, corners, ids, rejected);
 
         if (ids.empty()) {
-            /* Print a heartbeat every ~5 s so terminal shows it's alive */
-            if (frame_n % 30 == 0)
-                ESP_LOGI(TAG, "frame=%" PRIu64 "  no markers", frame_n);
+            /* Print heartbeat every 30 frames with FPS */
+            if (frame_n % 30 == 0) {
+                uint64_t now = esp_timer_get_time();
+                float fps = 30.0f * 1e6f / (float)(now - t_fps_start);
+                uint32_t det_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+                ESP_LOGI(TAG, "frame=%" PRIu64 "  no markers  %.1f FPS  det=%"PRIu32"ms",
+                         frame_n, fps, det_ms);
+                t_fps_start = now;
+            }
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }

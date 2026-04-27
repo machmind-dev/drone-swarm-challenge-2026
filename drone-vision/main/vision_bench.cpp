@@ -72,6 +72,12 @@
 static const char *TAG = "bench";
 
 /* ── Benchmark parameters ───────────────────────────────────────────────── */
+#ifndef CONFIG_VISION_BENCH_FRAMES
+#define CONFIG_VISION_BENCH_FRAMES  200   /* default if built in pose mode */
+#endif
+#ifndef CONFIG_VISION_MARKER_SIZE_CM
+#define CONFIG_VISION_MARKER_SIZE_CM 15   /* default if built in pose mode */
+#endif
 #define BENCH_FRAMES    CONFIG_VISION_BENCH_FRAMES
 #define ARUCO_DICT      ((cv::aruco::PredefinedDictionaryType)CONFIG_VISION_ARUCO_DICT)
 #define MARKER_SIZE_M   (CONFIG_VISION_MARKER_SIZE_CM / 100.0f)

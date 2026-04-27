@@ -29,6 +29,17 @@
 
 static const char *TAG = "main";
 
+/* Pose mode needs a large stack for cv::Mat / std::vector / solvePnP.
+ * 32 KB is comfortably above the ~12 KB used by the OpenCV pipeline. */
+#define POSE_TASK_STACK_KB  32
+
+static void pose_task(void *arg)
+{
+    (void)arg;
+    aruco_pose_start(); /* never returns */
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -39,7 +50,11 @@ void app_main(void)
 
 #if CONFIG_VISION_MODE_POSE
     ESP_LOGI(TAG, "Mach Mind — ESP32S3 ArUco Pose Estimator boot");
-    aruco_pose_start();   /* never returns */
+    xTaskCreatePinnedToCore(pose_task, "aruco_pose",
+                            POSE_TASK_STACK_KB * 1024,
+                            NULL, 5, NULL,
+                            1 /* CPU1 — keeps CPU0 free for logging */);
+    vTaskDelete(NULL); /* release the tiny main_task stack */
 #else
     ESP_LOGI(TAG, "Mach Mind — ESP32S3 Vision Benchmark boot");
     vision_bench_start(); /* never returns (restarts after each run) */

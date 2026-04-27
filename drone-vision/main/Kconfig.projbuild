@@ -56,7 +56,7 @@ menu "Drone Vision"
 
     choice VISION_POSE_RES
         bool "Capture resolution for pose mode"
-        default VISION_POSE_RES_QVGA
+        default VISION_POSE_RES_QQVGA
         depends on VISION_MODE_POSE
 
         config VISION_POSE_RES_QQVGA
