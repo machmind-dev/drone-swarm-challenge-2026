@@ -278,10 +278,11 @@ void aruco_pose_start(void)
     auto dict = cv::aruco::getPredefinedDictionary(
         (cv::aruco::PredefinedDictionaryType)CONFIG_VISION_ARUCO_DICT);
     cv::aruco::DetectorParameters params;
-    /* minMarkerPerimeterRate=0.35: at QQVGA (160px wide) this rejects blobs
-     * with perimeter < 56px (side < 14px), i.e. markers beyond ~5m for 50cm
-     * physical size. Eliminates most noise contours before any decode work. */
-    params.minMarkerPerimeterRate      = 0.35f;
+    /* minMarkerPerimeterRate=0.20: rejects blobs with perimeter < 32px
+     * (side < 8px), covering detection out to ~8m for 50cm markers at QQVGA.
+     * 0.35 was too tight — at 4m the margin against focal-length uncertainty
+     * was too small and markers were dropped. */
+    params.minMarkerPerimeterRate      = 0.20f;
     params.maxMarkerPerimeterRate      = 4.0f;
     params.polygonalApproxAccuracyRate = 0.08f;
     params.minCornerDistanceRate       = 0.02f;
