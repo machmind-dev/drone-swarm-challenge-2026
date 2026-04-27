@@ -1,10 +1,22 @@
-menu "Drone Vision Benchmark"
+menu "Drone Vision"
+
+    choice VISION_MODE
+        bool "Application mode"
+        default VISION_MODE_BENCH
+        help
+            BENCH: multi-resolution ArUco FPS sweep, prints table + CSV.
+            POSE:  continuous ArUco detection, world pose via solvePnP,
+                   prints dist/angles and x/y/z/quaternion to USB-serial.
+
+        config VISION_MODE_BENCH
+            bool "Benchmark (FPS sweep across all resolutions)"
+        config VISION_MODE_POSE
+            bool "Pose estimation (continuous ArUco world-pose)"
+    endchoice
 
     choice VISION_BOARD
-        bool "Target board"
+        bool "Target board / camera module"
         default VISION_BOARD_XIAO_ESP32S3
-        help
-            Select the camera board / module.
 
         config VISION_BOARD_XIAO_ESP32S3
             bool "XIAO ESP32S3 Sense (OV2640 / OV5640)"
@@ -12,38 +24,55 @@ menu "Drone Vision Benchmark"
             bool "M5Stack Timer Camera X / OV3660 breakout"
     endchoice
 
-    config VISION_BENCH_FRAMES
-        int "Frames per resolution stage"
-        default 200
-        range 50 2000
-        help
-            How many ArUco detection calls to run at each resolution
-            before advancing to the next stage.  Higher values give
-            a more stable FPS average at the cost of a longer run.
-
     config VISION_ARUCO_DICT
         int "ArUco dictionary (cv::aruco::PredefinedDictionaryType)"
         default 0
         range 0 20
         help
-            0 = DICT_4X4_50 (fastest, recommended for markers ≥ 30 px)
+            0 = DICT_4X4_50  (SDC26 regulation, recommended)
             1 = DICT_4X4_100
-            2 = DICT_4X4_250
             7 = DICT_5X5_50
-            17 = DICT_6X6_50
+
+    # ── Benchmark options ─────────────────────────────────────────────────────
+
+    config VISION_BENCH_FRAMES
+        int "Frames per resolution stage (bench mode)"
+        default 200
+        range 50 2000
+        depends on VISION_MODE_BENCH
 
     config VISION_MARKER_SIZE_CM
-        int "Physical ArUco marker side length (cm)"
+        int "Marker side length for bench solvePnP (cm)"
         default 15
         range 1 200
-        help
-            Used by solvePnP to compute the metric distance to the marker.
+        depends on VISION_MODE_BENCH
 
     config VISION_SHOW_POSE
-        bool "Print solvePnP pose for every detected frame"
+        bool "Print solvePnP pose per detected bench frame"
         default n
+        depends on VISION_MODE_BENCH
+
+    # ── Pose-mode options ─────────────────────────────────────────────────────
+
+    choice VISION_POSE_RES
+        bool "Capture resolution for pose mode"
+        default VISION_POSE_RES_QVGA
+        depends on VISION_MODE_POSE
+
+        config VISION_POSE_RES_QQVGA
+            bool "QQVGA 160x120  (fastest, lower accuracy)"
+        config VISION_POSE_RES_QVGA
+            bool "QVGA 320x240  (recommended)"
+        config VISION_POSE_RES_HVGA
+            bool "HVGA 480x320  (highest accuracy, slow PSRAM path)"
+    endchoice
+
+    config VISION_POSE_MARKER_SIZE_CM
+        int "Physical marker side length for pose mode (cm)"
+        default 50
+        range 1 200
+        depends on VISION_MODE_POSE
         help
-            Prints tvec / quaternion per detected frame.  Disable for
-            clean CSV-only benchmark output.
+            SDC26 regulation: 50 cm x 50 cm markers.
 
 endmenu
