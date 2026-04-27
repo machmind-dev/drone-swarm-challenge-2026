@@ -2,11 +2,11 @@ menu "Drone Vision"
 
     choice VISION_MODE
         bool "Application mode"
-        default VISION_MODE_BENCH
+        default VISION_MODE_POSE
         help
             BENCH: multi-resolution ArUco FPS sweep, prints table + CSV.
             POSE:  continuous ArUco detection, world pose via solvePnP,
-                   prints dist/angles and x/y/z/quaternion to USB-serial.
+                   single-line rolling status to USB-serial.
 
         config VISION_MODE_BENCH
             bool "Benchmark (FPS sweep across all resolutions)"
@@ -60,11 +60,11 @@ menu "Drone Vision"
         depends on VISION_MODE_POSE
 
         config VISION_POSE_RES_QQVGA
-            bool "QQVGA 160x120  (fastest, lower accuracy)"
+            bool "QQVGA 160x120  (fastest, fits in DRAM)"
         config VISION_POSE_RES_QVGA
-            bool "QVGA 320x240  (recommended)"
+            bool "QVGA 320x240  (higher accuracy, PSRAM path)"
         config VISION_POSE_RES_HVGA
-            bool "HVGA 480x320  (highest accuracy, slow PSRAM path)"
+            bool "HVGA 480x320  (highest accuracy, slow)"
     endchoice
 
     config VISION_POSE_MARKER_SIZE_CM

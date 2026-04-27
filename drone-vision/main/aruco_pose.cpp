@@ -331,22 +331,27 @@ void aruco_pose_start(void)
         rejected.clear();
         detector.detectMarkers(frame, corners, ids, rejected);
 
+        /* ── Rolling single-line status ─────────────────────────────────────
+         * \r returns to column 0; \033[K erases to end of line.
+         * No \n so every frame overwrites the previous line in the terminal.
+         * A static char buf avoids per-frame heap allocation.
+         * ─────────────────────────────────────────────────────────────── */
+
+        /* Update FPS counter every 30 frames */
+        float fps_now = 0.0f;
+        if (frame_n % 30 == 0) {
+            uint64_t now = esp_timer_get_time();
+            fps_now = 30.0f * 1e6f / (float)(now - t_fps_start + 1);
+            t_fps_start = now;
+        }
+
         if (ids.empty()) {
-            /* Print heartbeat every 30 frames with FPS */
-            if (frame_n % 30 == 0) {
-                uint64_t now = esp_timer_get_time();
-                float fps = 30.0f * 1e6f / (float)(now - t_fps_start);
-                uint32_t det_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
-                ESP_LOGI(TAG, "frame=%" PRIu64 "  no markers  %.1f FPS  det=%"PRIu32"ms",
-                         frame_n, fps, det_ms);
-                t_fps_start = now;
-            }
+            printf("\r\033[K[f=%" PRIu64 "] --- no markers ---  %.1f fps",
+                   frame_n, fps_now > 0 ? fps_now : 0.0f);
+            fflush(stdout);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
-
-        printf("\n");
-        ESP_LOGI(TAG, "frame=%" PRIu64 "  %d marker(s)", frame_n, (int)ids.size());
 
         /* ── Per-marker: distance + horizontal/vertical angles ───────────
          * Uses single-marker solvePnP with IPPE_SQUARE (optimal for squares).
@@ -355,6 +360,12 @@ void aruco_pose_start(void)
         std::vector<cv::Point3f> obj_pts_world;
         std::vector<cv::Point2f> img_pts_world;
         int matched = 0;
+
+        /* Build marker substring: "M1:1.83m(-4°/-13°) M3:2.10m(+2°/-3°)" */
+        static char mbuf[160];
+        int mpos = 0;
+        mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
+                         "[f=%" PRIu64 "] %dM: ", frame_n, (int)ids.size());
 
         for (int i = 0; i < (int)ids.size(); i++) {
             int mid = ids[i];
@@ -372,10 +383,10 @@ void aruco_pose_start(void)
             float v_deg = atan2f(-ty, tz) * 180.0f / (float)M_PI;
 
             const world_marker_t *wm = find_marker(mid);
-            printf("[aruco]  M%-2d [%-7s]  dist=%5.2fm  H=%+6.1fdeg  V=%+6.1fdeg\n",
-                   mid,
-                   wm ? "known" : "UNKNOWN",
-                   dist, h_deg, v_deg);
+            mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
+                             "M%d%s:%.2fm(%+.0f/%+.0f) ",
+                             mid, wm ? "" : "?",
+                             dist, h_deg, v_deg);
 
             /* Accumulate world points for multi-marker solvePnP */
             if (wm) {
@@ -392,7 +403,6 @@ void aruco_pose_start(void)
         /* ── World pose via multi-marker solvePnP ────────────────────────
          * solvePnP gives T_cam_world (world→camera).
          * Invert → T_world_cam: camera (= drone) position in world frame.
-         * Inversion of rigid-body transform: R_inv=R^T, t_inv=-R^T * t.
          * ─────────────────────────────────────────────────────────────── */
         if (matched > 0) {
             cv::Mat rvec, tvec;
@@ -411,18 +421,15 @@ void aruco_pose_start(void)
                 float qx, qy, qz, qw;
                 rot_to_quat(R_inv, &qx, &qy, &qz, &qw);
 
-                printf("[pose]   x=%7.3f  y=%7.3f  z=%7.3f  "
-                       "qw=%7.4f qx=%7.4f qy=%7.4f qz=%7.4f"
-                       "  (%d marker%s)\n",
-                       wx, wy, wz,
-                       qw, qx, qy, qz,
-                       matched, matched == 1 ? "" : "s");
+                printf("\r\033[K%s| x=%5.2f y=%5.2f z=%5.2f  %.1ffps",
+                       mbuf, wx, wy, wz, fps_now > 0 ? fps_now : 0.0f);
             } else {
-                printf("[pose]   solvePnP FAILED\n");
+                printf("\r\033[K%s| pose FAIL", mbuf);
             }
         } else {
-            printf("[aruco]  no known markers — world pose unavailable\n");
+            printf("\r\033[K%s| no known markers", mbuf);
         }
+        fflush(stdout);
 
         /* Yield so IDLE1 can reset the task watchdog */
         vTaskDelay(pdMS_TO_TICKS(10));

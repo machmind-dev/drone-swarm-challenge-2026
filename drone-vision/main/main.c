@@ -2,15 +2,9 @@
  *
  * Two modes, selected at build time via Kconfig → idf.py menuconfig:
  *
- *   BENCH (default)
- *     Multi-resolution ArUco FPS sweep.  Prints timing table + CSV over
- *     USB-Serial, then restarts automatically after 10 s.
- *
- *   POSE
- *     Continuous ArUco detection using the SDC26 arena marker map.
- *     Computes per-marker distance + H/V angles and, when ≥1 known marker
- *     is visible, solves for world pose (x, y, z + quaternion).
- *     Output: USB-Serial at 115200 baud.
+ *   BENCH  — multi-resolution ArUco FPS sweep, CSV output, auto-restart.
+ *   POSE   — continuous ArUco detection, single-line rolling status,
+ *             world pose (x/y/z) via solvePnP to USB-serial.
  *
  * Flash & monitor:
  *   docker compose exec esp32s3_vision bash
@@ -29,8 +23,7 @@
 
 static const char *TAG = "main";
 
-/* Pose mode needs a large stack for cv::Mat / std::vector / solvePnP.
- * 32 KB is comfortably above the ~12 KB used by the OpenCV pipeline. */
+/* Pose mode needs a large stack for cv::Mat / std::vector / solvePnP. */
 #define POSE_TASK_STACK_KB  32
 
 static void pose_task(void *arg)
@@ -53,10 +46,10 @@ void app_main(void)
     xTaskCreatePinnedToCore(pose_task, "aruco_pose",
                             POSE_TASK_STACK_KB * 1024,
                             NULL, 5, NULL,
-                            1 /* CPU1 — keeps CPU0 free for logging */);
-    vTaskDelete(NULL); /* release the tiny main_task stack */
+                            1 /* CPU1 */);
+    vTaskDelete(NULL);
 #else
     ESP_LOGI(TAG, "Mach Mind — ESP32S3 Vision Benchmark boot");
-    vision_bench_start(); /* never returns (restarts after each run) */
+    vision_bench_start(); /* never returns */
 #endif
 }
