@@ -299,8 +299,7 @@ void aruco_pose_start(void)
 
     /* ── Detection loop ─────────────────────────────────────────────────── */
     uint64_t frame_n = 0;
-    uint64_t t_fps_start = esp_timer_get_time();
-    float fps_last = 0.0f;   /* persists between updates */
+    uint64_t t_fps_start = esp_timer_get_time(); (void)t_fps_start;
 
     /* Pre-allocate vectors outside loop to avoid per-frame heap alloc/free */
     std::vector<int> ids;
@@ -338,16 +337,7 @@ void aruco_pose_start(void)
          * A static char buf avoids per-frame heap allocation.
          * ─────────────────────────────────────────────────────────────── */
 
-        /* Update FPS counter every 10 frames */
-        if (frame_n % 10 == 0 && frame_n > 0) {
-            uint64_t now = esp_timer_get_time();
-            fps_last = 10.0f * 1e6f / (float)(now - t_fps_start + 1);
-            t_fps_start = now;
-        }
-
         if (ids.empty()) {
-            printf("\r\033[K--- %.1ffps", fps_last);
-            fflush(stdout);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
@@ -379,7 +369,7 @@ void aruco_pose_start(void)
         /* Trim trailing space */
         if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
 
-        printf("\r\033[K%s  %.1ffps", mbuf, fps_last);
+        printf("%s\n", mbuf);
         fflush(stdout);
 
         /* Yield so IDLE1 can reset the task watchdog */
