@@ -1,0 +1,8 @@
+# extram_bss scheme — routes BSS/common to extern_ram (PSRAM).
+# Normally provided by esp_wifi/linker.lf; duplicated here for builds
+# that do not include WiFi (drone-vision benchmark).
+
+[scheme:extram_bss]
+entries:
+    bss -> extern_ram
+    common -> extern_ram

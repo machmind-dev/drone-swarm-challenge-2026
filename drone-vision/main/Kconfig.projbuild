@@ -1,0 +1,49 @@
+menu "Drone Vision Benchmark"
+
+    choice VISION_BOARD
+        bool "Target board"
+        default VISION_BOARD_XIAO_ESP32S3
+        help
+            Select the camera board / module.
+
+        config VISION_BOARD_XIAO_ESP32S3
+            bool "XIAO ESP32S3 Sense (OV2640 / OV5640)"
+        config VISION_BOARD_OV3660_DEVKIT
+            bool "M5Stack Timer Camera X / OV3660 breakout"
+    endchoice
+
+    config VISION_BENCH_FRAMES
+        int "Frames per resolution stage"
+        default 200
+        range 50 2000
+        help
+            How many ArUco detection calls to run at each resolution
+            before advancing to the next stage.  Higher values give
+            a more stable FPS average at the cost of a longer run.
+
+    config VISION_ARUCO_DICT
+        int "ArUco dictionary (cv::aruco::PredefinedDictionaryType)"
+        default 0
+        range 0 20
+        help
+            0 = DICT_4X4_50 (fastest, recommended for markers ≥ 30 px)
+            1 = DICT_4X4_100
+            2 = DICT_4X4_250
+            7 = DICT_5X5_50
+            17 = DICT_6X6_50
+
+    config VISION_MARKER_SIZE_CM
+        int "Physical ArUco marker side length (cm)"
+        default 15
+        range 1 200
+        help
+            Used by solvePnP to compute the metric distance to the marker.
+
+    config VISION_SHOW_POSE
+        bool "Print solvePnP pose for every detected frame"
+        default n
+        help
+            Prints tvec / quaternion per detected frame.  Disable for
+            clean CSV-only benchmark output.
+
+endmenu

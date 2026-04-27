@@ -1,0 +1,7 @@
+# Custom partition table for ESP32-S3 with 8MB flash.
+# Factory partition enlarged to 7MB to accommodate OpenCV firmware
+# compiled at -O0 (required to work around Xtensa GCC 11.2 ICE).
+# Name,   Type, SubType, Offset,   Size, Flags
+nvs,      data, nvs,     0x11000,  0x6000,
+phy_init, data, phy,     0x17000,  0x1000,
+factory,  app,  factory, 0x20000,  7M,
