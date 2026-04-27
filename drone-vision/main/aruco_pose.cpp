@@ -346,8 +346,7 @@ void aruco_pose_start(void)
         }
 
         if (ids.empty()) {
-            printf("\r\033[K[f=%" PRIu64 "] --- no markers ---  %.1f fps",
-                   frame_n, fps_now > 0 ? fps_now : 0.0f);
+            printf("\r\033[K--- %.0ffps", fps_now > 0 ? fps_now : 0.0f);
             fflush(stdout);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
@@ -361,11 +360,9 @@ void aruco_pose_start(void)
         std::vector<cv::Point2f> img_pts_world;
         int matched = 0;
 
-        /* Build marker substring: "M1:1.83m(-4°/-13°) M3:2.10m(+2°/-3°)" */
+        /* Build marker substring: "M1:1.8m(-4/+13) M3:2.1m(+2/-3)" */
         static char mbuf[160];
         int mpos = 0;
-        mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
-                         "[f=%" PRIu64 "] %dM: ", frame_n, (int)ids.size());
 
         for (int i = 0; i < (int)ids.size(); i++) {
             int mid = ids[i];
@@ -384,9 +381,8 @@ void aruco_pose_start(void)
 
             const world_marker_t *wm = find_marker(mid);
             mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
-                             "M%d%s:%.2fm(%+.0f/%+.0f) ",
-                             mid, wm ? "" : "?",
-                             dist, h_deg, v_deg);
+                             "M%d:%.1f(%+.0f/%+.0f) ",
+                             mid, dist, h_deg, v_deg);
 
             /* Accumulate world points for multi-marker solvePnP */
             if (wm) {
@@ -421,13 +417,13 @@ void aruco_pose_start(void)
                 float qx, qy, qz, qw;
                 rot_to_quat(R_inv, &qx, &qy, &qz, &qw);
 
-                printf("\r\033[K%s| x=%5.2f y=%5.2f z=%5.2f  %.1ffps",
+                printf("\r\033[K%s> %.2f,%.2f,%.2f %.0ffps",
                        mbuf, wx, wy, wz, fps_now > 0 ? fps_now : 0.0f);
             } else {
-                printf("\r\033[K%s| pose FAIL", mbuf);
+                printf("\r\033[K%s> ?pose", mbuf);
             }
         } else {
-            printf("\r\033[K%s| no known markers", mbuf);
+            printf("\r\033[K%s> ?map", mbuf);
         }
         fflush(stdout);
 
