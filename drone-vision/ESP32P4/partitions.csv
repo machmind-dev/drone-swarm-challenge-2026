@@ -1,0 +1,5 @@
+# Custom partition table for ESP32-P4 with 16 MB flash (Waveshare board).
+# Factory partition enlarged to 8 MB to accommodate OpenCV firmware.
+# Name,   Type, SubType, Offset,   Size, Flags
+nvs,      data, nvs,     0x11000,  0x6000,
+factory,  app,  factory, 0x20000,  8M,

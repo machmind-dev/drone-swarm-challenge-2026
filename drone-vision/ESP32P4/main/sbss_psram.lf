@@ -1,0 +1,70 @@
+# sbss_psram.lf — Route .bss/.sbss from OpenCV and toolchain libs to PSRAM.
+#
+# Background: OpenCV + ArUco pull in C++ locale and newlib stdio singletons
+# from libstdc++.a and libc.a. Those BSS sections total ~630 KB and exhaust
+# sram_low + sram_high (563 KB total), causing "--enable-non-contiguous-regions
+# discards section" linker errors.
+#
+# How ldgen handles pre-built archives (not in ldgen_libraries):
+#   When archive: foo.a is listed but foo.a is absent from ldgen_libraries,
+#   ldgen generates a FILENAME-WILDCARD pattern "*foo.a:(...)" in sections.ld
+#   rather than per-object patterns. This still matches the linker's archive
+#   path and routes all matching input sections to the target region.
+#
+# Requirement: CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y (sdkconfig.defaults)
+#   must be active so the sections.ld.in template generates the
+#   ".ext_ram.bss (NOLOAD) { mapping[extern_ram] } > ext_ram_seg" output
+#   section. Without it, extern_ram mappings have nowhere to land.
+#
+# RISC-V GP-relative relaxation: symbols in PSRAM that exceed the GP register
+# range fall back to auipc+addi (PC-relative) automatically — safe at runtime.
+
+[sections:sbss_bss_all]
+entries:
+    .sbss+
+    .bss+
+    .sdata+
+
+[scheme:sbss_to_extram]
+entries:
+    sbss_bss_all -> extern_ram
+
+[mapping:libstdcpp_extram]
+archive: libstdc++.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:libc_extram]
+archive: libc.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:opencv_core_extram]
+archive: libopencv_core.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:opencv_imgproc_extram]
+archive: libopencv_imgproc.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:opencv_objdetect_extram]
+archive: libopencv_objdetect.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:opencv_features2d_extram]
+archive: libopencv_features2d.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:opencv_calib3d_extram]
+archive: libopencv_calib3d.a
+entries:
+    * (sbss_to_extram)
+
+[mapping:opencv_flann_extram]
+archive: libopencv_flann.a
+entries:
+    * (sbss_to_extram)

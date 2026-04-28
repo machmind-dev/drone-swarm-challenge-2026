@@ -1,0 +1,47 @@
+services:
+  esp32p4_vision:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - LC_ALL=C
+    network_mode: "host"
+    privileged: true          # required for /dev/ttyACM0 access
+    tty: true
+    volumes:
+      - /dev:/dev
+      # Project source files from the ESP32P4 subfolder
+      - ../main:/code/main
+      - ../CMakeLists.txt:/code/CMakeLists.txt
+      - ../sdkconfig.defaults:/code/sdkconfig.defaults
+      - ../partitions.csv:/code/partitions.csv
+      # sdkconfig and managed_components are NOT bind-mounted.
+      # Both are written/deleted by idf.py at runtime; Docker bind-mount
+      # directories/files become OS mount-points that idf.py cannot rename
+      # or rmtree (EBUSY). They live in the container's writable layer —
+      # managed_components are re-fetched on first build after a fresh start.
+      #
+      # WARNING — bind-mount stale-inode trap:
+      # Docker file bind-mounts track inodes, not paths. If a file is replaced
+      # on the host (e.g. by Write tool, cp, or git checkout), the container
+      # still sees the OLD inode. Symptoms: container has outdated file content
+      # even though the host shows the correct version.
+      # Fix: push content into the container manually, then regenerate sdkconfig:
+      #   cat sdkconfig.defaults | docker compose exec -T esp32p4_vision tee /code/sdkconfig.defaults
+      #   docker compose exec esp32p4_vision rm -f /code/sdkconfig
+      #   docker compose exec esp32p4_vision idf.py build
+    # Keep container alive — use docker compose exec to run commands.
+    #
+    # BOARD USB NOTE: Waveshare ESP32-P4-WiFi6 board has a WCH CH343 USB-UART
+    # bridge (VID 1a86:55d3) connected to the ESP32-P4's UART0. This appears as
+    # /dev/ttyACM0. The P4's USB_SERIAL_JTAG peripheral is NOT routed to a USB
+    # connector on this board — use CONFIG_ESP_CONSOLE_UART_DEFAULT=y, NOT
+    # CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y.
+    #
+    # First-time setup (run once after container start):
+    #   docker compose exec esp32p4_vision idf.py set-target esp32p4
+    #
+    # Build & flash:
+    #   docker compose exec esp32p4_vision idf.py build
+    #   docker compose exec esp32p4_vision idf.py -p /dev/ttyACM0 flash monitor
+    command: sleep infinity
