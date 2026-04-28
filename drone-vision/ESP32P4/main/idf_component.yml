@@ -1,0 +1,7 @@
+dependencies:
+  # OV5647 sensor driver — detected automatically via SCCB
+  # Also pulls in esp_sccb_intf and esp_driver_cam as public dependencies.
+  espressif/esp_cam_sensor: ">=0.6.0"
+
+  # OpenCV for ESP32-P4 (RISC-V build)
+  espressif/opencv: ">=4.10.0"

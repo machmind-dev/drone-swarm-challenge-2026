@@ -1,0 +1,47 @@
+# CPU frequency is configured at runtime via esp_pm_configure() in main.c
+# (40-360 MHz DFS). No static Kconfig symbol needed for P4 frequency.
+
+CONFIG_PARTITION_TABLE_OFFSET=0x10000
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+CONFIG_FREERTOS_HZ=1000
+
+# Flash -- Waveshare ESP32-P4 WiFi6 board has 16 MB flash
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# Waveshare ESP32-P4-WIFI6 board has a WCH CH343 USB-UART bridge (1a86:55d3)
+# connected to P4's UART0 -- this appears as /dev/ttyACM0 (CDC-ACM).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# -- Power management ---------------------------------------------------------
+CONFIG_PM_ENABLE=y
+# CONFIG_FREERTOS_USE_TICKLESS_IDLE is not set
+
+# -- PSRAM -- Waveshare board has 32 MB external PSRAM (16-line HEX mode) ----
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
+
+# -- Camera sensor -- OV5647 MIPI-CSI ----------------------------------------
+CONFIG_CAMERA_OV5647=y
+CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
+# OV5647 driver uses this unconditionally (reg 0x4800) -- must be defined.
+# ISP is configured with has_line_start_packet=true to match.
+CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=y
+
+# -- IDF experimental features ------------------------------------------------
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# -- Drone Vision -- pose estimation ------------------------------------------
+# CONFIG_VISION_POSE_RES_QQVGA is not set
+CONFIG_VISION_POSE_RES_QVGA=y
+# CONFIG_VISION_POSE_RES_HVGA is not set
+CONFIG_VISION_POSE_MARKER_SIZE_CM=50
+CONFIG_VISION_ARUCO_DICT=0
