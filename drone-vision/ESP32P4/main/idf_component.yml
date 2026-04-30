@@ -1,7 +1,10 @@
 dependencies:
-  # OV5647 sensor driver — detected automatically via SCCB
-  # Also pulls in esp_sccb_intf and esp_driver_cam as public dependencies.
-  espressif/esp_cam_sensor: ">=0.6.0"
+  idf: ">=5.3"
+
+  # esp_video: V4L2 camera layer — handles OV5647 sensor detect, CSI, ISP internally
+  espressif/esp_video:
+    version: "0.8.*"
+    public: true
 
   # OpenCV for ESP32-P4 (RISC-V build)
   espressif/opencv: ">=4.10.0"

@@ -36,6 +36,15 @@ CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
 # ISP is configured with has_line_start_packet=true to match.
 CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=y
 
+# -- ISP pipeline controller --------------------------------------------------
+# Required for V4L2 API: without this, isp_task never drives the CSI DMA and
+# VIDIOC_DQBUF blocks forever.  Log interleaving from this task is suppressed
+# inside camera_view_mode() via esp_log_level_set("*", ESP_LOG_NONE).
+CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
+CONFIG_CAM_CTLR_MIPI_CSI_ISR_CACHE_SAFE=y
+CONFIG_ISP_CTRL_FUNC_IN_IRAM=y
+CONFIG_I2C_ISR_IRAM_SAFE=y
+
 # -- IDF experimental features ------------------------------------------------
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 

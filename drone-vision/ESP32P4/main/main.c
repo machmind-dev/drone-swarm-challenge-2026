@@ -25,8 +25,10 @@
 
 static const char *TAG = "main";
 
-/* Pose task needs a large stack: cv::Mat / std::vector / solvePnP */
-#define POSE_TASK_STACK_KB  32
+/* Pose task needs a large stack: cv::Mat / std::vector / solvePnP /
+ * OpenCV parallel backend registry init (~5KB) + cvtColor frame init.
+ * 32 KB overflows on first cvtColor call; 64 KB gives comfortable headroom. */
+#define POSE_TASK_STACK_KB  64
 
 static void pose_task(void *arg)
 {
@@ -44,21 +46,24 @@ void app_main(void)
     }
 
     /* ── Power management ────────────────────────────────────────────────────
-     * Allow CPU to scale between 40 MHz (FreeRTOS idle / light sleep) and
-     * 360 MHz (active ArUco detection).  vTaskDelay() calls become real
-     * light-sleep windows, saving ~100–150 mA vs always-on 400 MHz.        */
+     * IMPORTANT: DFS (Dynamic Frequency Scaling) is DISABLED by locking
+     * min_freq == max_freq.  DFS suspends L2 cache during frequency
+     * transitions; on ESP32-P4 rev 1.0 this triggers an L1→L2 auto-writeback
+     * stuck issue (fixed in IDF 5.5 for later silicon revisions).  Symptom:
+     * dirty cache lines containing the PSRAM heap multi_heap_t spinlock are
+     * not written back to PSRAM before DMA cache-line invalidation; the next
+     * CPU read of the spinlock returns stale/garbage → spinlock_acquire(0x17)
+     * load-access-fault.
+     * Running at a fixed 360 MHz avoids the DFS-induced L2 suspension entirely.
+     * Power budget: ~60 mA extra vs DFS; acceptable for a tethered board.   */
 #if CONFIG_PM_ENABLE
     esp_pm_config_t pm_cfg = {
         .max_freq_mhz       = 360,
-        .min_freq_mhz       = 40,
-#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
-        .light_sleep_enable = true,
-#else
+        .min_freq_mhz       = 360,   /* no DFS: min == max */
         .light_sleep_enable = false,
-#endif
     };
     ESP_ERROR_CHECK(esp_pm_configure(&pm_cfg));
-    ESP_LOGI(TAG, "PM enabled: 40–360 MHz DFS + light sleep");
+    ESP_LOGI(TAG, "PM: fixed 360 MHz (DFS disabled — avoids L2 cache writeback errata)");
 #endif
 
     ESP_LOGI(TAG, "Mach Mind — ESP32-P4 ArUco Pose Estimator boot");
@@ -66,6 +71,6 @@ void app_main(void)
     xTaskCreatePinnedToCore(pose_task, "aruco_pose",
                             POSE_TASK_STACK_KB * 1024,
                             NULL, 5, NULL,
-                            1 /* CPU1 */);
+                            0 /* CPU0 — ISP ISR also on CPU0; same-core critical sections disable IRQs, no spinlock deadlock */);
     vTaskDelete(NULL);
 }

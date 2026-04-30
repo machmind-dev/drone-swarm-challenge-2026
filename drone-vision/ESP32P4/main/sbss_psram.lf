@@ -23,7 +23,11 @@
 entries:
     .sbss+
     .bss+
-    .sdata+
+# NOTE: .sdata intentionally excluded.
+# RISC-V .sdata holds GP-relative *initialised* data, which in OpenCV includes
+# function-pointer dispatch tables (e.g. CvtFunc linear_tab[] in cvtColor).
+# If .sdata lives in PSRAM the camera DMA bus can corrupt those pointers
+# mid-read → garbage PC → instruction access fault.  Keep .sdata in SRAM.
 
 [scheme:sbss_to_extram]
 entries:
