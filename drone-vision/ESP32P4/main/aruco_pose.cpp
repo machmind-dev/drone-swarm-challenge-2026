@@ -235,7 +235,10 @@ static void camera_view_mode(int video_fd,
     static const int SW = 80, SH = 60;
     /* Raw RGB565 output frame — 9600 bytes */
     static uint16_t s_frame[SW * SH];
-    static const uint8_t MAGIC[4] = {0xAA, 0x55, 0x50, 0x3C};
+    /* 8-byte magic — 4 bytes are too short and can appear in RGB565 image
+     * data, causing stream_view.py to false-sync mid-frame.  8 bytes gives
+     * P(false match) < 10^-15 per frame. */
+    static const uint8_t MAGIC[8] = {0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C};
 
     ESP_LOGI(TAG, "=== CAMERA VIEW MODE %dx%d -> %dx%d binary stream ===",
              (int)cap_w, (int)cap_h, SW, SH);

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-stream_view.py — Binary camera stream viewer for ESP32-P4 CAMERA_STREAM_MODE.
+stream_view.py — Binary camera stream viewer for ESP32-P4 CAMERA_VIEW_MODE.
 
-Protocol: [0xAA][0x55][0x50][0x3C] + 80×60×2 bytes raw RGB565 (little-endian)
+Protocol: [0xAA][0x55][0xA5][0x5A][0xF0][0x0F][0x50][0x3C]  8-byte magic
+          + 80×60×2 bytes raw RGB565 (little-endian)
+
+8-byte magic prevents false-sync on RGB565 image data that happened to
+contain the old 4-byte magic as pixel values.
 
 Shows THREE panels:
   Left   — RGB565 decoded as RGB  (standard V4L2 interpretation)
@@ -28,7 +32,7 @@ PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyACM0"
 BAUD = int(sys.argv[2])         if len(sys.argv) > 2 else 921600
 W, H = 80, 60
 FRAME_BYTES = W * H * 2         # RGB565 = 2 bytes/pixel
-MAGIC = bytes([0xAA, 0x55, 0x50, 0x3C])
+MAGIC = bytes([0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C])
 
 print(f"Opening {PORT} @ {BAUD} baud — waiting for first frame …")
 print("LEFT=RGB565→RGB  CENTRE=RGB565→BGR  RIGHT=luminance Y")
