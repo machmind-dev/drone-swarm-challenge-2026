@@ -240,9 +240,12 @@ static void camera_view_mode(int video_fd,
     ESP_LOGI(TAG, "=== CAMERA VIEW MODE %dx%d -> %dx%d binary stream ===",
              (int)cap_w, (int)cap_h, SW, SH);
     ESP_LOGI(TAG, "Run: python3 tools/stream_view.py /dev/ttyACM0 921600");
-    /* Suppress component logs — stray bytes corrupt binary frames.
-     * Even if a log line leaks through, stream_view.py resyncs on MAGIC. */
+    /* Kill ALL log output before entering the streaming loop.
+     * esp_log_level_set filters by level but ISP/driver tasks can still
+     * emit bytes via direct uart_write_bytes paths.  Replacing the vprintf
+     * function pointer is the only guaranteed way to silence everything. */
     esp_log_level_set("*", ESP_LOG_NONE);
+    esp_log_set_vprintf([](const char *, va_list) -> int { return 0; });
     /* Allow ISP AE/AWB to converge before first capture */
     vTaskDelay(pdMS_TO_TICKS(3000));
 
