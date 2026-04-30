@@ -232,8 +232,8 @@ static void camera_view_mode(int video_fd,
                               uint32_t cap_w,
                               uint32_t cap_h)
 {
-    static const int SW = 80, SH = 60;
-    /* Raw RGB565 output frame — 9600 bytes */
+    static const int SW = 80, SH = 64;  /* 800/10 x 640/10 — exact 10x, correct 5:4 aspect */
+    /* Raw RGB565 output frame — 10240 bytes */
     static uint16_t s_frame[SW * SH];
     /* 8-byte magic — 4 bytes are too short and can appear in RGB565 image
      * data, causing stream_view.py to false-sync mid-frame.  8 bytes gives
