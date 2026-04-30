@@ -66,13 +66,13 @@ frame_n = [0]
 
 # ── sync helper ───────────────────────────────────────────────────────────────
 def sync_to_magic():
-    """Scan serial bytes until the 4-byte magic header is found."""
+    """Scan serial bytes until the magic header is found."""
     buf = b''
     while True:
         b = ser.read(1)
         if not b:
             return False          # timeout
-        buf = (buf + b)[-4:]
+        buf = (buf + b)[-len(MAGIC):]
         if buf == MAGIC:
             return True
 
