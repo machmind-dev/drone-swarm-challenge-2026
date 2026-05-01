@@ -64,6 +64,13 @@
 #include "sdkconfig.h"
 #include "boards.h"
 
+/* ── Vision resolution ─────────────────────────────────────────────────────
+ * VISION_RES_QVGA : 320×240 — ~8 m reliable detection range  (default)
+ * VISION_RES_HVGA : 480×320 — ~12 m reliable detection range, slower
+ * Uncomment exactly one. */
+#define VISION_RES_QVGA
+/* #define VISION_RES_HVGA */
+
 static const char *TAG = "aruco_pose";
 
 /* ── __register_exitproc stub ────────────────────────────────────────────────
@@ -173,9 +180,6 @@ static void rot_to_quat(const cv::Mat &R,
 }
 #pragma GCC diagnostic pop
 
-/* ── Capture resolution — OV5647 MIPI RAW8 800x800@50fps ────────────────── */
-#define POSE_W  1280
-#define POSE_H   960
 #define POSE_BPP 2          /* ISP outputs RGB565 = 2 bytes/pixel */
 
 /* ── Number of V4L2 frame buffers ────────────────────────────────────────── *
@@ -190,16 +194,17 @@ static void rot_to_quat(const cv::Mat &R,
  * DQBUF and before any OpenCV call, then re-queue + VIDIOC_STREAMON after.  */
 #define CAM_BUF_COUNT  2
 
-/* ── Requested detection resolution ─────────────────────────────────────── */
-#if   CONFIG_VISION_POSE_RES_QQVGA
-  #define POSE_REQ_W  160
-  #define POSE_REQ_H  120
-#elif CONFIG_VISION_POSE_RES_HVGA
+/* ── Detection resolution and stream preview dimensions ──────────────────── */
+#if defined(VISION_RES_HVGA)
   #define POSE_REQ_W  480
   #define POSE_REQ_H  320
-#else  /* default: QVGA */
+  #define VIEW_W       80
+  #define VIEW_H       53   /* ≈3:2 — 800-wide 10× downscale of 533-row crop */
+#else                         /* default: QVGA */
   #define POSE_REQ_W  320
   #define POSE_REQ_H  240
+  #define VIEW_W       80
+  #define VIEW_H       60   /* exact 4:3 — 10× downscale of 800×600 crop */
 #endif
 
 #ifndef CONFIG_VISION_POSE_MARKER_SIZE_CM
@@ -214,15 +219,14 @@ static void rot_to_quat(const cv::Mat &R,
  * Baud:   CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600 in sdkconfig.defaults.
  *
  * Binary protocol per frame (stream_view.py compatible):
- *   [0xAA][0x55][0x50][0x3C]   4-byte magic
- *   80x60x2 bytes              raw RGB565 little-endian
+ *   8 bytes  magic   [0xAA][0x55][0xA5][0x5A][0xF0][0x0F][0x50][0x3C]
+ *   4 bytes  header  W (uint16 LE), H (uint16 LE)
+ *   W×H×2 bytes      raw RGB565 — detection crop region, 10× downscaled
+ *
+ * QVGA: VIEW_W=80, VIEW_H=60 → 9612 bytes/frame → ~9.6 fps @ 921600 baud
+ * HVGA: VIEW_W=80, VIEW_H=53 → 8492 bytes/frame → ~10.9 fps @ 921600 baud
  *
  * Camera stays STREAMON always (no per-frame stop — no overheating).
- * fwrite() flushes the full frame in one call — no printf interleaving.
- * Any stray ISP log bytes between frames are harmless — stream_view.py
- * resyncs on the next magic header.
- * At 921600 baud: 9604 bytes/frame -> ~9 fps.
- *
  * Host viewer: python3 tools/stream_view.py /dev/ttyACM0 921600
  * ══════════════════════════════════════════════════════════════════════════ */
 #ifdef CAMERA_VIEW_MODE
@@ -232,25 +236,24 @@ static void camera_view_mode(int video_fd,
                               uint32_t cap_w,
                               uint32_t cap_h)
 {
-    static const int SW = 80, SH = 64;  /* 800/10 x 640/10 — exact 10x, correct 5:4 aspect */
-    /* Raw RGB565 output frame — 10240 bytes */
-    static uint16_t s_frame[SW * SH];
-    /* 8-byte magic — 4 bytes are too short and can appear in RGB565 image
-     * data, causing stream_view.py to false-sync mid-frame.  8 bytes gives
-     * P(false match) < 10^-15 per frame. */
-    static const uint8_t MAGIC[8] = {0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C};
+    /* Same center-crop as ArUco detection so the viewer shows exactly what
+     * the detector will process: 800×800 → 800×crop_h → VIEW_W×VIEW_H. */
+    const int crop_h = (int)cap_w * POSE_REQ_H / POSE_REQ_W;
+    const int crop_y = ((int)cap_h - crop_h) / 2;
 
-    ESP_LOGI(TAG, "=== CAMERA VIEW MODE %dx%d -> %dx%d binary stream ===",
-             (int)cap_w, (int)cap_h, SW, SH);
+    static uint16_t s_frame[VIEW_W * VIEW_H];
+    static const uint8_t MAGIC[8] = {0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C};
+    /* Dimension header — stream_view.py reads W and H from these 4 bytes */
+    const uint8_t dim_hdr[4] = {
+        (uint8_t)(VIEW_W & 0xFF), (uint8_t)(VIEW_W >> 8),
+        (uint8_t)(VIEW_H & 0xFF), (uint8_t)(VIEW_H >> 8),
+    };
+
+    ESP_LOGI(TAG, "=== CAMERA VIEW MODE %dx%d crop -> %dx%d stream ===",
+             (int)cap_w, (int)cap_h, VIEW_W, VIEW_H);
     ESP_LOGI(TAG, "Run: python3 tools/stream_view.py /dev/ttyACM0 921600");
-    /* Kill ALL log output before entering the streaming loop.
-     * esp_log_level_set covers all known tags; set_vprintf is a hard
-     * backstop for any new tags the ISP task spawns after init. */
     esp_log_level_set("*", ESP_LOG_NONE);
     esp_log_set_vprintf([](const char *, va_list) -> int { return 0; });
-    /* Allow ISP AE/AWB to fully settle — bright lights cause fast
-     * exposure adjustments that generate log bursts; 5 s gives the
-     * AE/AWB loop time to converge before binary streaming begins. */
     vTaskDelay(pdMS_TO_TICKS(5000));
 
     for (;;) {
@@ -262,13 +265,13 @@ static void camera_view_mode(int video_fd,
             continue;
         }
 
-        /* Downscale cap_w x cap_h RGB565 -> SW x SH RGB565 (nearest-neighbor) */
+        /* Crop detection region, downscale → VIEW_W×VIEW_H (nearest-neighbor) */
         const uint16_t *src = (const uint16_t *)(void *)cam_bufs[buf.index];
-        for (int dy = 0; dy < SH; dy++) {
-            int sy = dy * (int)cap_h / SH;
+        for (int dy = 0; dy < VIEW_H; dy++) {
+            int sy = crop_y + dy * crop_h / VIEW_H;
             const uint16_t *row = src + (size_t)sy * cap_w;
-            for (int dx = 0; dx < SW; dx++) {
-                s_frame[dy * SW + dx] = row[dx * (int)cap_w / SW];
+            for (int dx = 0; dx < VIEW_W; dx++) {
+                s_frame[dy * VIEW_W + dx] = row[dx * (int)cap_w / VIEW_W];
             }
         }
 
@@ -279,8 +282,9 @@ static void camera_view_mode(int video_fd,
         qbuf.index  = buf.index;
         ioctl(video_fd, VIDIOC_QBUF, &qbuf);
 
-        /* Binary frame: 4-byte magic + 9600 bytes raw RGB565 */
+        /* Binary frame: 8-byte magic + 4-byte W×H header + VIEW_W×VIEW_H×2 RGB565 */
         fwrite(MAGIC,   1, sizeof(MAGIC),   stdout);
+        fwrite(dim_hdr, 1, sizeof(dim_hdr), stdout);
         fwrite(s_frame, 1, sizeof(s_frame), stdout);
         fflush(stdout);
     }
@@ -303,8 +307,8 @@ void aruco_pose_start(void)
     ESP_LOGI(TAG, "MIPI CSI PHY LDO ch3 @ 2500 mV acquired");
 
     ESP_LOGI(TAG, "=== Mach Mind ArUco Pose Estimator -- ESP32-P4 + OV5647 ===");
-    ESP_LOGI(TAG, "capture=%dx%d  detect=%dx%d  marker=%.2fm  map=%d  dict=%d",
-             POSE_W, POSE_H, POSE_REQ_W, POSE_REQ_H,
+    ESP_LOGI(TAG, "detect=%dx%d  marker=%.2fm  map=%d  dict=%d",
+             POSE_REQ_W, POSE_REQ_H,
              POSE_MARKER_SIZE_M, NUM_MAP_MARKERS, CONFIG_VISION_ARUCO_DICT);
 
     /* ── esp_video init — sensor SCCB, CSI controller, ISP all handled internally */
@@ -432,8 +436,8 @@ void aruco_pose_start(void)
     /* ── Camera intrinsics at detection resolution ────────────────────────── *
      * OV5647 800x800@50fps: 2x2 binned, FOV(H)=72° -> fx_800 approx 892 px.
      * Center-crop 800x800->800x600, then uniform resize ->POSE_REQ (320x240).
-     * Scale = POSE_REQ_W / POSE_W = 320/800 = 0.4 -> fx=fy approx 357 px.  */
-    const double scale = (double)POSE_REQ_W / (double)POSE_W;
+     * Scale = POSE_REQ_W / cap_w = 320/800 = 0.4 -> fx=fy approx 357 px.  */
+    const double scale = (double)POSE_REQ_W / (double)cap_w;
     const double fx = 892.0 * scale;
     const double fy = fx;
     const double cx = (double)POSE_REQ_W / 2.0;

@@ -25,6 +25,9 @@
 
 static const char *TAG = "main";
 
+/* ── Identity ──────────────────────────────────────────────────────────── */
+#define DRONE_ID  1
+
 /* Pose task needs a large stack: cv::Mat / std::vector / solvePnP /
  * OpenCV parallel backend registry init (~5KB) + cvtColor frame init.
  * 32 KB overflows on first cvtColor call; 64 KB gives comfortable headroom. */

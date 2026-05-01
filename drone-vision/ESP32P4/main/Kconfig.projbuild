@@ -9,22 +9,6 @@ menu "Drone Vision"
             1 = DICT_4X4_100
             7 = DICT_5X5_50
 
-    choice VISION_POSE_RES
-        bool "Capture resolution"
-        default VISION_POSE_RES_QVGA
-        help
-            QQVGA 160x120 — OV5647 may negotiate to nearest supported mode.
-            QVGA  320x240 — recommended; reliable native OV5647 binning mode.
-            HVGA  480x320 — higher accuracy, higher power draw.
-
-        config VISION_POSE_RES_QQVGA
-            bool "QQVGA 160x120  (OV5647 may negotiate to nearest supported)"
-        config VISION_POSE_RES_QVGA
-            bool "QVGA  320x240  (recommended for OV5647)"
-        config VISION_POSE_RES_HVGA
-            bool "HVGA  480x320  (higher accuracy)"
-    endchoice
-
     config VISION_POSE_MARKER_SIZE_CM
         int "Physical marker side length (cm)"
         default 50

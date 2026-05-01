@@ -15,8 +15,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
 # Waveshare ESP32-P4-WIFI6 board has a WCH CH343 USB-UART bridge (1a86:55d3)
 # connected to P4's UART0 -- this appears as /dev/ttyACM0 (CDC-ACM).
-CONFIG_ESP_CONSOLE_UART_CUSTOM=y
-CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
 # -- Power management ---------------------------------------------------------
 CONFIG_PM_ENABLE=y
@@ -27,62 +26,28 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
 CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=32768
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 
 # -- Camera sensor -- OV5647 MIPI-CSI ----------------------------------------
 CONFIG_CAMERA_OV5647=y
 CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y
-CONFIG_CAMERA_OV5647_MIPI_RAW8_800x640_50FPS=y
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
 # OV5647 driver uses this unconditionally (reg 0x4800) -- must be defined.
 # ISP is configured with has_line_start_packet=true to match.
 CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=y
 
 # -- ISP pipeline controller --------------------------------------------------
-# Waveshare's working 12_video_lcd_display example has this enabled.
-# It starts the isp_task for AE/AWB auto-adjustment; without it on P4+OV5647
-# the ISP pipeline may not drive the CSI DMA and DQBUF blocks forever.
+# Required for V4L2 API: without this, isp_task never drives the CSI DMA and
+# VIDIOC_DQBUF blocks forever.  Log interleaving from this task is suppressed
+# inside camera_view_mode() via esp_log_level_set("*", ESP_LOG_NONE).
 CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
-
-# -- CSI DMA ISR cache-safe ---------------------------------------------------
-# Without this, csi_controller_t (including on_trans_done callback pointer) is
-# allocated with MALLOC_CAP_DEFAULT → lands in PSRAM.  The CSI DMA ISR reads
-# this pointer from PSRAM under active DMA bus pressure → reads corrupted value
-# → instruction access fault (MEPC = 0x25024ff2, 0xa00e4000, etc.).
-# With this set, CSI_MEM_ALLOC_CAPS = MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT
-# and the ISR is placed in IRAM (no cache miss, no corruption).
 CONFIG_CAM_CTLR_MIPI_CSI_ISR_CACHE_SAFE=y
-
-# -- ISP control functions in IRAM --------------------------------------------
-# Without either ISP_CTRL_FUNC_IN_IRAM or ISP_ISR_IRAM_SAFE,
-# ISP_MEM_ALLOC_CAPS = MALLOC_CAP_DEFAULT → isp_processor_t (and its spinlock)
-# land in PSRAM.  RISC-V LR/SC atomics on PSRAM fail under active camera DMA →
-# ISP ISR spinlock spins forever → interrupt WDT fires.
-# ISP_CTRL_FUNC_IN_IRAM sets ISP_MEM_ALLOC_CAPS = MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT
-# (struct in SRAM) without adding strict IRAM checks on all ISP callbacks.
-# (ISP_ISR_IRAM_SAFE would also work but requires all esp_video ISP callbacks
-# to be IRAM_ATTR, which the esp_video component does not implement.)
 CONFIG_ISP_CTRL_FUNC_IN_IRAM=y
-
-# -- I2C master ISR cache-safe ------------------------------------------------
-# The ISP pipeline controller task calls i2c_master_multi_buffer_transmit()
-# to update AE/AWB settings on the OV5647 sensor via SCCB (I2C).
-# Without I2C_ISR_IRAM_SAFE, I2C_MEM_ALLOC_CAPS = MALLOC_CAP_DEFAULT →
-# i2c_master_bus_t, i2c_master_dev_t, and per-transaction i2c_operation_t
-# structs land in PSRAM (when internal SRAM is exhausted by OpenCV allocations).
-# Camera DMA writes to frame buffers in PSRAM at adjacent addresses →
-# cache-line invalidation corrupts the I2C structs → spinlock_acquire and
-# i2c_master_multi_buffer_transmit load-access-fault (MEPC in i2c_master.c,
-# MTVAL = 0x9ffc00c1 / 0x62ac0000 = frame pixel data read as a pointer).
-# I2C_ISR_IRAM_SAFE sets I2C_MEM_ALLOC_CAPS = MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT
-# forcing all I2C structs into SRAM, immune to PSRAM DMA bus contention.
 CONFIG_I2C_ISR_IRAM_SAFE=y
 
 # -- IDF experimental features ------------------------------------------------
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 
 # -- Drone Vision -- pose estimation ------------------------------------------
-CONFIG_VISION_POSE_RES_QQVGA=y
-# CONFIG_VISION_POSE_RES_QVGA is not set
-# CONFIG_VISION_POSE_RES_HVGA is not set
 CONFIG_VISION_POSE_MARKER_SIZE_CM=50
 CONFIG_VISION_ARUCO_DICT=0
