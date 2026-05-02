@@ -25,25 +25,48 @@ M1:4.94m POSE:1:15.538:6.171:4.056:0.059:0.736:-0.046:0.673
 | Component | Part |
 |-----------|------|
 | MCU | Waveshare ESP32-P4 WiFi6 (360 MHz, 32 MB PSRAM) |
-| Camera | OV5647 MIPI-CSI, 800×640 @ 50 fps, RGB565 ISP output |
+| Camera | OV5647 MIPI-CSI, 800×800 RAW8 @ 50 fps → ISP → RGB565 |
 | USB-UART | WCH CH343 bridge → `/dev/ttyACM0` |
+
+Detection pipeline: 800×800 capture → center-crop to 800×600 → resize to 320×240 (QVGA) for ArUco.
+
+## Detection Resolution
+
+Two modes are selectable at the top of `main/aruco_pose.cpp`:
+
+```cpp
+#define VISION_RES_QVGA   // 320×240 — ~8 m detection range (default)
+// #define VISION_RES_HVGA // 480×320 — ~12 m detection range, slower
+```
+
+Stream preview is always 80×60 (10× downscale of the detection crop).
 
 ## Build & Flash
 
+Use the launcher script (recommended):
+
+```bash
+launchers/ubuntu-gnome-pc/launch-drone-vision-p4.sh
+```
+
+Or manually via Docker:
+
 ```bash
 cd drone-vision/ESP32P4
-docker compose -f docker/docker-compose.yml run --rm esp32p4_vision idf.py build
-docker compose -f docker/docker-compose.yml run --rm esp32p4_vision idf.py -p /dev/ttyACM0 flash
+docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml exec esp32p4_vision bash
+# inside container:
+idf.py set-target esp32p4   # first time only
+idf.py build
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-## Stream Viewer
+## Tools
 
-```bash
-python3 tools/stream_view.py /dev/ttyACM0 921600
-```
-
-Displays three panels: RGB565→RGB | RGB565→BGR | Luminance Y.
-POSE overlay appears top-left when a known arena marker is in view.
+| Script | Purpose |
+|--------|---------|
+| `tools/stream_view.py /dev/ttyACM0 921600` | Live 80×60 detection crop with marker outlines and POSE overlay |
+| `tools/view_frame.py /dev/ttyACM0 115200` | Two-panel debug viewer — color RGB (left) and grayscale (right) via hex dump protocol |
 
 ## Key Design Decisions
 

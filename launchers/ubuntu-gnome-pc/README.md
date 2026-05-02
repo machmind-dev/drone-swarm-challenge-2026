@@ -44,24 +44,33 @@ source /opt/ros/jazzy/setup.bash
 
 | Script | Purpose |
 |--------|---------|
-| `setup.sh` | One-time dependency install and workspace build |
-| `launch.sh` | Start the full GCS stack (micro-ROS agent + ROS2 nodes + RViz) |
-| `launch-idf-docker.sh` | Start the ESP-IDF Docker environment for firmware development |
-| `launch-vision.sh` | Start the ArUco vision node only |
+| `launch.sh` | Full GCS stack — micro-ROS agent, ROS2 topic monitor, RViz2, rqt control panel |
+| `launch-swarm-mission.sh` | Swarm L-loop mission — runs `mission_forward_back.py` for drones 1 & 2 in parallel |
+| `launch-vision.sh` | GCS-side ArUco vision node (`aruco_node.py`) |
+| `launch-drone-vision-p4.sh` | Docker dev shell for ESP32-P4 vision firmware (IDF 5.4, MIPI-CSI) |
+| `launch-drone-vision-s3.sh` | Docker dev shell for ESP32-S3 vision firmware (IDF 5.0, DVP) |
+| `launch-idf-docker.sh` | Docker dev shell for drone firmware (ESP32-S3, micro-ROS) |
+| `launch-node-vision-ide.sh` | Docker dev shell for ESP32-S3 ArUco benchmark |
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. First-time setup
-./setup.sh
-
-# 2. Launch full ground station
+# Launch full ground station
 ./launch.sh
 
-# 3. (Optional) Firmware development environment
+# (Optional) GCS-side ArUco vision only
+./launch-vision.sh
+
+# (Optional) Firmware development — drone node
 ./launch-idf-docker.sh
+
+# (Optional) Firmware development — ESP32-P4 vision board
+./launch-drone-vision-p4.sh
+
+# (Optional) Run swarm mission (requires drones armed via rqt first)
+./launch-swarm-mission.sh
 ```
 
 ---

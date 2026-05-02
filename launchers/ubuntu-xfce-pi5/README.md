@@ -32,6 +32,9 @@ sudo usermod -aG docker $USER   # re-login after this
 # OpenCV Python bindings
 sudo apt install python3-opencv
 
+# GPIO library (for physical button handler)
+sudo apt install python3-gpiod
+
 # Source ROS2 in your shell (add to ~/.bashrc)
 source /opt/ros/jazzy/setup.bash
 ```
@@ -44,27 +47,28 @@ source /opt/ros/jazzy/setup.bash
 
 | Script | Purpose |
 |--------|---------|
-| `setup.sh` | One-time dependency install and workspace build |
-| `launch.sh` | Start the full GCS stack (micro-ROS agent + ROS2 nodes) |
-| `launch-vision.sh` | Start the ArUco vision node only |
-| `launch-buttons.sh` | Start the physical button handler ROS2 publisher |
+| `launch.sh` | Full GCS stack — micro-ROS agent, ROS2 topic monitor, rqt, RViz2 (xfce4-terminal tabs) |
+| `launch-swarm-mission.sh` | Swarm L-loop mission — runs `mission_forward_back.py` for drones 1 & 2 in parallel |
+| `launch-vision.sh` | GCS-side ArUco vision node (`aruco_node.py`) |
+| `launch-buttons.sh` | Physical GPIO button handler — ARM / MISSION / EMERG buttons via gpiochip4 |
+| `launch-node-ide.sh` | Docker dev shell for drone firmware (ESP32-S3, micro-ROS) |
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. First-time setup (run once after imaging the SD card)
-./setup.sh
-
-# 2. Launch full ground station
+# 1. Launch full ground station
 ./launch.sh
 
-# 3. (Optional) Vision only
+# 2. (Optional) Physical button handler
+./launch-buttons.sh
+
+# 3. (Optional) ArUco vision only
 ./launch-vision.sh
 
-# 4. (Optional) Button handler only
-./launch-buttons.sh
+# 4. (Optional) Run swarm mission (requires drones armed via rqt first)
+./launch-swarm-mission.sh
 ```
 
 ---
