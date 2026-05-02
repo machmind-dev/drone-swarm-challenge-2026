@@ -850,34 +850,36 @@ void aruco_pose_start(void)
         }
 
 #ifdef DETECTION_STREAM
-        /* Draw detected marker outlines on fast_frame, downsample to VIEW_W×VIEW_H,
-         * convert grayscale→RGB565, send binary frame (same protocol as CAMERA_VIEW_MODE).
-         * Runs every frame so the viewer stays live even when no markers are visible. */
+        /* Stream the 80×60 color thumbnail (s_color_thumb, RGB888) as RGB565.
+         * s_color_thumb is built each frame from raw ISP data before detectMarkers
+         * runs, so it is never corrupted by adaptive thresholding.
+         * Marker outlines are drawn at VIEW/POSE_REQ scale (~1:4). */
         {
+            static uint16_t det_view[VIEW_W * VIEW_H];
+            for (int i = 0; i < VIEW_W * VIEW_H; i++) {
+                uint32_t r = s_color_thumb[i * 3 + 0];
+                uint32_t g = s_color_thumb[i * 3 + 1];
+                uint32_t b = s_color_thumb[i * 3 + 2];
+                det_view[i] = ((uint16_t)(r >> 3) << 11)
+                            | ((uint16_t)(g >> 2) <<  5)
+                            |  (uint16_t)(b >> 3);
+            }
+            const float vsx = (float)VIEW_W / POSE_REQ_W;
+            const float vsy = (float)VIEW_H / POSE_REQ_H;
             for (int i = 0; i < (int)ids.size(); i++) {
                 for (int j = 0; j < 4; j++) {
-                    int x0 = (int)roundf(corners[i][j].x);
-                    int y0 = (int)roundf(corners[i][j].y);
-                    int x1 = (int)roundf(corners[i][(j+1)%4].x);
-                    int y1 = (int)roundf(corners[i][(j+1)%4].y);
+                    int x0 = (int)(corners[i][j].x           * vsx);
+                    int y0 = (int)(corners[i][j].y           * vsy);
+                    int x1 = (int)(corners[i][(j+1)%4].x    * vsx);
+                    int y1 = (int)(corners[i][(j+1)%4].y    * vsy);
                     int steps = std::max(std::abs(x1-x0), std::abs(y1-y0));
                     if (steps < 1) steps = 1;
                     for (int s = 0; s <= steps; s++) {
                         int px = x0 + (x1-x0)*s/steps;
                         int py = y0 + (y1-y0)*s/steps;
-                        if (px >= 0 && px < POSE_REQ_W && py >= 0 && py < POSE_REQ_H)
-                            fast_frame[py * POSE_REQ_W + px] = 255;
+                        if (px >= 0 && px < VIEW_W && py >= 0 && py < VIEW_H)
+                            det_view[py * VIEW_W + px] = 0xFFFF;  /* white */
                     }
-                }
-            }
-            static uint16_t det_view[VIEW_W * VIEW_H];
-            for (int dy = 0; dy < VIEW_H; dy++) {
-                int sy = (int)((uint32_t)dy * POSE_REQ_H / VIEW_H);
-                for (int dx = 0; dx < VIEW_W; dx++) {
-                    int sx = (int)((uint32_t)dx * POSE_REQ_W / VIEW_W);
-                    uint8_t g = fast_frame[sy * POSE_REQ_W + sx];
-                    det_view[dy * VIEW_W + dx] =
-                        ((uint16_t)(g >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (g >> 3);
                 }
             }
             static const uint8_t DET_MAGIC[8] =
