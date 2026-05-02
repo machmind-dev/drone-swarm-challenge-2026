@@ -492,6 +492,13 @@ void aruco_pose_start(void)
     const int crop_h = (int)cap_w * POSE_REQ_H / POSE_REQ_W;   /* 800*240/320 = 600 */
     const int crop_y = ((int)cap_h - crop_h) / 2;               /* (800-600)/2 = 100 */
 
+#ifdef DETECTION_STREAM
+    /* Raw ISP RGB565 snapshot at VIEW_W×VIEW_H — filled each frame in the
+     * STREAMOFF window from the camera buffer, same crop+scale as CAMERA_VIEW_MODE.
+     * Kept separate from fast_frame (grayscale) and s_color_thumb (normalised). */
+    static uint16_t det_snap[VIEW_W * VIEW_H];
+#endif
+
     /* ── Pre-allocated detection vectors ─────────────────────────────────── */
     std::vector<int> ids;
     std::vector<std::vector<cv::Point2f>> corners, rejected;
@@ -717,6 +724,21 @@ void aruco_pose_start(void)
             }
 
         }
+
+#ifdef DETECTION_STREAM
+        /* Snapshot raw ISP pixels into det_snap while DMA is off and frame_ptr is
+         * exclusively ours.  Identical crop+downscale to CAMERA_VIEW_MODE. */
+        {
+            const uint16_t *snap_src = (const uint16_t *)(void *)frame_ptr;
+            for (int dy = 0; dy < VIEW_H; dy++) {
+                int sy = crop_y + dy * crop_h / VIEW_H;
+                const uint16_t *row = snap_src + (size_t)sy * cap_w;
+                for (int dx = 0; dx < VIEW_W; dx++)
+                    det_snap[dy * VIEW_W + dx] = row[(size_t)dx * cap_w / VIEW_W];
+            }
+        }
+#endif
+
         /* Detect ArUco markers — SRAM-only, DMA still OFF.
          * detectMarkers() calls malloc(76800) internally (adaptiveThreshold
          * workspace). That allocation exceeds SPIRAM_MALLOC_ALWAYSINTERNAL
@@ -850,35 +872,25 @@ void aruco_pose_start(void)
         }
 
 #ifdef DETECTION_STREAM
-        /* Stream the 80×60 color thumbnail (s_color_thumb, RGB888) as RGB565.
-         * s_color_thumb is built each frame from raw ISP data before detectMarkers
-         * runs, so it is never corrupted by adaptive thresholding.
-         * Marker outlines are drawn at VIEW/POSE_REQ scale (~1:4). */
+        /* Stream det_snap (raw ISP RGB565, VIEW_W×VIEW_H) with detected marker
+         * outlines drawn white.  det_snap was filled in the STREAMOFF window before
+         * detectMarkers ran — identical format to CAMERA_VIEW_MODE. */
         {
-            static uint16_t det_view[VIEW_W * VIEW_H];
-            for (int i = 0; i < VIEW_W * VIEW_H; i++) {
-                uint32_t r = s_color_thumb[i * 3 + 0];
-                uint32_t g = s_color_thumb[i * 3 + 1];
-                uint32_t b = s_color_thumb[i * 3 + 2];
-                det_view[i] = ((uint16_t)(r >> 3) << 11)
-                            | ((uint16_t)(g >> 2) <<  5)
-                            |  (uint16_t)(b >> 3);
-            }
             const float vsx = (float)VIEW_W / POSE_REQ_W;
             const float vsy = (float)VIEW_H / POSE_REQ_H;
             for (int i = 0; i < (int)ids.size(); i++) {
                 for (int j = 0; j < 4; j++) {
-                    int x0 = (int)(corners[i][j].x           * vsx);
-                    int y0 = (int)(corners[i][j].y           * vsy);
-                    int x1 = (int)(corners[i][(j+1)%4].x    * vsx);
-                    int y1 = (int)(corners[i][(j+1)%4].y    * vsy);
+                    int x0 = (int)(corners[i][j].x        * vsx);
+                    int y0 = (int)(corners[i][j].y        * vsy);
+                    int x1 = (int)(corners[i][(j+1)%4].x * vsx);
+                    int y1 = (int)(corners[i][(j+1)%4].y * vsy);
                     int steps = std::max(std::abs(x1-x0), std::abs(y1-y0));
                     if (steps < 1) steps = 1;
                     for (int s = 0; s <= steps; s++) {
                         int px = x0 + (x1-x0)*s/steps;
                         int py = y0 + (y1-y0)*s/steps;
                         if (px >= 0 && px < VIEW_W && py >= 0 && py < VIEW_H)
-                            det_view[py * VIEW_W + px] = 0xFFFF;  /* white */
+                            det_snap[py * VIEW_W + px] = 0xFFFF;
                     }
                 }
             }
@@ -890,7 +902,7 @@ void aruco_pose_start(void)
             };
             fwrite(DET_MAGIC, 1, sizeof(DET_MAGIC), stdout);
             fwrite(dim_hdr,   1, sizeof(dim_hdr),   stdout);
-            fwrite(det_view,  1, sizeof(det_view),  stdout);
+            fwrite(det_snap,  2, VIEW_W * VIEW_H,   stdout);
             fflush(stdout);
         }
 #endif /* DETECTION_STREAM */
