@@ -493,9 +493,13 @@ void aruco_pose_start(void)
     const int crop_y = ((int)cap_h - crop_h) / 2;               /* (800-600)/2 = 100 */
 
 #ifdef DETECTION_STREAM
-    /* Raw ISP RGB565 snapshot at VIEW_W×VIEW_H — filled each frame in the
-     * STREAMOFF window from the camera buffer, same crop+scale as CAMERA_VIEW_MODE.
-     * Kept separate from fast_frame (grayscale) and s_color_thumb (normalised). */
+    /* det_snap_gray: VIEW_W×VIEW_H uint8 grayscale — downsampled from fast_frame
+     * before detectMarkers runs.  fast_frame has the 98th-percentile ns
+     * normalisation applied, so the image is always properly exposed regardless
+     * of whether ISP auto-exposure has converged. */
+    static uint8_t  det_snap_gray[VIEW_W * VIEW_H];
+    /* det_snap: VIEW_W×VIEW_H uint16 RGB565 — filled from det_snap_gray at
+     * stream time with detected marker outlines drawn white. */
     static uint16_t det_snap[VIEW_W * VIEW_H];
 #endif
 
@@ -726,15 +730,16 @@ void aruco_pose_start(void)
         }
 
 #ifdef DETECTION_STREAM
-        /* Snapshot raw ISP pixels into det_snap while DMA is off and frame_ptr is
-         * exclusively ours.  Identical crop+downscale to CAMERA_VIEW_MODE. */
+        /* Downsample fast_frame (already ns-normalised to 0-255) into det_snap_gray.
+         * Must happen here — after fast_frame is filled, before detectMarkers
+         * overwrites it via adaptive thresholding. */
         {
-            const uint16_t *snap_src = (const uint16_t *)(void *)frame_ptr;
             for (int dy = 0; dy < VIEW_H; dy++) {
-                int sy = crop_y + dy * crop_h / VIEW_H;
-                const uint16_t *row = snap_src + (size_t)sy * cap_w;
-                for (int dx = 0; dx < VIEW_W; dx++)
-                    det_snap[dy * VIEW_W + dx] = row[(size_t)dx * cap_w / VIEW_W];
+                int sy = (int)((uint32_t)dy * POSE_REQ_H / VIEW_H);
+                for (int dx = 0; dx < VIEW_W; dx++) {
+                    int sx = (int)((uint32_t)dx * POSE_REQ_W / VIEW_W);
+                    det_snap_gray[dy * VIEW_W + dx] = fast_frame[sy * POSE_REQ_W + sx];
+                }
             }
         }
 #endif
@@ -874,8 +879,17 @@ void aruco_pose_start(void)
 #ifdef DETECTION_STREAM
         /* Stream det_snap (raw ISP RGB565, VIEW_W×VIEW_H) with detected marker
          * outlines drawn white.  det_snap was filled in the STREAMOFF window before
-         * detectMarkers ran — identical format to CAMERA_VIEW_MODE. */
+         * detectMarkers ran.  Convert det_snap_gray (uint8 normalised) to RGB565
+         * then draw detected marker outlines white. */
         {
+            /* Gray→RGB565: replicate the 8-bit value across all three channels */
+            for (int i = 0; i < VIEW_W * VIEW_H; i++) {
+                uint8_t g = det_snap_gray[i];
+                det_snap[i] = ((uint16_t)(g >> 3) << 11)
+                            | ((uint16_t)(g >> 2) <<  5)
+                            |  (uint16_t)(g >> 3);
+            }
+            /* Draw detected marker outlines white */
             const float vsx = (float)VIEW_W / POSE_REQ_W;
             const float vsy = (float)VIEW_H / POSE_REQ_H;
             for (int i = 0; i < (int)ids.size(); i++) {
