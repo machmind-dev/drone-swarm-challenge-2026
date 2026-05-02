@@ -20,6 +20,8 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 ```
 drone-swarm-challenge-2026/
 ├── drone-firmware/          # ESP32-S3 drone node firmware (ESP-IDF)
+├── drone-vision/            # ESP32-P4 vision board firmware (ArUco + POSE)
+│   └── ESP32P4/             # OV5647 MIPI-CSI, ArUco detection, world-frame POSE
 ├── ground-station-software/ # ROS2 ground control station, swarm algorithms & vision
 ├── hardware/                # Mechanical and electrical design files
 └── docs/                    # Documentation and media
@@ -65,6 +67,7 @@ See the platform-specific launcher README for setup and launch instructions:
 - [Ubuntu GNOME PC (x86\_64)](ground-station-software/launchers/ubuntu-gnome-pc/README.md)
 - [Ubuntu XFCE Pi5 (ARM64)](ground-station-software/launchers/ubuntu-xfce-pi5/README.md)
 - [Drone Firmware](drone-firmware/README.md)
+- [Vision Board (ESP32-P4)](drone-vision/ESP32P4/README.md)
 
 ---
 
