@@ -121,15 +121,12 @@ static const world_marker_t MARKER_MAP[] = {
 };
 #define NUM_MAP_MARKERS  (int)(sizeof(MARKER_MAP) / sizeof(MARKER_MAP[0]))
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
 static const world_marker_t *find_marker(int id)
 {
     for (int i = 0; i < NUM_MAP_MARKERS; i++)
         if (MARKER_MAP[i].id == id) return &MARKER_MAP[i];
     return NULL;
 }
-#pragma GCC diagnostic pop
 
 /* ── World-frame corners for a known marker ─────────────────────────────────
  * Replicates aruco_node.py _corners_world(): rotate TL/TR/BR/BL by marker
@@ -153,8 +150,6 @@ static void marker_world_corners(const world_marker_t *m, float s,
 #pragma GCC diagnostic pop
 
 /* ── Rotation matrix → quaternion (Shepperd method) ────────────────────── */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
 static void rot_to_quat(const cv::Mat &R,
                          float *qx, float *qy, float *qz, float *qw)
 {
@@ -178,7 +173,6 @@ static void rot_to_quat(const cv::Mat &R,
     }
     *qx=(float)x; *qy=(float)y; *qz=(float)z; *qw=(float)w;
 }
-#pragma GCC diagnostic pop
 
 #define POSE_BPP 2          /* ISP outputs RGB565 = 2 bytes/pixel */
 
@@ -800,9 +794,14 @@ void aruco_pose_start(void)
             continue;
         }
 
-        /* Per-marker: distance via single-marker solvePnP */
+        /* Per-marker: distance + world pose via single-marker solvePnP */
         static char mbuf[160];
         int mpos = 0;
+
+        double px_sum = 0, py_sum = 0, pz_sum = 0;
+        float  qx_out = 0, qy_out = 0, qz_out = 0, qw_out = 1;
+        int    pose_n = 0;
+        float  best_dist = 1e9f;
 
         for (int i = 0; i < (int)ids.size(); i++) {
             std::vector<cv::Point2f> &c = corners[i];
@@ -815,10 +814,41 @@ void aruco_pose_start(void)
             float dist = sqrtf(tx*tx + ty*ty + tz*tz);
             mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
                              "M%d:%.2fm ", ids[i], dist);
+
+            const world_marker_t *m = find_marker(ids[i]);
+            if (m) {
+                float yr = m->yaw_deg * (float)M_PI / 180.0f;
+                cv::Mat R_lw = (cv::Mat_<double>(3,3) <<
+                     cos(yr),  0,  sin(yr),
+                     sin(yr),  0, -cos(yr),
+                     0,        1,  0      );
+                cv::Mat R_l2c;
+                cv::Rodrigues(rvec_s, R_l2c);
+                cv::Mat p_local = -R_l2c.t() * tvec_s;
+                cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
+                    (double)m->x, (double)m->y, (double)m->z);
+                cv::Mat p_world = R_lw * p_local + t_mw;
+                px_sum += p_world.at<double>(0);
+                py_sum += p_world.at<double>(1);
+                pz_sum += p_world.at<double>(2);
+                if (dist < best_dist) {
+                    best_dist = dist;
+                    rot_to_quat(R_lw * R_l2c.t(),
+                                &qx_out, &qy_out, &qz_out, &qw_out);
+                }
+                pose_n++;
+            }
         }
         if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
 
-        printf("%s\n", mbuf);
+        if (pose_n > 0) {
+            printf("%s POSE:%d:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f\n",
+                   mbuf, pose_n,
+                   px_sum / pose_n, py_sum / pose_n, pz_sum / pose_n,
+                   qx_out, qy_out, qz_out, qw_out);
+        } else {
+            printf("%s\n", mbuf);
+        }
         fflush(stdout);
     }
 }
