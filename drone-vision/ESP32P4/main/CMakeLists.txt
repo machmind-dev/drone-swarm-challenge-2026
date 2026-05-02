@@ -8,4 +8,4 @@ idf_component_register(SRCS main.c aruco_pose.cpp
 
 # -DCAMERA_VIEW_MODE : color+gray live viewer, no OpenCV -- use with view_frame.py
 # Remove -DCAMERA_VIEW_MODE to restore normal ArUco detection mode.
-target_compile_options(${COMPONENT_LIB} PRIVATE "-UEPS")
+target_compile_options(${COMPONENT_LIB} PRIVATE "-UEPS" "-DDETECTION_STREAM")

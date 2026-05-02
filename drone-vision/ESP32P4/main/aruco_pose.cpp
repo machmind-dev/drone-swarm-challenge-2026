@@ -790,65 +790,107 @@ void aruco_pose_start(void)
             fflush(stdout);
         }
 
-        if (ids.empty()) {
-            continue;
-        }
+        /* Per-marker: distance + world pose (skipped when no markers found) */
+        if (!ids.empty()) {
+            static char mbuf[160];
+            int mpos = 0;
 
-        /* Per-marker: distance + world pose via single-marker solvePnP */
-        static char mbuf[160];
-        int mpos = 0;
+            double px_sum = 0, py_sum = 0, pz_sum = 0;
+            float  qx_out = 0, qy_out = 0, qz_out = 0, qw_out = 1;
+            int    pose_n = 0;
+            float  best_dist = 1e9f;
 
-        double px_sum = 0, py_sum = 0, pz_sum = 0;
-        float  qx_out = 0, qy_out = 0, qz_out = 0, qw_out = 1;
-        int    pose_n = 0;
-        float  best_dist = 1e9f;
+            for (int i = 0; i < (int)ids.size(); i++) {
+                std::vector<cv::Point2f> &c = corners[i];
+                cv::Mat rvec_s, tvec_s;
+                cv::solvePnP(single_obj, c, K, D,
+                             rvec_s, tvec_s, false, cv::SOLVEPNP_IPPE_SQUARE);
+                float tx = (float)tvec_s.at<double>(0);
+                float ty = (float)tvec_s.at<double>(1);
+                float tz = (float)tvec_s.at<double>(2);
+                float dist = sqrtf(tx*tx + ty*ty + tz*tz);
+                mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
+                                 "M%d:%.2fm ", ids[i], dist);
 
-        for (int i = 0; i < (int)ids.size(); i++) {
-            std::vector<cv::Point2f> &c = corners[i];
-            cv::Mat rvec_s, tvec_s;
-            cv::solvePnP(single_obj, c, K, D,
-                         rvec_s, tvec_s, false, cv::SOLVEPNP_IPPE_SQUARE);
-            float tx = (float)tvec_s.at<double>(0);
-            float ty = (float)tvec_s.at<double>(1);
-            float tz = (float)tvec_s.at<double>(2);
-            float dist = sqrtf(tx*tx + ty*ty + tz*tz);
-            mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
-                             "M%d:%.2fm ", ids[i], dist);
-
-            const world_marker_t *m = find_marker(ids[i]);
-            if (m) {
-                float yr = m->yaw_deg * (float)M_PI / 180.0f;
-                cv::Mat R_lw = (cv::Mat_<double>(3,3) <<
-                     cos(yr),  0,  sin(yr),
-                     sin(yr),  0, -cos(yr),
-                     0,        1,  0      );
-                cv::Mat R_l2c;
-                cv::Rodrigues(rvec_s, R_l2c);
-                cv::Mat p_local = -R_l2c.t() * tvec_s;
-                cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
-                    (double)m->x, (double)m->y, (double)m->z);
-                cv::Mat p_world = R_lw * p_local + t_mw;
-                px_sum += p_world.at<double>(0);
-                py_sum += p_world.at<double>(1);
-                pz_sum += p_world.at<double>(2);
-                if (dist < best_dist) {
-                    best_dist = dist;
-                    rot_to_quat(R_lw * R_l2c.t(),
-                                &qx_out, &qy_out, &qz_out, &qw_out);
+                const world_marker_t *m = find_marker(ids[i]);
+                if (m) {
+                    float yr = m->yaw_deg * (float)M_PI / 180.0f;
+                    cv::Mat R_lw = (cv::Mat_<double>(3,3) <<
+                         cos(yr),  0,  sin(yr),
+                         sin(yr),  0, -cos(yr),
+                         0,        1,  0      );
+                    cv::Mat R_l2c;
+                    cv::Rodrigues(rvec_s, R_l2c);
+                    cv::Mat p_local = -R_l2c.t() * tvec_s;
+                    cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
+                        (double)m->x, (double)m->y, (double)m->z);
+                    cv::Mat p_world = R_lw * p_local + t_mw;
+                    px_sum += p_world.at<double>(0);
+                    py_sum += p_world.at<double>(1);
+                    pz_sum += p_world.at<double>(2);
+                    if (dist < best_dist) {
+                        best_dist = dist;
+                        rot_to_quat(R_lw * R_l2c.t(),
+                                    &qx_out, &qy_out, &qz_out, &qw_out);
+                    }
+                    pose_n++;
                 }
-                pose_n++;
             }
-        }
-        if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
+            if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
 
-        if (pose_n > 0) {
-            printf("%s POSE:%d:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f\n",
-                   mbuf, pose_n,
-                   px_sum / pose_n, py_sum / pose_n, pz_sum / pose_n,
-                   qx_out, qy_out, qz_out, qw_out);
-        } else {
-            printf("%s\n", mbuf);
+            if (pose_n > 0) {
+                printf("%s POSE:%d:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f\n",
+                       mbuf, pose_n,
+                       px_sum / pose_n, py_sum / pose_n, pz_sum / pose_n,
+                       qx_out, qy_out, qz_out, qw_out);
+            } else {
+                printf("%s\n", mbuf);
+            }
+            fflush(stdout);
         }
-        fflush(stdout);
+
+#ifdef DETECTION_STREAM
+        /* Draw detected marker outlines on fast_frame, downsample to VIEW_W×VIEW_H,
+         * convert grayscale→RGB565, send binary frame (same protocol as CAMERA_VIEW_MODE).
+         * Runs every frame so the viewer stays live even when no markers are visible. */
+        {
+            for (int i = 0; i < (int)ids.size(); i++) {
+                for (int j = 0; j < 4; j++) {
+                    int x0 = (int)roundf(corners[i][j].x);
+                    int y0 = (int)roundf(corners[i][j].y);
+                    int x1 = (int)roundf(corners[i][(j+1)%4].x);
+                    int y1 = (int)roundf(corners[i][(j+1)%4].y);
+                    int steps = std::max(std::abs(x1-x0), std::abs(y1-y0));
+                    if (steps < 1) steps = 1;
+                    for (int s = 0; s <= steps; s++) {
+                        int px = x0 + (x1-x0)*s/steps;
+                        int py = y0 + (y1-y0)*s/steps;
+                        if (px >= 0 && px < POSE_REQ_W && py >= 0 && py < POSE_REQ_H)
+                            fast_frame[py * POSE_REQ_W + px] = 255;
+                    }
+                }
+            }
+            static uint16_t det_view[VIEW_W * VIEW_H];
+            for (int dy = 0; dy < VIEW_H; dy++) {
+                int sy = (int)((uint32_t)dy * POSE_REQ_H / VIEW_H);
+                for (int dx = 0; dx < VIEW_W; dx++) {
+                    int sx = (int)((uint32_t)dx * POSE_REQ_W / VIEW_W);
+                    uint8_t g = fast_frame[sy * POSE_REQ_W + sx];
+                    det_view[dy * VIEW_W + dx] =
+                        ((uint16_t)(g >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (g >> 3);
+                }
+            }
+            static const uint8_t DET_MAGIC[8] =
+                {0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C};
+            const uint8_t dim_hdr[4] = {
+                (uint8_t)(VIEW_W & 0xFF), (uint8_t)(VIEW_W >> 8),
+                (uint8_t)(VIEW_H & 0xFF), (uint8_t)(VIEW_H >> 8),
+            };
+            fwrite(DET_MAGIC, 1, sizeof(DET_MAGIC), stdout);
+            fwrite(dim_hdr,   1, sizeof(dim_hdr),   stdout);
+            fwrite(det_view,  1, sizeof(det_view),  stdout);
+            fflush(stdout);
+        }
+#endif /* DETECTION_STREAM */
     }
 }
