@@ -493,13 +493,9 @@ void aruco_pose_start(void)
     const int crop_y = ((int)cap_h - crop_h) / 2;               /* (800-600)/2 = 100 */
 
 #ifdef DETECTION_STREAM
-    /* det_snap_gray: VIEW_W×VIEW_H uint8 grayscale — downsampled from fast_frame
-     * before detectMarkers runs.  fast_frame has the 98th-percentile ns
-     * normalisation applied, so the image is always properly exposed regardless
-     * of whether ISP auto-exposure has converged. */
-    static uint8_t  det_snap_gray[VIEW_W * VIEW_H];
-    /* det_snap: VIEW_W×VIEW_H uint16 RGB565 — filled from det_snap_gray at
-     * stream time with detected marker outlines drawn white. */
+    /* det_snap: VIEW_W×VIEW_H uint16 RGB565 — filled from the DMA buffer before
+     * STREAMOFF (same technique as camera_view_mode) so ISP lens-shading and AE
+     * corrections are active.  Marker outlines drawn white at stream time. */
     static uint16_t det_snap[VIEW_W * VIEW_H];
 #endif
 
@@ -604,11 +600,12 @@ void aruco_pose_start(void)
             ESP_LOGW(TAG, "VIDIOC_S_EXT_CTRLS EXPOSURE_ABSOLUTE failed (errno=%d)", errno);
     }
 
-    /* Give the OV5647 and ISP pipeline 500 ms to stabilise before the first
-     * DQBUF.  The sensor begins clocking MIPI data immediately on STREAMON but
-     * the ISP pipeline controller (AE/AWB isp_task) needs a few frames to
-     * settle; issuing DQBUF too early can race with the DMA setup. */
-    vTaskDelay(pdMS_TO_TICKS(500));
+    /* Give the OV5647 and ISP pipeline 5 s to stabilise before the first
+     * DQBUF.  The ISP lens-shading correction and AE need several frames to
+     * converge; the per-frame STREAMOFF in the detection loop pauses DMA but
+     * does not reset the ISP algorithm state, so once converged the corrections
+     * remain active.  500 ms was too short — lens vignette circle visible. */
+    vTaskDelay(pdMS_TO_TICKS(5000));
     ESP_LOGI(TAG, "Sensor stabilisation delay done — entering capture loop");
 
 #ifdef CAMERA_VIEW_MODE
@@ -641,15 +638,30 @@ void aruco_pose_start(void)
             continue;
         }
 
-        /* Stop CSI DMA before reading PSRAM frame buffer.
-         * HEX PSRAM DMA → MSPI bus pressure → stale cache lines if we read
-         * frame data while DMA writes to an adjacent buffer in the same PSRAM.
-         * STREAMOFF window is kept as short as possible: just the C conversion
-         * below.  DMA restarts before the slow detectMarkers call so the camera
-         * pipeline is disrupted for only ~5–10 ms per frame. */
-        int stream_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        ioctl(video_fd, VIDIOC_STREAMOFF, &stream_type);
+#ifdef DETECTION_STREAM
+        /* Color snapshot BEFORE STREAMOFF — DMA still running on the other buffer.
+         * This mirrors camera_view_mode exactly: buf.index is exclusively ours
+         * after DQBUF, so reading cam_bufs[buf.index] is safe while DMA writes
+         * to the other buffer.  ISP lens-shading and AE corrections are active,
+         * producing a proper scene image (no raw lens vignette circle). */
+        {
+            const uint16_t *src = (const uint16_t *)(void *)cam_bufs[buf.index];
+            for (int dy = 0; dy < VIEW_H; dy++) {
+                int sy = crop_y + (int)((uint32_t)dy * (uint32_t)crop_h / VIEW_H);
+                const uint16_t *row = src + (uint32_t)sy * cap_w;
+                for (int dx = 0; dx < VIEW_W; dx++) {
+                    int sx = (int)((uint32_t)dx * cap_w / VIEW_W);
+                    det_snap[dy * VIEW_W + dx] = row[sx];
+                }
+            }
+        }
+#endif
 
+        /* NO STREAMOFF — camera streams continuously so ISP AE/AWB/LSC converges.
+         * buf.index is exclusively ours after DQBUF; DMA is writing to the
+         * other buffer.  PSRAM reads of cam_bufs[buf.index] are safe here,
+         * same as camera_view_mode.  We QBUF this buffer below, AFTER we have
+         * copied all needed data into SRAM fast_frame. */
         uint8_t *frame_ptr = cam_bufs[buf.index];
 
         /* FPS counter — log every 5 seconds */
@@ -663,8 +675,8 @@ void aruco_pose_start(void)
         }
 
         /* One-pass RGB565→grayscale + center-crop + nearest-neighbour resize
-         * PSRAM→SRAM.  No OpenCV, no TLS, no BSS statics — just pointer math.
-         * DMA is stopped; PSRAM reads are cache-coherent. */
+         * PSRAM→SRAM.  DMA is streaming on the other buffer — reading this
+         * buffer is safe because DQBUF gives us exclusive ownership of it. */
         {
             /* 98th-percentile normalisation: bright point sources saturate
              * but do NOT collapse ambient scene to black. */
@@ -729,46 +741,26 @@ void aruco_pose_start(void)
 
         }
 
-#ifdef DETECTION_STREAM
-        /* Downsample fast_frame (already ns-normalised to 0-255) into det_snap_gray.
-         * Must happen here — after fast_frame is filled, before detectMarkers
-         * overwrites it via adaptive thresholding. */
-        {
-            for (int dy = 0; dy < VIEW_H; dy++) {
-                int sy = (int)((uint32_t)dy * POSE_REQ_H / VIEW_H);
-                for (int dx = 0; dx < VIEW_W; dx++) {
-                    int sx = (int)((uint32_t)dx * POSE_REQ_W / VIEW_W);
-                    det_snap_gray[dy * VIEW_W + dx] = fast_frame[sy * POSE_REQ_W + sx];
-                }
-            }
-        }
-#endif
+        /* det_snap already captured from DMA buffer above (before frame fill). */
 
-        /* Detect ArUco markers — SRAM-only, DMA still OFF.
-         * detectMarkers() calls malloc(76800) internally (adaptiveThreshold
-         * workspace). That allocation exceeds SPIRAM_MALLOC_ALWAYSINTERNAL
-         * (32768) and lands in the PSRAM heap.  The PSRAM heap manager struct
-         * (multi_heap_t) lives within the same PSRAM region as cam_bufs[].
-         * If DMA is running during this malloc the spinlock field in
-         * multi_heap_t gets corrupted by cache-line pressure → crash.
-         * Keep STREAMOFF active until detectMarkers + solvePnP are done. */
+        /* Return DMA buffer to driver now — all data copied to SRAM fast_frame.
+         * Camera keeps streaming continuously; ISP AE/AWB converges normally. */
+        {
+            struct v4l2_buffer qbuf = {};
+            qbuf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            qbuf.memory = V4L2_MEMORY_MMAP;
+            qbuf.index  = buf.index;
+            ioctl(video_fd, VIDIOC_QBUF, &qbuf);
+        }
+
+        /* Detect ArUco markers in fast_frame (SRAM — no PSRAM access).
+         * detectMarkers() calls malloc(76800) internally; with
+         * SPIRAM_MALLOC_ALWAYSINTERNAL=131072 this lands in SRAM, so there is
+         * no PSRAM heap spinlock conflict while DMA is active. */
         cv::Mat det_mat(POSE_REQ_H, POSE_REQ_W, CV_8UC1, fast_frame);
 
         ids.clear(); corners.clear(); rejected.clear();
         detector.detectMarkers(det_mat, corners, ids, rejected);
-
-        /* Restart DMA AFTER all OpenCV processing is complete.
-         * cam_bufs[] in PSRAM are no longer accessed from this point;
-         * the next loop iteration calls DQBUF which blocks until DMA
-         * delivers a fresh frame. */
-        for (int qi = 0; qi < CAM_BUF_COUNT; qi++) {
-            struct v4l2_buffer qbuf = {};
-            qbuf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            qbuf.memory = V4L2_MEMORY_MMAP;
-            qbuf.index  = qi;
-            ioctl(video_fd, VIDIOC_QBUF, &qbuf);
-        }
-        ioctl(video_fd, VIDIOC_STREAMON, &stream_type);
 
         /* Diagnostic: every 50 frames log pixel stats + detection counts */
         if (++diag_frame % 50 == 0) {
@@ -877,18 +869,10 @@ void aruco_pose_start(void)
         }
 
 #ifdef DETECTION_STREAM
-        /* Stream det_snap (raw ISP RGB565, VIEW_W×VIEW_H) with detected marker
-         * outlines drawn white.  det_snap was filled in the STREAMOFF window before
-         * detectMarkers ran.  Convert det_snap_gray (uint8 normalised) to RGB565
-         * then draw detected marker outlines white. */
+        /* Stream det_snap (ISP color RGB565, VIEW_W×VIEW_H) with detected marker
+         * outlines drawn white.  det_snap was captured from DMA buffer before
+         * STREAMOFF so ISP lens-shading and AE corrections are fully applied. */
         {
-            /* Gray→RGB565: replicate the 8-bit value across all three channels */
-            for (int i = 0; i < VIEW_W * VIEW_H; i++) {
-                uint8_t g = det_snap_gray[i];
-                det_snap[i] = ((uint16_t)(g >> 3) << 11)
-                            | ((uint16_t)(g >> 2) <<  5)
-                            |  (uint16_t)(g >> 3);
-            }
             /* Draw detected marker outlines white */
             const float vsx = (float)VIEW_W / POSE_REQ_W;
             const float vsy = (float)VIEW_H / POSE_REQ_H;
@@ -920,5 +904,11 @@ void aruco_pose_start(void)
             fflush(stdout);
         }
 #endif /* DETECTION_STREAM */
+
+        /* Yield 5 ms per loop so FreeRTOS IDLE task can run and reset the task
+         * watchdog.  Without this, DQBUF never blocks (camera at 50 fps
+         * outpaces detection at ~3 fps → always a frame queued) and IDLE
+         * never gets CPU time → WDT triggers every 5 s. */
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
