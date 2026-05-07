@@ -1,9 +1,0 @@
-dependencies:
-  espressif/esp32-camera:
-    version: '*'
-
-  # espressif/opencv is provided as a local component override in
-  # components/espressif__opencv/ (symlink to drone-firmware) so it is not
-  # listed here. The local component includes the PSRAM BSS linker fragment
-  # that prevents DRAM overflow on ESP32-S3.
-

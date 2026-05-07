@@ -1,18 +1,19 @@
 # =============================================================================
-# ESP-IDF / Drone Firmware
+# ESP-IDF / Drone Firmware (all versions)
 # =============================================================================
-drone-firmware/build/
-drone-firmware/managed_components/
-drone-firmware/components/micro_ros_espidf_component/
-!drone-firmware/components/micro_ros_espidf_component/colcon.meta
-drone-firmware/dependencies.lock
-drone-firmware/sdkconfig
-drone-firmware/.cache/
+drone-firmware/**/build/
+drone-firmware/**/managed_components/
+drone-firmware/**/dependencies.lock
+drone-firmware/**/sdkconfig
+drone-firmware/**/.cache/
 drone-firmware/**/*.o
 drone-firmware/**/*.d
 drone-firmware/**/*.elf
 drone-firmware/**/*.bin
 drone-firmware/**/*.map
+# v1.0 micro-ros component is large — keep only colcon.meta
+drone-firmware/v1.0/components/micro_ros_espidf_component/
+!drone-firmware/v1.0/components/micro_ros_espidf_component/colcon.meta
 
 # =============================================================================
 # ROS2 / Colcon (Ground Station)
