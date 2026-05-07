@@ -875,8 +875,9 @@ void aruco_pose_start(void)
             printf("TOF:");
             for (uint8_t k = 0; k < n; k++) {
                 if (k) printf(",");
-                if (tof_get_range_status(k) == 0)
-                    printf("%u", tof_get_distance_mm(k));
+                uint16_t d = tof_get_distance_mm(k);
+                if (tof_get_range_status(k) == 0 && d > 0)
+                    printf("%u", d);
                 else
                     printf("---");
             }
