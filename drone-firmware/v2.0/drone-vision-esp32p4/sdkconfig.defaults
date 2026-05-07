@@ -15,9 +15,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
 # Waveshare ESP32-P4-WIFI6 board has a WCH CH343 USB-UART bridge (1a86:55d3)
 # connected to P4's UART0 -- this appears as /dev/ttyACM0 (CDC-ACM).
-# 921600 baud matches stream_view.py (binary RGB565 frames + POSE/TOF text).
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
 
 # -- Power management ---------------------------------------------------------
 CONFIG_PM_ENABLE=y
