@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=true
+Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-drone-vision-s3.sh
+Path=/home/pihas/drone-swarm-challenge-2026/drone-firmware/v2.0/drone-comms-esp32s3
+Name=IDE — Flash S3
+Comment=Build and flash ArUco vision firmware for ESP32-S3 (IDF 5.0, OV3660/OV5640)
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/flash_ico.png

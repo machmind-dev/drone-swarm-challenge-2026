@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=true
+Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-drone-vision-p4.sh
+Path=/home/pihas/drone-swarm-challenge-2026/drone-firmware/v2.0/drone-vision-esp32p4
+Name=IDE — Flash P4
+Comment=Build and flash ArUco vision firmware for ESP32-P4 (IDF 5.3, OV5647 MIPI-CSI)
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/flash_ico.png

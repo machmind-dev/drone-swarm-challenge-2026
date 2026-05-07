@@ -5,6 +5,6 @@ Type=Application
 Terminal=true
 Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-vision.sh
 Path=/home/pihas/drone-swarm-challenge-2026/
-Name=Mach Mind - Vision
+Name=GCS — Vision
 Comment=Start ArUco marker detection node
 Icon=/home/pihas/drone-swarm-challenge-2026/launchers/vision_ico.png
