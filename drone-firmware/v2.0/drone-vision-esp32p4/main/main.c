@@ -22,6 +22,7 @@
 #endif
 
 #include "aruco_pose.h"
+#include "tof_task.h"
 
 static const char *TAG = "main";
 
@@ -70,6 +71,8 @@ void app_main(void)
 #endif
 
     ESP_LOGI(TAG, "Mach Mind — ESP32-P4 ArUco Pose Estimator boot");
+
+    tof_task_start();
 
     xTaskCreatePinnedToCore(pose_task, "aruco_pose",
                             POSE_TASK_STACK_KB * 1024,

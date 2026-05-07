@@ -23,6 +23,7 @@
  */
 
 #include "aruco_pose.h"
+#include "tof_task.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -865,6 +866,21 @@ void aruco_pose_start(void)
             } else {
                 printf("%s\n", mbuf);
             }
+            fflush(stdout);
+        }
+
+        /* ── ToF distance output — every frame ──────────────────────────────── */
+        {
+            uint8_t n = tof_sensor_count();
+            printf("TOF:");
+            for (uint8_t k = 0; k < n; k++) {
+                if (k) printf(",");
+                if (tof_get_range_status(k) == 0)
+                    printf("%u", tof_get_distance_mm(k));
+                else
+                    printf("---");
+            }
+            printf("mm\n");
             fflush(stdout);
         }
 

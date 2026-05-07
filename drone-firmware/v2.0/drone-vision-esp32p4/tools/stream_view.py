@@ -39,16 +39,19 @@ print("Close the window or Ctrl-C to quit.")
 
 ser = serial.Serial(PORT, BAUD, timeout=3)
 
-# ── POSE state (updated from UART text lines between frames) ──────────────────
-_latest_pose_txt = ""   # formatted string shown in overlay, empty when no fix
+# ── POSE + TOF state (updated from UART text lines between frames) ───────────
+_latest_pose_txt = ""   # cyan overlay on panel 1, empty when no fix
+_latest_tof_txt  = ""   # yellow overlay on panel 3, empty until first reading
 
 _POSE_RE = re.compile(
     r'POSE:(\d+):([-\d.]+):([-\d.]+):([-\d.]+)'
     r':([-\d.]+):([-\d.]+):([-\d.]+):([-\d.]+)'
 )
+# TOF:<dist0>,<dist1>,...mm  where each value is a number or ---
+_TOF_RE = re.compile(r'TOF:([\d,\-]+)mm')
 
 def _handle_text_line(raw: bytes) -> None:
-    global _latest_pose_txt
+    global _latest_pose_txt, _latest_tof_txt
     try:
         line = raw.decode('ascii', errors='replace').strip()
     except Exception:
@@ -62,8 +65,21 @@ def _handle_text_line(raw: bytes) -> None:
         x, y, z = float(m.group(2)), float(m.group(3)), float(m.group(4))
         _latest_pose_txt = f"POSE n={n}  x={x:.2f} y={y:.2f} z={z:.2f} m"
     elif line.startswith('M') and not m:
-        # Marker distances without a known-marker POSE
         _latest_pose_txt = line
+    t = _TOF_RE.search(line)
+    if t:
+        parts = t.group(1).split(',')
+        labels = []
+        for i, p in enumerate(parts):
+            if p == '---':
+                labels.append(f"S{i}: --")
+            else:
+                try:
+                    mm = int(p)
+                    labels.append(f"S{i}: {mm} mm  ({mm/1000:.2f} m)")
+                except ValueError:
+                    labels.append(f"S{i}: ?")
+        _latest_tof_txt = "ToF\n" + "\n".join(labels)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def sync_to_magic():
@@ -153,6 +169,12 @@ pose_txt = axes[0].text(0.01, 0.98, "",
                          family='monospace',
                          bbox=dict(facecolor='#000000aa', edgecolor='none', pad=2))
 
+tof_txt = axes[2].text(0.01, 0.98, "",
+                        transform=axes[2].transAxes,
+                        color='yellow', fontsize=9, va='top',
+                        family='monospace',
+                        bbox=dict(facecolor='#000000cc', edgecolor='none', pad=3))
+
 plt.tight_layout()
 plt.ion()
 plt.show()
@@ -196,6 +218,7 @@ def display_frame(W, H, raw):
         f"R={r_mean:.0f} G={g_mean:.0f} B={b_mean:.0f}  max={max_val}  {status}"
     )
     pose_txt.set_text(_latest_pose_txt)
+    tof_txt.set_text(_latest_tof_txt)
 
     fig.canvas.draw()
     fig.canvas.flush_events()

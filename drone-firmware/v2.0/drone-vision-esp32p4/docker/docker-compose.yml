@@ -10,6 +10,8 @@ services:
     tty: true
     volumes:
       - /dev:/dev
+      # Local components (VL53L1-ULD-ESP and any future additions)
+      - ../components:/code/components
       # Project source files from the ESP32P4 subfolder
       - ../main:/code/main
       - ../CMakeLists.txt:/code/CMakeLists.txt
