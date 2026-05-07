@@ -10,13 +10,11 @@ services:
     tty: true
     volumes:
       - /dev:/dev
-      # Shared components live two levels up (drone-vision/components/)
-      - ../../components/esp32-camera:/code/components/esp32-camera
-      - ../../components/psram_bss_scheme:/code/components/psram_bss_scheme
-      # OpenCV pre-built for ESP32-S3 (Xtensa), shared from drone-firmware
-      - /home/pihas/drone-swarm-challenge-2026/drone-firmware/components/espressif__opencv:/code/components/espressif__opencv:ro
-      # Shared managed_components (esp_jpeg etc.) from drone-vision root
-      - ../../managed_components:/code/managed_components
+      # OpenCV pre-built for ESP32-S3 (Xtensa) — lives in v1.0 archive
+      - /home/pihas/drone-swarm-challenge-2026/drone-firmware/v1.0/components/espressif__opencv:/code/components/espressif__opencv:ro
+      # esp32-camera and managed_components are NOT bind-mounted.
+      # idf.py fetches esp32-camera via component manager on first build;
+      # managed_components lives in the container writable layer (same as P4).
       # Project source files from this subfolder
       - ../main:/code/main
       - ../CMakeLists.txt:/code/CMakeLists.txt

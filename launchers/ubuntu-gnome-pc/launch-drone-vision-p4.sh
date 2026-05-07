@@ -28,7 +28,7 @@ echo "         idf.py -p /dev/ttyACM0 flash monitor"
 echo ""
 sleep 1
 
-PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-vision/ESP32P4"
+PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-firmware/v2.0/drone-vision-esp32p4"
 COMPOSE_FILE="docker/docker-compose.yml"
 SERVICE_NAME="esp32p4_vision"
 

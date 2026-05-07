@@ -37,7 +37,7 @@ echo ""
 echo "[INFO] Initializing micro-ROS environment ..."
 sleep 1
 
-PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-firmware"
+PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-firmware/v1.0"
 COMPOSE_FILE="docker/docker-compose.yml"
 SERVICE_NAME="esp32s3_camera"
 
