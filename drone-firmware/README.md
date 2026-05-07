@@ -118,12 +118,22 @@ OV5647 MIPI-CSI                             PX4 Flight Controller
 | Capture resolution | 160×120 (QQVGA) | 800×800 RAW8 |
 | Detection resolution | 80×60 (2× downsampled) | 320×240 (QVGA, cropped + resized) |
 | Detection range achieved | ~3–4 m | ~8 m (QVGA) / ~12 m (HVGA mode) |
+| Sensor frame rate | 15 fps (DVP limit) | 50 fps @ 800×800 RAW8 |
 | Frame rate at detection res | ~2–3 fps (CPU shared) | ~3 fps at 320×240 (CPU dedicated) |
 
-The v1.0 firmware had to run at QQVGA → 80×60 because the S3 shared its CPU between
-camera capture, ArUco detection, micro-ROS, and sensor polling. The OV5647 on P4 captures
-at 800×800 and downsamples to QVGA, giving roughly 4× more detection pixels and more than
-double the reliable marker range.
+The OV5647 sensor delivers 50 fps but detection runs at ~3 fps — the camera is not the
+bottleneck. Each frame requires the P4 to read and convert the full 800×800 RGB565 buffer
+(1.28 MB) from PSRAM to SRAM twice (grayscale crop for ArUco + color thumbnail for the
+stream viewer), then run OpenCV `detectMarkers` which internally executes adaptive
+thresholding, contour finding, corner refinement, and `solvePnP` on the 320×240 image.
+That pipeline costs ~300 ms per frame on the 360 MHz RISC-V core, capping throughput at
+~3 fps regardless of sensor speed. The sensor runs continuously so ISP auto-exposure and
+lens-shading correction keep converging between detection frames.
+
+The v1.0 firmware had to use 80×60 (QQVGA downsampled) because the S3 shared its CPU
+between camera, ArUco, micro-ROS, and sensor polling. The OV5647 on P4 processes 320×240
+— 16× more pixels — on a dedicated core, achieving more than double the reliable marker
+detection range despite the same ~3 fps throughput.
 
 ### OV5647 adjustable focus lens
 
