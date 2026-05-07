@@ -30,7 +30,7 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 PORT  = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyACM0"
-BAUD  = int(sys.argv[2]) if len(sys.argv) > 2 else 921600
+BAUD  = int(sys.argv[2]) if len(sys.argv) > 2 else 115200
 MAGIC = bytes([0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C])
 
 print(f"Opening {PORT} @ {BAUD} baud — waiting for first frame …")
