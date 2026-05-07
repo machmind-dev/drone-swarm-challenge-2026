@@ -96,6 +96,62 @@ OV5647 MIPI-CSI                             PX4 Flight Controller
 
 ---
 
+## Camera Comparison — v1.0 vs v2.0
+
+### Sensor specifications
+
+| | OV2640 (v1.0) | OV3660 (v1.0) | OV5647 (v2.0) |
+|---|---|---|---|
+| Sensor size | 1/4" | 1/5" | 1/4" |
+| Native resolution | 2 MP (1600×1200) | 3 MP (2048×1536) | 5 MP (2592×1944) |
+| Pixel size | 2.2 µm | 1.75 µm | 1.4 µm |
+| Interface | DVP (parallel) | DVP (parallel) | MIPI-CSI2 (2-lane) |
+| Hardware ISP | None | Partial | Full (ESP32-P4 ISP block) |
+| Lens type | Fixed focus | Fixed focus | **Adjustable focus (M12 mount)** |
+| Max frame rate | 15 fps @ SVGA | 15 fps @ SVGA | 50 fps @ 800×800 RAW8 |
+| Low-light | Poor | Moderate | Good (ISP AE/AWB/lens-shading) |
+
+### Resolution used for ArUco detection
+
+| | v1.0 (OV2640 / OV3660) | v2.0 (OV5647) |
+|---|---|---|
+| Capture resolution | 160×120 (QQVGA) | 800×800 RAW8 |
+| Detection resolution | 80×60 (2× downsampled) | 320×240 (QVGA, cropped + resized) |
+| Detection range achieved | ~3–4 m | ~8 m (QVGA) / ~12 m (HVGA mode) |
+| Frame rate at detection res | ~2–3 fps (CPU shared) | ~3–4 fps (CPU dedicated) |
+
+The v1.0 firmware had to run at QQVGA → 80×60 because the S3 shared its CPU between
+camera capture, ArUco detection, micro-ROS, and sensor polling. The OV5647 on P4 captures
+at 800×800 and downsamples to QVGA, giving roughly 4× more detection pixels and more than
+double the reliable marker range.
+
+### OV5647 adjustable focus lens
+
+The OV5647 module used on the Waveshare ESP32-P4 board has an **M12 screw-mount lens with
+a manual focus ring**. Rotating the lens barrel moves the lens element along the optical
+axis, shifting the focal plane between close range (~0.5 m) and far range (>10 m).
+
+This is a concrete operational advantage over the fixed-focus OV2640 / OV3660:
+
+| Scenario | Fixed-focus (OV2640 / OV3660) | Adjustable-focus (OV5647) |
+|----------|-------------------------------|---------------------------|
+| Arena with bright overhead lighting | Image overexposed at fixed AEC target — no adjustment possible | ISP AEC + lens focus tuned to arena distance before flight |
+| Arena with dim / mixed lighting | Fixed focus may place sharpest plane at wrong distance | Focus ring set for working distance (e.g. 3 m to nearest wall marker) |
+| Changing between indoor arenas | Stuck with factory focus | Refocused in ~10 seconds with a small screwdriver |
+| Marker at 1 m vs 8 m | One is blurry — no fix | Focus set to the typical operating distance for each competition stage |
+
+The OV5647 also benefits from the ESP32-P4's hardware ISP pipeline (auto-exposure,
+auto-white-balance, and lens-shading correction), which converges to stable image
+quality after the 5-second warmup. The OV2640/OV3660 had no equivalent — exposure was
+managed through software register writes and reacted slowly to lighting changes.
+
+> **SDC 2026 arena note:** Finals arenas typically differ from qualifying arenas in size
+> and ceiling height. The adjustable lens was set to the marker working distance
+> (wall-to-wall detection range) before each flight, and the ISP warmup was allowed to
+> stabilise before arming. This is not possible with a fixed-focus sensor.
+
+---
+
 ## Repository layout
 
 ```
