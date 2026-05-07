@@ -1,190 +1,131 @@
 /**
- * i2c_platform_esp.c
- * 
- * I2C device interface for the 
- * Espressif Internet-of-Things (IoT) Development Framework ESP-IDF
+ * i2c_platform_esp.c — driver_ng (i2c_master) shim for VL53L1X on ESP-IDF 5.3+.
  *
- * I2C_Master is the global I2C interface shared by all devices
- * 
- * (c) 2021 by David Asher
- * https://github.com/david-asher
- * https://www.linkedin.com/in/davidasher/
- * This code is licensed under MIT license, see LICENSE.txt for details
+ * ESP-IDF 5.x raises abort() if you mix the legacy i2c_driver_install() with
+ * i2c_new_master_bus() on the same port.  The esp_video / esp_sccb_intf camera
+ * stack uses driver_ng on the shared I2C bus (GPIO7 SDA / GPIO8 SCL, I2C_NUM_1
+ * on the Waveshare ESP32-P4-WiFi6 board).  This file replaces the old shim with
+ * one that uses driver_ng throughout.
+ *
+ * Bus ownership strategy
+ * ----------------------
+ *  1. Try i2c_new_master_bus() — succeeds when the port is free (future PCB
+ *     with a dedicated VL53L1X I2C port).
+ *  2. If the port is already taken (ESP_ERR_INVALID_STATE), borrow the handle
+ *     that esp_video created via i2c_master_get_bus_handle().  Retry for up to
+ *     5 s so that camera SCCB init can finish before we touch the bus.
+ *
+ * Device handles are cached in a small table keyed by 7-bit I2C address so
+ * i2c_master_bus_add_device() is only called once per address.
  */
 
 #include "i2c_platform_esp.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <string.h>
 
-typedef struct {
+static const char *TAG = "i2c_plat";
 
-    i2c_port_t 		  port; 
-    gpio_num_t 		  pin_sda; 
-    gpio_num_t 		  pin_scl; 
-    uint32_t   		  freq;
-    uint8_t           dev_address;
-    i2c_cmd_handle_t  cmd_handle;
+static i2c_master_bus_handle_t s_bus  = NULL;
+static bool                    s_owned = false;
+static uint32_t                s_freq  = I2C_DEFAULT_FREQ;
 
-} I2C_Master_t;
+#define MAX_DEVICES 10
+typedef struct { uint8_t addr7; i2c_master_dev_handle_t h; } dev_slot_t;
+static dev_slot_t s_devs[MAX_DEVICES];
+static int        s_ndevs = 0;
 
-I2C_Master_t *I2C_Master = (I2C_Master_t *) NULL;
-
-/* Static buffer for I2C command links — eliminates heap allocation from the
- * periodic ToF timer callback.  512 B covers the largest VL53L1X transaction
- * (2 start + 3 write_byte + 1 read + 1 stop = ~8 nodes × ~20 B ≈ 180 B). */
-#define I2C_CMD_STATIC_BUF_BYTES 512
-static uint8_t s_i2c_cmd_buf[I2C_CMD_STATIC_BUF_BYTES];
-
-void i2c_scan()
+/* Look up or add a device by its 7-bit address. */
+static i2c_master_dev_handle_t get_or_add(uint8_t addr7)
 {
-    printf("\r\nI2C device scan: ");
-    for (uint8_t i = 1; i < 127; i++)
-    {
-        int ret;
-        uint8_t test_address = i << 1;
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-        ESP_ERROR_CHECK( i2c_master_start(cmd) );
-        ESP_ERROR_CHECK( i2c_master_write_byte(cmd, test_address | I2C_MASTER_WRITE, 1) );
-        ESP_ERROR_CHECK( i2c_master_stop(cmd) );
-        ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, 100 / portTICK_PERIOD_MS);
-        i2c_cmd_link_delete(cmd);
-        if (ret != ESP_OK) continue;
-        printf("0x%02X | ", test_address );
+    for (int i = 0; i < s_ndevs; i++)
+        if (s_devs[i].addr7 == addr7) return s_devs[i].h;
+
+    if (s_ndevs >= MAX_DEVICES) {
+        ESP_LOGE(TAG, "device table full");
+        return NULL;
     }
-    printf( "\r\n" );
-}
 
-I2C_Master_t *i2c_master_setup()
-{
-    I2C_Master_t *new_master = (I2C_Master_t *) malloc( sizeof( I2C_Master_t ) );
-    new_master->port = I2C_DEFAULT_PORT;
-    new_master->pin_sda = I2C_DEFAULT_SDA; 
-    new_master->pin_scl = I2C_DEFAULT_SCL;
-    new_master->freq = I2C_DEFAULT_FREQ;
-    new_master->dev_address = I2C_NO_DEVICE;
-    new_master->cmd_handle = NULL;
-    return new_master;
-}
-
-void i2c_get_config( i2c_port_t *port, gpio_num_t *pin_sda, gpio_num_t *pin_scl, uint32_t *freq )
-{
-    *port = I2C_Master->port;
-    *pin_sda = I2C_Master->pin_sda; 
-    *pin_scl = I2C_Master->pin_scl;
-    *freq = I2C_Master->freq;
-}
-
-void i2c_init_driver()
-{
-    i2c_config_t conf;
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_Master->pin_sda;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_io_num = I2C_Master->pin_scl;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_Master->freq;
-    conf.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL;
-    ESP_ERROR_CHECK( i2c_param_config( I2C_Master->port, &conf ) );
-    ESP_ERROR_CHECK( i2c_driver_install( I2C_Master->port, conf.mode, 0, 0, 0 ) );
-}
-
-void i2c_init_config( i2c_port_t port, gpio_num_t pin_sda, gpio_num_t pin_scl, uint32_t freq )
-{
-    if ( I2C_Master != (I2C_Master_t *) NULL ) return;
-    I2C_Master = i2c_master_setup();
-    I2C_Master->port = port;
-    I2C_Master->pin_sda = pin_sda; 
-    I2C_Master->pin_scl = pin_scl;
-    I2C_Master->freq = freq;
-    i2c_init_driver();
-}
-
-void i2c_init() 
-{
-    if ( I2C_Master != (I2C_Master_t *) NULL ) return;
-    I2C_Master = i2c_master_setup();
-    i2c_init_driver();
-    i2c_filter_enable(I2C_Master->port, 7);
-}
-
-void i2c_remove() 
-{
-    ESP_ERROR_CHECK( i2c_driver_delete( I2C_Master->port ) );
-    free( I2C_Master );
-    I2C_Master = (I2C_Master_t *) NULL;
-}
-
-void i2c_upgrade( uint32_t upgrade_freq )
-{
-    i2c_port_t port;
-    gpio_num_t pin_sda;
-    gpio_num_t pin_scl;
-    uint32_t   old_freq;
-
-    i2c_get_config( &port, &pin_sda, &pin_scl, &old_freq );
-    i2c_remove();
-    i2c_init_config( port, pin_sda, pin_scl, upgrade_freq );
-}
-
-bool i2c_start( uint8_t i2c_device_address, i2c_rw_t read_write )
-{
-    if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) {
-        I2C_Master->dev_address = i2c_device_address;
-        I2C_Master->cmd_handle = i2c_cmd_link_create_static(s_i2c_cmd_buf, sizeof(s_i2c_cmd_buf));
-        if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) return false;
+    i2c_device_config_t cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = addr7,
+        .scl_speed_hz    = s_freq,
+    };
+    i2c_master_dev_handle_t h;
+    esp_err_t ret = i2c_master_bus_add_device(s_bus, &cfg, &h);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "add_device 0x%02x failed: %s", addr7, esp_err_to_name(ret));
+        return NULL;
     }
-    else if ( I2C_Master->dev_address != i2c_device_address ) {
-        return false;
+    s_devs[s_ndevs++] = (dev_slot_t){addr7, h};
+    ESP_LOGD(TAG, "registered device 0x%02x", addr7);
+    return h;
+}
+
+void i2c_init_config(i2c_port_num_t port, gpio_num_t sda,
+                     gpio_num_t scl, uint32_t freq)
+{
+    if (s_bus) return;
+    s_freq = freq;
+
+    /* --- attempt to create a fresh bus (works for dedicated I2C port) --- */
+    i2c_master_bus_config_t cfg = {
+        .i2c_port              = port,
+        .sda_io_num            = sda,
+        .scl_io_num            = scl,
+        .clk_source            = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt     = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    esp_err_t ret = i2c_new_master_bus(&cfg, &s_bus);
+    if (ret == ESP_OK) {
+        s_owned = true;
+        ESP_LOGI(TAG, "created I2C bus  port=%d  SDA=%d SCL=%d  %lu Hz",
+                 (int)port, (int)sda, (int)scl, (unsigned long)freq);
+        return;
     }
-    if ( i2c_master_start(I2C_Master->cmd_handle) != ESP_OK ||
-         i2c_master_write_byte(I2C_Master->cmd_handle, I2C_Master->dev_address | read_write, ACK_CHECK_EN) != ESP_OK ) {
-        i2c_cmd_link_delete_static(I2C_Master->cmd_handle);
-        I2C_Master->cmd_handle = (i2c_cmd_handle_t) NULL;
-        I2C_Master->dev_address = I2C_NO_DEVICE;
-        return false;
+
+    /* --- port taken by driver_ng (camera SCCB) — borrow the handle --- */
+    for (int attempt = 0; attempt < 50; attempt++) {
+        ret = i2c_master_get_bus_handle(port, &s_bus);
+        if (ret == ESP_OK && s_bus) {
+            s_owned = false;
+            ESP_LOGI(TAG, "borrowed I2C bus from SCCB  port=%d  %lu Hz",
+                     (int)port, (unsigned long)freq);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-    return true;
+    ESP_LOGE(TAG, "cannot get I2C bus handle on port %d: %s",
+             (int)port, esp_err_to_name(ret));
 }
 
-size_t i2c_write_byte( uint8_t data_byte_out )
+esp_err_t i2c_write_multi(uint8_t dev_addr8, uint16_t reg,
+                          uint8_t *data, uint32_t count)
 {
-    if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) return 0;
-    ESP_ERROR_CHECK( i2c_master_write_byte( I2C_Master->cmd_handle, data_byte_out, ACK_CHECK_EN ) );
-    return 1;
+    if (!s_bus) return ESP_ERR_INVALID_STATE;
+    i2c_master_dev_handle_t h = get_or_add(dev_addr8 >> 1);
+    if (!h) return ESP_ERR_NOT_FOUND;
+
+    /* 2-byte register address + payload — static buffer avoids VLA */
+    uint8_t buf[258];
+    if (count > 256) return ESP_ERR_INVALID_ARG;
+    buf[0] = (reg >> 8) & 0xFF;
+    buf[1] =  reg       & 0xFF;
+    memcpy(buf + 2, data, count);
+    return i2c_master_transmit(h, buf, 2 + count, pdMS_TO_TICKS(100));
 }
 
-size_t i2c_write( uint8_t *pByteBuffer, size_t NumByteToWrite )
+esp_err_t i2c_read_multi(uint8_t dev_addr8, uint16_t reg,
+                         uint8_t *data, uint32_t count)
 {
-    uint16_t byte_index;
-    if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) return 0;
-    // Note: Needed to use i2c_master_write_byte as i2c_master_write will not expect an ack after each byte
-    while ( NumByteToWrite-- > 0 )
-    {
-        ESP_ERROR_CHECK( i2c_master_write_byte( I2C_Master->cmd_handle, *pByteBuffer++, ACK_CHECK_EN ) );
-    }
-    return byte_index;
-}
+    if (!s_bus) return ESP_ERR_INVALID_STATE;
+    i2c_master_dev_handle_t h = get_or_add(dev_addr8 >> 1);
+    if (!h) return ESP_ERR_NOT_FOUND;
 
-uint8_t i2c_read_byte()
-{
-    uint8_t byteBuffer = 0;
-    ESP_ERROR_CHECK( i2c_master_read_byte( I2C_Master->cmd_handle, &byteBuffer, I2C_MASTER_LAST_NACK ) );
-    return byteBuffer;
+    uint8_t reg_buf[2] = {(reg >> 8) & 0xFF, reg & 0xFF};
+    return i2c_master_transmit_receive(h, reg_buf, 2,
+                                       data, count,
+                                       pdMS_TO_TICKS(100));
 }
-
-size_t i2c_read( uint8_t *pByteBuffer, size_t NumByteToRead )
-{
-    ESP_ERROR_CHECK( i2c_master_read( I2C_Master->cmd_handle, pByteBuffer, NumByteToRead, I2C_MASTER_LAST_NACK ) );
-    return NumByteToRead;
-}
-
-esp_err_t i2c_transmit()
-{
-    if ( I2C_Master->cmd_handle == (i2c_cmd_handle_t) NULL ) return ESP_FAIL;
-    esp_err_t i2c_error = i2c_master_stop( I2C_Master->cmd_handle );
-    if ( i2c_error == ESP_OK )
-        i2c_error = i2c_master_cmd_begin(I2C_Master->port, I2C_Master->cmd_handle, 1000 / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete_static( I2C_Master->cmd_handle );
-    I2C_Master->dev_address = I2C_NO_DEVICE;
-    I2C_Master->cmd_handle = (i2c_cmd_handle_t) NULL;
-    return i2c_error;
-}
-
