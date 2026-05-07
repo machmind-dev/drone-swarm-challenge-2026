@@ -118,7 +118,7 @@ OV5647 MIPI-CSI                             PX4 Flight Controller
 | Capture resolution | 160×120 (QQVGA) | 800×800 RAW8 |
 | Detection resolution | 80×60 (2× downsampled) | 320×240 (QVGA, cropped + resized) |
 | Detection range achieved | ~3–4 m | ~8 m (QVGA) / ~12 m (HVGA mode) |
-| Frame rate at detection res | ~2–3 fps (CPU shared) | ~3–4 fps (CPU dedicated) |
+| Frame rate at detection res | ~2–3 fps (CPU shared) | ~3 fps at 320×240 (CPU dedicated) |
 
 The v1.0 firmware had to run at QQVGA → 80×60 because the S3 shared its CPU between
 camera capture, ArUco detection, micro-ROS, and sensor polling. The OV5647 on P4 captures
