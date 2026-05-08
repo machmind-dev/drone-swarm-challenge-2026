@@ -9,11 +9,14 @@
  *
  * Bus ownership strategy
  * ----------------------
- *  1. Try i2c_new_master_bus() — succeeds when the port is free (future PCB
- *     with a dedicated VL53L1X I2C port).
- *  2. If the port is already taken (ESP_ERR_INVALID_STATE), borrow the handle
- *     that esp_video created via i2c_master_get_bus_handle().  Retry for up to
- *     5 s so that camera SCCB init can finish before we touch the bus.
+ *  1. Borrow first: retry i2c_master_get_bus_handle() for up to 5 s, waiting
+ *     for whoever owns the port (esp_video / camera SCCB) to init it first.
+ *     This avoids a startup race: tof_task runs on CPU1 and can reach
+ *     i2c_new_master_bus() before aruco_pose's esp_video_init() on CPU0 does.
+ *     esp_video wraps its bus-create in ESP_ERROR_CHECK and aborts if the port
+ *     is already taken — so TOF must never win that race.
+ *  2. If nobody creates the port after 5 s, create it ourselves (used when TOF
+ *     has a dedicated I2C port on the final PCB).
  *
  * Device handles are cached in a small table keyed by 7-bit I2C address so
  * i2c_master_bus_add_device() is only called once per address.
@@ -69,24 +72,8 @@ void i2c_init_config(i2c_port_num_t port, gpio_num_t sda,
     if (s_bus) return;
     s_freq = freq;
 
-    /* --- attempt to create a fresh bus (works for dedicated I2C port) --- */
-    i2c_master_bus_config_t cfg = {
-        .i2c_port              = port,
-        .sda_io_num            = sda,
-        .scl_io_num            = scl,
-        .clk_source            = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt     = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    esp_err_t ret = i2c_new_master_bus(&cfg, &s_bus);
-    if (ret == ESP_OK) {
-        s_owned = true;
-        ESP_LOGI(TAG, "created I2C bus  port=%d  SDA=%d SCL=%d  %lu Hz",
-                 (int)port, (int)sda, (int)scl, (unsigned long)freq);
-        return;
-    }
-
-    /* --- port taken by driver_ng (camera SCCB) — borrow the handle --- */
+    /* --- borrow first: wait for whoever owns the port to initialise it --- */
+    esp_err_t ret = ESP_FAIL;
     for (int attempt = 0; attempt < 50; attempt++) {
         ret = i2c_master_get_bus_handle(port, &s_bus);
         if (ret == ESP_OK && s_bus) {
@@ -102,7 +89,24 @@ void i2c_init_config(i2c_port_num_t port, gpio_num_t sda,
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    ESP_LOGE(TAG, "cannot get I2C bus handle on port %d: %s",
+
+    /* --- nobody created the port in 5 s — create it ourselves (dedicated port) --- */
+    i2c_master_bus_config_t cfg = {
+        .i2c_port              = port,
+        .sda_io_num            = sda,
+        .scl_io_num            = scl,
+        .clk_source            = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt     = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    ret = i2c_new_master_bus(&cfg, &s_bus);
+    if (ret == ESP_OK) {
+        s_owned = true;
+        ESP_LOGI(TAG, "created I2C bus  port=%d  SDA=%d SCL=%d  %lu Hz",
+                 (int)port, (int)sda, (int)scl, (unsigned long)freq);
+        return;
+    }
+    ESP_LOGE(TAG, "cannot initialize I2C bus on port %d: %s",
              (int)port, esp_err_to_name(ret));
 }
 
