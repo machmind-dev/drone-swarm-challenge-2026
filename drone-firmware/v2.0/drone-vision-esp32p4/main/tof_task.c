@@ -101,6 +101,12 @@ static void tof_task(void *arg)
     ESP_LOGI(TAG, "I2C_NUM_%d  SDA=GPIO%d  SCL=GPIO%d  %d Hz",
              (int)TOF_I2C_PORT, (int)TOF_SDA_PIN, (int)TOF_SCL_PIN, TOF_I2C_FREQ);
 
+    /* Scan with all XSHUTs still LOW — no sensors on bus, so i2c_master_probe
+     * never touches address 0x29 and leaves no ghost device in the driver.
+     * Running the scan after releasing XSHUTs caused i2c_master_bus_add_device(0x29)
+     * to fail for the entire InitSensorArray sequence. */
+    i2c_scan();
+
     /* Release all sensors; InitSensorArray sequences XSHUT per-sensor for
      * address assignment so each ends up at its unique address. */
     for (int k = 0; k < SENSOR_COUNT; k++) {
@@ -110,8 +116,6 @@ static void tof_task(void *arg)
         ESP_LOGI(TAG, "XSHUT GPIO%d → HIGH", (int)pin);
     }
     vTaskDelay(pdMS_TO_TICKS(2));   /* VL53L1X needs ≥1.2 ms after XSHUT HIGH */
-
-    i2c_scan();
 
     ESP_LOGI(TAG, "=== VL53L1X_InitSensorArray START ===");
     VL53L1X_ERROR err = VL53L1X_InitSensorArray(s_sensors, SENSOR_COUNT);

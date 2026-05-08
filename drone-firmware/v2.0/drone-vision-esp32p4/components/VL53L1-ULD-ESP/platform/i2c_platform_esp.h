@@ -41,6 +41,12 @@ esp_err_t i2c_read_multi(uint8_t dev_addr8, uint16_t reg,
 /* Probe all 7-bit addresses 0x08–0x77 and log any that ACK. */
 void i2c_scan(void);
 
+/* Reset the bus (SCL clock pulses to free stuck SDA) and evict the cached
+ * device handle for the VL53L1X default address 0x29 so the next BootState
+ * attempt gets a fresh handle.  Call after i2c_scan() and after each sensor
+ * slot timeout to prevent ghost state from corrupting subsequent inits. */
+void i2c_bus_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

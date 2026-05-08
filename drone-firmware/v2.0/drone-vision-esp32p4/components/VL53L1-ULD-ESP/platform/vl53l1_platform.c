@@ -196,12 +196,18 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
     vTaskDelay(pdMS_TO_TICKS(100));
 
     for (int k = 0; k < sensor_count; k++) {
+        /* Reset bus while sensor is still in hardware reset — clock pulses must
+         * not arrive after XSHUT HIGH or they can corrupt the sensor's I2C boot. */
+        i2c_bus_reset();
         if (sensor_array[k].shutdown_pin != GPIO_NUM_NC)
             digitalWrite(sensor_array[k].shutdown_pin, HIGH);
         timeout_check = sensorState = 0;
         while (sensorState == 0) {
             vTaskDelay(pdMS_TO_TICKS(20));
             VL53L1X_ERROR bst = VL53L1X_BootState(VL53L1_I2C_ADDRESS, &sensorState);
+            /* A failed read can write partial data into sensorState; discard it so
+             * a garbage mid-boot byte cannot cause premature loop exit. */
+            if (bst) sensorState = 0;
             ESP_LOGI(TAG_PLAT, "BootState attempt %d: i2c_err=%d state=%d",
                      timeout_check, bst, sensorState);
             if (++timeout_check > 10) {
