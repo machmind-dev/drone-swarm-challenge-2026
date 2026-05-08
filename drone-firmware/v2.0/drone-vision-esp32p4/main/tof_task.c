@@ -1,12 +1,11 @@
 /* tof_task.c — VL53L1X ToF sensor task for ESP32-P4 Navigation Module
  *
  * Hardware (breadboard mock-up → Mach Mind Sensors Board rev 07/2026):
- *   I2C bus — dedicated I2C_NUM_0 on GPIO5 (SDA) / GPIO6 (SCL).
- *   Separate from camera SCCB (I2C_NUM_1, GPIO7/8) so there is no bus
- *   sharing, no borrowing, and no hardware state pollution from SCCB failures.
- *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
+ *   I2C bus — shared I2C_NUM_1 on GPIO7 (SDA) / GPIO8 (SCL), same lines as
+ *   camera SCCB.  i2c_platform_esp borrows the bus handle created by esp_video;
+ *   pull-ups are provided by the camera module.
  *
- *   Breadboard cluster (left header, consecutive rows): GPIO4 XSHUT · GND · GPIO3 SCL · GPIO2 SDA
+ *   Breadboard: VL53L1X SDA→GPIO7, SCL→GPIO8, XSHUT→GPIO4, GND, 3V3.
  *
  * Sensor slots (6 total on final PCB, 1 active for mock-up testing):
  *   Slot 0  XSHUT GPIO4  addr 0x54
@@ -29,9 +28,9 @@
 static const char *TAG = "tof";
 
 /* ── I2C bus config — pin constants come from boards.h ──────────────────── */
-#define TOF_SDA_PIN     TOF_I2C_SDA     /* GPIO2 — dedicated I2C_NUM_0 bus   */
-#define TOF_SCL_PIN     TOF_I2C_SCL     /* GPIO3 — dedicated I2C_NUM_0 bus   */
-#define TOF_I2C_PORT    I2C_NUM_0
+#define TOF_SDA_PIN     TOF_I2C_SDA     /* GPIO7 — shared I2C_NUM_1 (SCCB)  */
+#define TOF_SCL_PIN     TOF_I2C_SCL     /* GPIO8 — shared I2C_NUM_1 (SCCB)  */
+#define TOF_I2C_PORT    I2C_NUM_1
 #define TOF_I2C_FREQ    400000
 
 /* ── Sensor array — add entries as sensors are wired ────────────────────── */
