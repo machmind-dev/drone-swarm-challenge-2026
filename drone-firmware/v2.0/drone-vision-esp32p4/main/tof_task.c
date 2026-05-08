@@ -1,11 +1,12 @@
 /* tof_task.c — VL53L1X ToF sensor task for ESP32-P4 Navigation Module
  *
  * Hardware (Mach Mind Sensors Board rev 07/2026):
- *   Shared I2C bus — SDA GPIO7, SCL GPIO8  (same physical lines as camera SCCB;
- *   the platform shim borrows the bus handle created by esp_video's SCCB).
+ *   I2C bus — SDA GPIO7, SCL GPIO8 on I2C_NUM_1 (shared with camera SCCB).
+ *   Two IDF I2C ports cannot share the same physical GPIO7/GPIO8 simultaneously.
+ *   Camera SCCB also uses I2C_NUM_1; the platform shim borrows that handle at t+3s.
  *
  * Sensor slots (6 total on final PCB, 1 active for mock-up testing):
- *   Slot 0  XSHUT GPIO19  addr 0x54  <- wired on dev bench
+ *   Slot 0  XSHUT GPIO51  addr 0x54  <- WiFi6 board wiring
  *   Slot 1  XSHUT GPIO??  addr 0x56  (uncomment when PCB arrives)
  *   Slot 2  XSHUT GPIO??  addr 0x58
  *   Slot 3  XSHUT GPIO??  addr 0x5A
@@ -36,7 +37,7 @@ static const char *TAG = "tof";
 /* ── I2C bus config (shared with camera SCCB via borrowed bus handle) ───── */
 #define TOF_SDA_PIN     GPIO_NUM_7
 #define TOF_SCL_PIN     GPIO_NUM_8
-#define TOF_I2C_PORT    I2C_NUM_1
+#define TOF_I2C_PORT    I2C_NUM_1   /* same port as camera SCCB (I2C_NUM_1); i2c_init_config borrows the handle SCCB created — GPIO7/8 cannot be split across two port numbers */
 #define TOF_I2C_FREQ    400000
 
 /* ── Sensor array — add entries as sensors are wired ────────────────────── */
@@ -45,7 +46,7 @@ static VL53L1_Dev_t s_sensors[] = {
      * timing_budget: 33 ms (minimum for LONG mode)
      * inter_measurement: 40 ms (period between measurements) */
     { .I2cDevAddr      = VL53L1_I2C_ADDRESS + 2,   /* 0x54 */
-      .shutdown_pin    = GPIO_NUM_19,
+      .shutdown_pin    = GPIO_NUM_4,               /* XSHUT — GPIO51 conflicts on WiFi6 board */
       .distance_mode   = DISTANCE_MODE_LONG,
       .timing_budget   = 33,
       .inter_measurement = 40 },
@@ -93,12 +94,44 @@ static void tof_task(void *arg)
     ESP_LOGI(TAG, "I2C_NUM_%d  SDA=GPIO%d  SCL=GPIO%d  %d Hz",
              (int)TOF_I2C_PORT, (int)TOF_SDA_PIN, (int)TOF_SCL_PIN, TOF_I2C_FREQ);
 
+    /* Pulse XSHUT before scanning: if the sensor held SDA low from the
+     * previous boot's incomplete transaction, this hard-resets it and frees
+     * the bus.  Without this, the IDF bus-reset fails and every probe times
+     * out instead of NACKing.  InitSensorArray repeats this sequence for
+     * address assignment, so the sensor ends up correctly initialised. */
+    for (int k = 0; k < SENSOR_COUNT; k++) {
+        gpio_num_t pin = s_sensors[k].shutdown_pin;
+        if (pin == GPIO_NUM_NC) continue;
+        gpio_config_t xshut_cfg = {
+            .pin_bit_mask       = 1ULL << pin,
+            .mode               = GPIO_MODE_OUTPUT_OD,
+            .pull_up_en         = GPIO_PULLUP_DISABLE,
+            .pull_down_en       = GPIO_PULLDOWN_DISABLE,
+            .intr_type          = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&xshut_cfg);
+        gpio_set_level(pin, 0);
+        ESP_LOGI(TAG, "XSHUT GPIO%d → LOW (sensor hard-reset)", (int)pin);
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    for (int k = 0; k < SENSOR_COUNT; k++) {
+        gpio_num_t pin = s_sensors[k].shutdown_pin;
+        if (pin == GPIO_NUM_NC) continue;
+        gpio_set_level(pin, 1);
+        ESP_LOGI(TAG, "XSHUT GPIO%d → HIGH (sensor booting)", (int)pin);
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));   /* VL53L1X needs ≥1.2 ms after XSHUT HIGH */
+
+    i2c_scan();
+
+    ESP_LOGI(TAG, "=== VL53L1X_InitSensorArray START ===");
     VL53L1X_ERROR err = VL53L1X_InitSensorArray(s_sensors, SENSOR_COUNT);
     if (err != VL53L1_ERROR_NONE) {
-        ESP_LOGE(TAG, "VL53L1X_InitSensorArray failed (%d) — check wiring", err);
+        ESP_LOGE(TAG, "=== VL53L1X_InitSensorArray FAILED err=%d — check XSHUT wiring and I2C bus ===", err);
         vTaskDelete(NULL);
         return;
     }
+    ESP_LOGI(TAG, "=== VL53L1X_InitSensorArray OK ===");
 
     for (int k = 0; k < SENSOR_COUNT; k++) {
         ESP_LOGI(TAG, "sensor[%d] addr=0x%02X XSHUT=GPIO%d ready",

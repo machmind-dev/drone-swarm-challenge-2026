@@ -1,5 +1,5 @@
 # CPU frequency is configured at runtime via esp_pm_configure() in main.c
-# (40-360 MHz DFS). No static Kconfig symbol needed for P4 frequency.
+# (locked at 360 MHz, DFS disabled to avoid ESP32-P4 eco2 L2 cache errata).
 
 CONFIG_PARTITION_TABLE_OFFSET=0x10000
 CONFIG_PARTITION_TABLE_CUSTOM=y
@@ -7,15 +7,26 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 CONFIG_FREERTOS_HZ=1000
 
-# Flash -- Waveshare ESP32-P4 WiFi6 board has 16 MB flash
+# Flash -- Waveshare ESP32-P4-Pico board has 16 MB flash
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
-# Waveshare ESP32-P4-WIFI6 board has a WCH CH343 USB-UART bridge (1a86:55d3)
-# connected to P4's UART0 -- this appears as /dev/ttyACM0 (CDC-ACM).
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# Waveshare ESP32-P4-WiFi6 board: WCH CH343 USB-UART bridge (1a86:55d3) on UART0
+# → /dev/ttyACM0.  UART_CUSTOM is required so ESP_CONSOLE_UART_BAUDRATE is
+# visible to Kconfig (with DEFAULT the baud rate is locked to 115200 invisibly).
+# 921600 baud: DETECTION_STREAM sends ~9.6 KB/frame at ~3 fps = ~28 KB/s;
+# 921600 (~92 KB/s effective) gives comfortable headroom.  At 115200 the UART
+# saturates → fwrite blocks → fps drops to 1.
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+
+# Flash baud rate — esptool default is 460800 which causes CH343 burst dropouts.
+# 230400 is stable on the CH343 bridge; flash time increases by ~30 s on a 3 MB
+# binary but is far more reliable than a failed flash that corrupts the image.
+CONFIG_ESPTOOLPY_BAUD_230400B=y
 
 # -- Power management ---------------------------------------------------------
 CONFIG_PM_ENABLE=y
