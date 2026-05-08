@@ -1,16 +1,20 @@
 /* tof_task.c — VL53L1X ToF sensor task for ESP32-P4 Navigation Module
  *
- * Hardware (breadboard mock-up → Mach Mind Sensors Board rev 07/2026):
+ * Hardware (Mach Mind Sensors Board rev 07/2026):
  *   I2C bus — dedicated I2C_NUM_0 on GPIO2 (SDA) / GPIO3 (SCL).
  *   Separate from camera SCCB (I2C_NUM_1, GPIO7/8): ISP AEC polls OV5647
  *   continuously; sharing that bus causes collision with 20 Hz TOF reads.
  *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
  *
- *   Breadboard: VL53L1X SDA→GPIO2, SCL→GPIO3, XSHUT→GPIO51, GND, 3V3.
+ *   Wiring: SDA→GPIO2, SCL→GPIO3, GND, 3V3
+ *   XSHUT pins: slot0→GPIO4, slot1→GPIO31, slot2→GPIO30, slot3→GPIO29, slot4→GPIO28
  *
- * Sensor slots (6 total on final PCB, 1 active for mock-up testing):
- *   Slot 0  XSHUT GPIO51  addr 0x54
- *   Slot 1–5  XSHUT GPIO??  addr 0x56–0x5E  (uncomment when PCB arrives)
+ * Sensor slots (5 active):
+ *   Slot 0  XSHUT GPIO4   addr 0x54
+ *   Slot 1  XSHUT GPIO31  addr 0x56
+ *   Slot 2  XSHUT GPIO30  addr 0x58
+ *   Slot 3  XSHUT GPIO29  addr 0x5A
+ *   Slot 4  XSHUT GPIO28  addr 0x5C
  *
  * Poll rate: ~20 Hz (50 ms; VL53L1X LONG mode needs ~33 ms/measurement)
  */
@@ -34,41 +38,30 @@ static const char *TAG = "tof";
 #define TOF_I2C_PORT    I2C_NUM_0
 #define TOF_I2C_FREQ    400000
 
-/* ── Sensor array — add entries as sensors are wired ────────────────────── */
+/* ── Sensor array ────────────────────────────────────────────────────────── */
 static VL53L1_Dev_t s_sensors[] = {
-    /* Slot 0 — mock-up test sensor
-     * timing_budget: 33 ms (minimum for LONG mode)
-     * inter_measurement: 40 ms (period between measurements) */
-    { .I2cDevAddr      = VL53L1_I2C_ADDRESS + 2,   /* 0x54 */
-      .shutdown_pin    = TOF_XSHUT_PIN,             /* GPIO51 — open-drain XSHUT             */
-      .distance_mode   = DISTANCE_MODE_LONG,
-      .timing_budget   = 33,
-      .inter_measurement = 40 },
-
-    /* Slot 1-5 — uncomment and set XSHUT GPIO when PCB arrives
-    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 4,  // 0x56
-      .shutdown_pin = GPIO_NUM_??,
+    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 2,  /* 0x54 */
+      .shutdown_pin = TOF_XSHUT_PIN_0,        /* GPIO4  */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
-    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 6,  // 0x58
-      .shutdown_pin = GPIO_NUM_??,
+    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 4,  /* 0x56 */
+      .shutdown_pin = TOF_XSHUT_PIN_1,        /* GPIO31 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
-    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 8,  // 0x5A
-      .shutdown_pin = GPIO_NUM_??,
+    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 6,  /* 0x58 */
+      .shutdown_pin = TOF_XSHUT_PIN_2,        /* GPIO30 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
-    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 10, // 0x5C
-      .shutdown_pin = GPIO_NUM_??,
+    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 8,  /* 0x5A */
+      .shutdown_pin = TOF_XSHUT_PIN_3,        /* GPIO29 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
-    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 12, // 0x5E
-      .shutdown_pin = GPIO_NUM_??,
+    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 10, /* 0x5C */
+      .shutdown_pin = TOF_XSHUT_PIN_4,        /* GPIO28 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
-    */
 };
 
 static const uint8_t SENSOR_COUNT = sizeof(s_sensors) / sizeof(s_sensors[0]);
 
 /* ── Latest readings (written by tof_task, read by aruco task) ──────────── */
-static volatile uint16_t s_dist_mm[6]      = {0};
-static volatile uint8_t  s_range_status[6] = {255, 255, 255, 255, 255, 255};
+static volatile uint16_t s_dist_mm[5]      = {0};
+static volatile uint8_t  s_range_status[5] = {255, 255, 255, 255, 255};
 
 uint16_t tof_get_distance_mm(uint8_t idx)  { return (idx < SENSOR_COUNT) ? s_dist_mm[idx]      : 0;   }
 uint8_t  tof_get_range_status(uint8_t idx) { return (idx < SENSOR_COUNT) ? s_range_status[idx] : 255; }
@@ -79,7 +72,7 @@ static void tof_task(void *arg)
 {
     (void)arg;
 
-    /* Drive XSHUT LOW immediately — pure GPIO, no I2C needed.
+    /* Drive all XSHUT LOW immediately — pure GPIO, no I2C needed.
      * VL53L1X may hold SDA low from a previous boot's incomplete transaction.
      * This must happen before camera SCCB starts so the shared bus is clean;
      * otherwise esp_video_init() gets an I2C timeout and fails. */
@@ -95,22 +88,21 @@ static void tof_task(void *arg)
         };
         gpio_config(&xshut_cfg);
         gpio_set_level(pin, 0);
-        ESP_LOGI(TAG, "XSHUT GPIO%d → LOW (freeing SDA before camera SCCB)", (int)pin);
+        ESP_LOGI(TAG, "XSHUT GPIO%d → LOW", (int)pin);
     }
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    /* Borrow the I2C bus from esp_video — camera can now init cleanly. */
     i2c_init_config(TOF_I2C_PORT, TOF_SDA_PIN, TOF_SCL_PIN, TOF_I2C_FREQ);
     ESP_LOGI(TAG, "I2C_NUM_%d  SDA=GPIO%d  SCL=GPIO%d  %d Hz",
              (int)TOF_I2C_PORT, (int)TOF_SDA_PIN, (int)TOF_SCL_PIN, TOF_I2C_FREQ);
 
-    /* Release sensors so they can boot; InitSensorArray repeats XSHUT
-     * sequencing per-sensor for address assignment. */
+    /* Release all sensors; InitSensorArray sequences XSHUT per-sensor for
+     * address assignment so each ends up at its unique address. */
     for (int k = 0; k < SENSOR_COUNT; k++) {
         gpio_num_t pin = s_sensors[k].shutdown_pin;
         if (pin == GPIO_NUM_NC) continue;
         gpio_set_level(pin, 1);
-        ESP_LOGI(TAG, "XSHUT GPIO%d → HIGH (sensor booting)", (int)pin);
+        ESP_LOGI(TAG, "XSHUT GPIO%d → HIGH", (int)pin);
     }
     vTaskDelay(pdMS_TO_TICKS(2));   /* VL53L1X needs ≥1.2 ms after XSHUT HIGH */
 
