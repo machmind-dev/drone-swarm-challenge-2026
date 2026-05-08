@@ -78,15 +78,10 @@ static void tof_task(void *arg)
 {
     (void)arg;
 
-    i2c_init_config(TOF_I2C_PORT, TOF_SDA_PIN, TOF_SCL_PIN, TOF_I2C_FREQ);
-    ESP_LOGI(TAG, "I2C_NUM_%d  SDA=GPIO%d  SCL=GPIO%d  %d Hz",
-             (int)TOF_I2C_PORT, (int)TOF_SDA_PIN, (int)TOF_SCL_PIN, TOF_I2C_FREQ);
-
-    /* Pulse XSHUT before scanning: if the sensor held SDA low from the
-     * previous boot's incomplete transaction, this hard-resets it and frees
-     * the bus.  Without this, the IDF bus-reset fails and every probe times
-     * out instead of NACKing.  InitSensorArray repeats this sequence for
-     * address assignment, so the sensor ends up correctly initialised. */
+    /* Drive XSHUT LOW immediately — pure GPIO, no I2C needed.
+     * VL53L1X may hold SDA low from a previous boot's incomplete transaction.
+     * This must happen before camera SCCB starts so the shared bus is clean;
+     * otherwise esp_video_init() gets an I2C timeout and fails. */
     for (int k = 0; k < SENSOR_COUNT; k++) {
         gpio_num_t pin = s_sensors[k].shutdown_pin;
         if (pin == GPIO_NUM_NC) continue;
@@ -99,9 +94,17 @@ static void tof_task(void *arg)
         };
         gpio_config(&xshut_cfg);
         gpio_set_level(pin, 0);
-        ESP_LOGI(TAG, "XSHUT GPIO%d → LOW (sensor hard-reset)", (int)pin);
+        ESP_LOGI(TAG, "XSHUT GPIO%d → LOW (freeing SDA before camera SCCB)", (int)pin);
     }
     vTaskDelay(pdMS_TO_TICKS(10));
+
+    /* Borrow the I2C bus from esp_video — camera can now init cleanly. */
+    i2c_init_config(TOF_I2C_PORT, TOF_SDA_PIN, TOF_SCL_PIN, TOF_I2C_FREQ);
+    ESP_LOGI(TAG, "I2C_NUM_%d  SDA=GPIO%d  SCL=GPIO%d  %d Hz",
+             (int)TOF_I2C_PORT, (int)TOF_SDA_PIN, (int)TOF_SCL_PIN, TOF_I2C_FREQ);
+
+    /* Release sensors so they can boot; InitSensorArray repeats XSHUT
+     * sequencing per-sensor for address assignment. */
     for (int k = 0; k < SENSOR_COUNT; k++) {
         gpio_num_t pin = s_sensors[k].shutdown_pin;
         if (pin == GPIO_NUM_NC) continue;
