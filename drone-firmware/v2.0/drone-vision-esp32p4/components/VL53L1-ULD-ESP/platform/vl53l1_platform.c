@@ -200,8 +200,14 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
             VL53L1X_ERROR bst = VL53L1X_BootState(VL53L1_I2C_ADDRESS, &sensorState);
             ESP_LOGI(TAG_PLAT, "BootState attempt %d: i2c_err=%d state=%d",
                      timeout_check, bst, sensorState);
-            if (++timeout_check > 10) return VL53L1_ERROR_TIME_OUT;
+            if (++timeout_check > 10) {
+                ESP_LOGW(TAG_PLAT, "sensor[%d] addr=0x%02X not found — skipping",
+                         k, sensor_array[k].I2cDevAddr);
+                sensor_array[k].I2cDevAddr = 0;
+                break;
+            }
         }
+        if (sensor_array[k].I2cDevAddr == 0) continue;
         VL53L1X_SensorInit(VL53L1_I2C_ADDRESS);
         VL53L1X_SetI2CAddress(VL53L1_I2C_ADDRESS, sensor_array[k].I2cDevAddr);
         VL53L1X_SetFastI2C(sensor_array[k].I2cDevAddr);

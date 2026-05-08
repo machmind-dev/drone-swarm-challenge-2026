@@ -8,7 +8,7 @@
  *     2    VL53L1X SDA      I2C_NUM_0 — dedicated TOF bus, breakout pull-ups
  *     3    VL53L1X SCL      I2C_NUM_0 — dedicated TOF bus, breakout pull-ups
  *     4    VL53L1X XSHUT   Slot 0 open-drain XSHUT
- *     5    VL53L1X XSHUT   Slot 5 open-drain XSHUT (upward-facing)
+ *    26    VL53L1X XSHUT   Slot 5 open-drain XSHUT (upward-facing)
  *     7    Camera SCCB SDA  I2C_NUM_1 — camera sensor control (OV5647)
  *     8    Camera SCCB SCL  I2C_NUM_1 — camera sensor control (OV5647)
  *    28    VL53L1X XSHUT   Slot 4 open-drain XSHUT
@@ -42,4 +42,4 @@
 #define TOF_XSHUT_PIN_2     GPIO_NUM_30   /* slot 2 XSHUT — open-drain          */
 #define TOF_XSHUT_PIN_3     GPIO_NUM_29   /* slot 3 XSHUT — open-drain          */
 #define TOF_XSHUT_PIN_4     GPIO_NUM_28   /* slot 4 XSHUT — open-drain          */
-#define TOF_XSHUT_PIN_5     GPIO_NUM_5    /* slot 5 XSHUT — upward-facing       */
+#define TOF_XSHUT_PIN_5     GPIO_NUM_26   /* slot 5 XSHUT — upward-facing       */

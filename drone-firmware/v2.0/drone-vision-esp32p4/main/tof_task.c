@@ -8,7 +8,7 @@
  *
  *   Wiring: SDA→GPIO2, SCL→GPIO3, GND, 3V3
  *   XSHUT pins: slot0→GPIO4, slot1→GPIO31, slot2→GPIO30, slot3→GPIO29,
- *               slot4→GPIO28, slot5→GPIO5 (up)
+ *               slot4→GPIO28, slot5→GPIO26 (up)
  *
  * Sensor slots (6 active):
  *   Slot 0  XSHUT GPIO4   addr 0x54
@@ -130,6 +130,7 @@ static void tof_task(void *arg)
     while (1) {
         for (int k = 0; k < SENSOR_COUNT; k++) {
             VL53L1_Dev_t *t = &s_sensors[k];
+            if (t->I2cDevAddr == 0) continue;   /* not present — skipped during init */
             t->range_error = VL53L1X_GetAndRestartMeasurement(
                 t->I2cDevAddr, &t->range_status, &t->range_mm);
 
