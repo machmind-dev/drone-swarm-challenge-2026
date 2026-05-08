@@ -40,7 +40,7 @@ static VL53L1_Dev_t s_sensors[] = {
      * timing_budget: 33 ms (minimum for LONG mode)
      * inter_measurement: 40 ms (period between measurements) */
     { .I2cDevAddr      = VL53L1_I2C_ADDRESS + 2,   /* 0x54 */
-      .shutdown_pin    = TOF_XSHUT_PIN,             /* GPIO4 — open-drain XSHUT              */
+      .shutdown_pin    = TOF_XSHUT_PIN,             /* GPIO51 — open-drain XSHUT             */
       .distance_mode   = DISTANCE_MODE_LONG,
       .timing_budget   = 33,
       .inter_measurement = 40 },
