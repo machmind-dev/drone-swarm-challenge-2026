@@ -6,7 +6,7 @@
  *   sharing, no borrowing, and no hardware state pollution from SCCB failures.
  *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
  *
- *   Breadboard cluster: GPIO4 (XSHUT), GPIO5 (SDA), GPIO6 (SCL) are adjacent.
+ *   Breadboard cluster (left header, consecutive rows): GPIO4 XSHUT · GND · GPIO3 SCL · GPIO2 SDA
  *
  * Sensor slots (6 total on final PCB, 1 active for mock-up testing):
  *   Slot 0  XSHUT GPIO4  addr 0x54
@@ -29,8 +29,8 @@
 static const char *TAG = "tof";
 
 /* ── I2C bus config — pin constants come from boards.h ──────────────────── */
-#define TOF_SDA_PIN     TOF_I2C_SDA     /* GPIO5 — dedicated I2C_NUM_0 bus   */
-#define TOF_SCL_PIN     TOF_I2C_SCL     /* GPIO6 — dedicated I2C_NUM_0 bus   */
+#define TOF_SDA_PIN     TOF_I2C_SDA     /* GPIO2 — dedicated I2C_NUM_0 bus   */
+#define TOF_SCL_PIN     TOF_I2C_SCL     /* GPIO3 — dedicated I2C_NUM_0 bus   */
 #define TOF_I2C_PORT    I2C_NUM_0
 #define TOF_I2C_FREQ    400000
 
