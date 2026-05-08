@@ -59,6 +59,13 @@ _POSE_RE = re.compile(
 # TOF:<dist0>,<dist1>,...mm  where each value is a number or ---
 _TOF_RE = re.compile(r'TOF:([\d,\-]+)mm')
 
+_TOF_MAX_MM  = 4000   # VL53L1X LONG mode range ceiling for bar scaling
+_TOF_BAR_W   = 16     # character width of distance bar
+
+def _tof_bar(mm: int) -> str:
+    filled = round(min(mm, _TOF_MAX_MM) / _TOF_MAX_MM * _TOF_BAR_W)
+    return '█' * filled + '░' * (_TOF_BAR_W - filled)
+
 def _handle_text_line(raw: bytes) -> None:
     global _latest_pose_txt, _latest_tof_txt
     try:
@@ -78,17 +85,18 @@ def _handle_text_line(raw: bytes) -> None:
     t = _TOF_RE.search(line)
     if t:
         parts = t.group(1).split(',')
-        labels = []
+        n = len(parts)
+        lines = [f"ToF  [{n} sensor{'s' if n != 1 else ''}]"]
         for i, p in enumerate(parts):
             if p == '---':
-                labels.append(f"S{i}: --")
+                lines.append(f"S{i}: ---              {'░' * _TOF_BAR_W}")
             else:
                 try:
                     mm = int(p)
-                    labels.append(f"S{i}: {mm} mm  ({mm/1000:.2f} m)")
+                    lines.append(f"S{i}: {mm:4d}mm ({mm/1000:.2f}m) {_tof_bar(mm)}")
                 except ValueError:
-                    labels.append(f"S{i}: ?")
-        _latest_tof_txt = "ToF\n" + "\n".join(labels)
+                    lines.append(f"S{i}: ?")
+        _latest_tof_txt = "\n".join(lines)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def sync_to_magic():
@@ -180,7 +188,7 @@ pose_txt = axes[0].text(0.01, 0.98, "",
 
 tof_txt = axes[2].text(0.01, 0.98, "",
                         transform=axes[2].transAxes,
-                        color='yellow', fontsize=9, va='top',
+                        color='yellow', fontsize=7.5, va='top',
                         family='monospace',
                         bbox=dict(facecolor='#000000cc', edgecolor='none', pad=3))
 
