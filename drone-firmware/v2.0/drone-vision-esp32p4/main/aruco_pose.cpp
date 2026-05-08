@@ -325,8 +325,23 @@ void aruco_pose_start(void)
     /* ── Open V4L2 device ────────────────────────────────────────────────── */
     int video_fd = open(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, O_RDONLY);
     if (video_fd < 0) {
-        ESP_LOGE(TAG, "Failed to open %s (errno=%d)", ESP_VIDEO_MIPI_CSI_DEVICE_NAME, errno);
-        return;
+        ESP_LOGE(TAG, "Failed to open %s (errno=%d) — camera unavailable, running ToF-only",
+                 ESP_VIDEO_MIPI_CSI_DEVICE_NAME, errno);
+        while (true) {
+            uint8_t n = tof_sensor_count();
+            printf("TOF:");
+            for (uint8_t k = 0; k < n; k++) {
+                if (k) printf(",");
+                uint16_t d = tof_get_distance_mm(k);
+                if (tof_get_range_status(k) == 0 && d > 0)
+                    printf("%u", d);
+                else
+                    printf("---");
+            }
+            printf("mm\n");
+            fflush(stdout);
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
     }
     ESP_LOGI(TAG, "Opened %s fd=%d", ESP_VIDEO_MIPI_CSI_DEVICE_NAME, video_fd);
 
