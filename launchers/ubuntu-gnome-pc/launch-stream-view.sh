@@ -25,7 +25,7 @@ echo ""
 
 SCRIPT="$HOME/drone-swarm-challenge-2026/drone-firmware/v2.0/drone-vision-esp32p4/tools/stream_view.py"
 PORT="${1:-/dev/ttyACM0}"
-BAUD="${2:-115200}"
+BAUD="${2:-921600}"
 
 if [ ! -f "$SCRIPT" ]; then
     echo "[ERROR] stream_view.py not found: $SCRIPT"

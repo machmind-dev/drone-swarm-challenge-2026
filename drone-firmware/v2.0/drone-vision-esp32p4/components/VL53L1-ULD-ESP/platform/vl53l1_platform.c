@@ -13,6 +13,8 @@
 #include "freertos/task.h"
 #include "VL53L1X_api.h"
 #include "i2c_platform_esp.h"
+#include "esp_log.h"
+static const char *TAG_PLAT = "vl53l1_plat";
 
 static const uint8_t status_rtn[24] = {
     255, 255, 255, 5, 2, 4, 1, 7, 3, 0,
@@ -177,8 +179,10 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
     uint16_t timeout_check = 0;
 
     for (int k = 0; k < sensor_count; k++) {
-        pinMode(sensor_array[k].shutdown_pin, OUTPUT_OPEN);
-        digitalWrite(sensor_array[k].shutdown_pin, LOW);
+        if (sensor_array[k].shutdown_pin != GPIO_NUM_NC) {
+            pinMode(sensor_array[k].shutdown_pin, OUTPUT_OPEN);
+            digitalWrite(sensor_array[k].shutdown_pin, LOW);
+        }
         sensor_array[k].time_stamp  = esp_timer_get_time();
         sensor_array[k].cycle_time  = 0;
         sensor_array[k].range_mm    = 0;
@@ -188,11 +192,14 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
     vTaskDelay(pdMS_TO_TICKS(100));
 
     for (int k = 0; k < sensor_count; k++) {
-        digitalWrite(sensor_array[k].shutdown_pin, HIGH);
+        if (sensor_array[k].shutdown_pin != GPIO_NUM_NC)
+            digitalWrite(sensor_array[k].shutdown_pin, HIGH);
         timeout_check = sensorState = 0;
         while (sensorState == 0) {
             vTaskDelay(pdMS_TO_TICKS(20));
-            VL53L1X_BootState(VL53L1_I2C_ADDRESS, &sensorState);
+            VL53L1X_ERROR bst = VL53L1X_BootState(VL53L1_I2C_ADDRESS, &sensorState);
+            ESP_LOGI(TAG_PLAT, "BootState attempt %d: i2c_err=%d state=%d",
+                     timeout_check, bst, sensorState);
             if (++timeout_check > 10) return VL53L1_ERROR_TIME_OUT;
         }
         VL53L1X_SensorInit(VL53L1_I2C_ADDRESS);

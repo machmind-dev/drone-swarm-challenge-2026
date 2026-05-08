@@ -309,7 +309,7 @@ void aruco_pose_start(void)
     /* ── esp_video init — sensor SCCB, CSI controller, ISP all handled internally */
     esp_video_init_csi_config_t csi_config = {};
     csi_config.sccb_config.init_sccb         = true;
-    csi_config.sccb_config.i2c_config.port   = 0; /* I2C_NUM_0 */
+    csi_config.sccb_config.i2c_config.port   = 1; /* I2C_NUM_1 — TOF task borrows this handle at t+3s */
     csi_config.sccb_config.i2c_config.scl_pin = CAMERA_SCCB_SCL;
     csi_config.sccb_config.i2c_config.sda_pin = CAMERA_SCCB_SDA;
     csi_config.sccb_config.freq              = 100000;

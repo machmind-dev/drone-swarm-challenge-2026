@@ -22,6 +22,8 @@ import sys
 import re
 import struct
 import time
+import signal
+import atexit
 from collections import deque
 import serial
 import numpy as np
@@ -30,7 +32,7 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 PORT  = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyACM0"
-BAUD  = int(sys.argv[2]) if len(sys.argv) > 2 else 115200
+BAUD  = int(sys.argv[2]) if len(sys.argv) > 2 else 921600
 MAGIC = bytes([0xAA, 0x55, 0xA5, 0x5A, 0xF0, 0x0F, 0x50, 0x3C])
 
 print(f"Opening {PORT} @ {BAUD} baud — waiting for first frame …")
@@ -38,6 +40,13 @@ print("LEFT=RGB565→RGB  CENTRE=RGB565→BGR  RIGHT=luminance Y")
 print("Close the window or Ctrl-C to quit.")
 
 ser = serial.Serial(PORT, BAUD, timeout=3)
+
+# Ensure the serial port is released even when the launcher terminal is closed
+# (SIGHUP/SIGTERM bypass Python's finally blocks; route them through sys.exit
+# so atexit handlers and the finally block in the main loop both run).
+atexit.register(ser.close)
+signal.signal(signal.SIGTERM, lambda _s, _f: sys.exit(0))
+signal.signal(signal.SIGHUP,  lambda _s, _f: sys.exit(0))
 
 # ── POSE + TOF state (updated from UART text lines between frames) ───────────
 _latest_pose_txt = ""   # cyan overlay on panel 1, empty when no fix

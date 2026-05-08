@@ -91,6 +91,11 @@ void i2c_init_config(i2c_port_num_t port, gpio_num_t sda,
         ret = i2c_master_get_bus_handle(port, &s_bus);
         if (ret == ESP_OK && s_bus) {
             s_owned = false;
+            /* SCCB may leave SDA stuck low (partial transaction or ISP poll).
+             * Run 9-clock bus recovery before any VL53L1X transaction. */
+            esp_err_t rst = i2c_master_bus_reset(s_bus);
+            if (rst != ESP_OK)
+                ESP_LOGW(TAG, "bus reset after borrow: %s", esp_err_to_name(rst));
             ESP_LOGI(TAG, "borrowed I2C bus from SCCB  port=%d  %lu Hz",
                      (int)port, (unsigned long)freq);
             return;
@@ -128,4 +133,21 @@ esp_err_t i2c_read_multi(uint8_t dev_addr8, uint16_t reg,
     return i2c_master_transmit_receive(h, reg_buf, 2,
                                        data, count,
                                        pdMS_TO_TICKS(100));
+}
+
+void i2c_scan(void)
+{
+    if (!s_bus) {
+        ESP_LOGI(TAG, "i2c scan: no bus initialised");
+        return;
+    }
+    ESP_LOGI(TAG, "i2c scan: probing 0x08–0x77 ...");
+    int found = 0;
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+        if (i2c_master_probe(s_bus, addr, pdMS_TO_TICKS(20)) == ESP_OK) {
+            ESP_LOGI(TAG, "  found 0x%02X (8-bit: 0x%02X)", addr, addr << 1);
+            found++;
+        }
+    }
+    ESP_LOGI(TAG, "i2c scan: %d device(s) found", found);
 }

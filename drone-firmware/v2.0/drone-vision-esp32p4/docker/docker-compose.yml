@@ -34,11 +34,9 @@ services:
       #   docker compose exec esp32p4_vision idf.py build
     # Keep container alive — use docker compose exec to run commands.
     #
-    # BOARD USB NOTE: Waveshare ESP32-P4-WiFi6 board has a WCH CH343 USB-UART
-    # bridge (VID 1a86:55d3) connected to the ESP32-P4's UART0. This appears as
-    # /dev/ttyACM0. The P4's USB_SERIAL_JTAG peripheral is NOT routed to a USB
-    # connector on this board — use CONFIG_ESP_CONSOLE_UART_DEFAULT=y, NOT
-    # CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y.
+    # BOARD USB NOTE: Waveshare ESP32-P4-WiFi6 uses a WCH CH343 USB-UART bridge
+    # (1a86:55d3) on UART0 → /dev/ttyACM0.  CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+    # (sdkconfig.defaults) routes the IDF console there at 921600 baud.
     #
     # First-time setup (run once after container start):
     #   docker compose exec esp32p4_vision idf.py set-target esp32p4

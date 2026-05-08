@@ -38,6 +38,9 @@ esp_err_t i2c_write_multi(uint8_t dev_addr8, uint16_t reg,
 esp_err_t i2c_read_multi(uint8_t dev_addr8, uint16_t reg,
                          uint8_t *data, uint32_t count);
 
+/* Probe all 7-bit addresses 0x08–0x77 and log any that ACK. */
+void i2c_scan(void);
+
 #ifdef __cplusplus
 }
 #endif
