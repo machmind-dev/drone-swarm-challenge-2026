@@ -7,12 +7,12 @@
  *     0    BOOT button       Reserved — hold LOW during reset to enter DL mode
  *     2    VL53L1X SDA      I2C_NUM_0 — dedicated TOF bus, breakout pull-ups
  *     3    VL53L1X SCL      I2C_NUM_0 — dedicated TOF bus, breakout pull-ups
- *     4    VL53L1X XSHUT   Open-drain output; driven LOW = sensor shutdown
+ *     4    (free)
  *     7    Camera SCCB SDA  I2C_NUM_1 — camera sensor control (OV5647)
  *     8    Camera SCCB SCL  I2C_NUM_1 — camera sensor control (OV5647)
  *    37    UART0 TX         Console via CH343 USB-UART bridge → /dev/ttyACM0
  *    38    UART0 RX         Console via CH343 USB-UART bridge → /dev/ttyACM0
- *    51    (reserved)       Used by WiFi6 (ESP32-C6) module — do not use
+ *    51    VL53L1X XSHUT   Open-drain output; driven LOW = sensor shutdown
  *   HW     MIPI-CSI lanes   Fixed silicon differential pairs, no GPIO config
  *
  * ── I2C bus topology ────────────────────────────────────────────────────────
@@ -30,6 +30,6 @@
 #define CAMERA_PWDN_PIN   GPIO_NUM_NC   /* not connected / active-low unused  */
 
 /* ── VL53L1X ToF sensors (I2C_NUM_0, dedicated, see tof_task.c) ─────────── */
-#define TOF_XSHUT_PIN     GPIO_NUM_4    /* slot 0 XSHUT — open-drain          */
+#define TOF_XSHUT_PIN     GPIO_NUM_51   /* slot 0 XSHUT — open-drain          */
 #define TOF_I2C_SDA       GPIO_NUM_2    /* dedicated I2C_NUM_0 bus             */
 #define TOF_I2C_SCL       GPIO_NUM_3    /* dedicated I2C_NUM_0 bus             */

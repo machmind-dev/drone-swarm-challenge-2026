@@ -6,10 +6,10 @@
  *   continuously; sharing that bus causes collision with 20 Hz TOF reads.
  *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
  *
- *   Breadboard: VL53L1X SDA→GPIO2, SCL→GPIO3, XSHUT→GPIO4, GND, 3V3.
+ *   Breadboard: VL53L1X SDA→GPIO2, SCL→GPIO3, XSHUT→GPIO51, GND, 3V3.
  *
  * Sensor slots (6 total on final PCB, 1 active for mock-up testing):
- *   Slot 0  XSHUT GPIO4  addr 0x54
+ *   Slot 0  XSHUT GPIO51  addr 0x54
  *   Slot 1–5  XSHUT GPIO??  addr 0x56–0x5E  (uncomment when PCB arrives)
  *
  * Poll rate: ~20 Hz (50 ms; VL53L1X LONG mode needs ~33 ms/measurement)
