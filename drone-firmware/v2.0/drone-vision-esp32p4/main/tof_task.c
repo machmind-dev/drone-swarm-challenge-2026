@@ -1,31 +1,25 @@
 /* tof_task.c — VL53L1X ToF sensor task for ESP32-P4 Navigation Module
  *
- * Hardware (Mach Mind Sensors Board rev 07/2026):
- *   I2C bus — SDA GPIO7, SCL GPIO8 on I2C_NUM_1 (shared with camera SCCB).
- *   Two IDF I2C ports cannot share the same physical GPIO7/GPIO8 simultaneously.
- *   Camera SCCB also uses I2C_NUM_1; the platform shim borrows that handle at t+3s.
+ * Hardware (breadboard mock-up → Mach Mind Sensors Board rev 07/2026):
+ *   I2C bus — dedicated I2C_NUM_0 on GPIO5 (SDA) / GPIO6 (SCL).
+ *   Separate from camera SCCB (I2C_NUM_1, GPIO7/8) so there is no bus
+ *   sharing, no borrowing, and no hardware state pollution from SCCB failures.
+ *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
+ *
+ *   Breadboard cluster: GPIO4 (XSHUT), GPIO5 (SDA), GPIO6 (SCL) are adjacent.
  *
  * Sensor slots (6 total on final PCB, 1 active for mock-up testing):
- *   Slot 0  XSHUT GPIO51  addr 0x54  <- WiFi6 board wiring
- *   Slot 1  XSHUT GPIO??  addr 0x56  (uncomment when PCB arrives)
- *   Slot 2  XSHUT GPIO??  addr 0x58
- *   Slot 3  XSHUT GPIO??  addr 0x5A
- *   Slot 4  XSHUT GPIO??  addr 0x5C
- *   Slot 5  XSHUT GPIO??  addr 0x5E
+ *   Slot 0  XSHUT GPIO4  addr 0x54
+ *   Slot 1–5  XSHUT GPIO??  addr 0x56–0x5E  (uncomment when PCB arrives)
  *
- * Each sensor is assigned a unique I2C address at boot via XSHUT sequencing
- * (VL53L1X_InitSensorArray brings sensors online one at a time).
- *
- * The task delays 3 s at startup so esp_video SCCB can initialise the camera
- * and create the I2C master bus — the platform shim then borrows that handle.
- *
- * Poll rate: ~20 Hz (50 ms interval; VL53L1X LONG mode needs ~33 ms/measurement)
+ * Poll rate: ~20 Hz (50 ms; VL53L1X LONG mode needs ~33 ms/measurement)
  */
 
 #include "tof_task.h"
 #include "VL53L1X_api.h"
 #include "vl53l1_platform.h"
 #include "i2c_platform_esp.h"
+#include "boards.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,10 +28,10 @@
 
 static const char *TAG = "tof";
 
-/* ── I2C bus config (shared with camera SCCB via borrowed bus handle) ───── */
-#define TOF_SDA_PIN     GPIO_NUM_7
-#define TOF_SCL_PIN     GPIO_NUM_8
-#define TOF_I2C_PORT    I2C_NUM_1   /* same port as camera SCCB (I2C_NUM_1); i2c_init_config borrows the handle SCCB created — GPIO7/8 cannot be split across two port numbers */
+/* ── I2C bus config — pin constants come from boards.h ──────────────────── */
+#define TOF_SDA_PIN     TOF_I2C_SDA     /* GPIO5 — dedicated I2C_NUM_0 bus   */
+#define TOF_SCL_PIN     TOF_I2C_SCL     /* GPIO6 — dedicated I2C_NUM_0 bus   */
+#define TOF_I2C_PORT    I2C_NUM_0
 #define TOF_I2C_FREQ    400000
 
 /* ── Sensor array — add entries as sensors are wired ────────────────────── */
@@ -46,7 +40,7 @@ static VL53L1_Dev_t s_sensors[] = {
      * timing_budget: 33 ms (minimum for LONG mode)
      * inter_measurement: 40 ms (period between measurements) */
     { .I2cDevAddr      = VL53L1_I2C_ADDRESS + 2,   /* 0x54 */
-      .shutdown_pin    = GPIO_NUM_4,               /* XSHUT — GPIO51 conflicts on WiFi6 board */
+      .shutdown_pin    = TOF_XSHUT_PIN,             /* GPIO4 — open-drain XSHUT              */
       .distance_mode   = DISTANCE_MODE_LONG,
       .timing_budget   = 33,
       .inter_measurement = 40 },
@@ -84,11 +78,6 @@ uint8_t  tof_sensor_count(void)            { return SENSOR_COUNT; }
 static void tof_task(void *arg)
 {
     (void)arg;
-
-    /* Wait for camera task to initialise SCCB so the I2C bus exists.
-     * The platform shim borrows the esp_video bus handle — it must be
-     * created before we call i2c_init_config. */
-    vTaskDelay(pdMS_TO_TICKS(3000));
 
     i2c_init_config(TOF_I2C_PORT, TOF_SDA_PIN, TOF_SCL_PIN, TOF_I2C_FREQ);
     ESP_LOGI(TAG, "I2C_NUM_%d  SDA=GPIO%d  SCL=GPIO%d  %d Hz",
