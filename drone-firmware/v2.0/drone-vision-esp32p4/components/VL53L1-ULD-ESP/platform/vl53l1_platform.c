@@ -14,6 +14,10 @@
 #include "VL53L1X_api.h"
 #include "i2c_platform_esp.h"
 #include "esp_log.h"
+
+/* Resets the I2C bus and evicts the stale 0x29 device handle after a sensor
+ * timeout so the next slot starts with a clean bus state. */
+extern void i2c_bus_reset(void);
 static const char *TAG_PLAT = "vl53l1_plat";
 
 static const uint8_t status_rtn[24] = {
@@ -204,6 +208,7 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
                 ESP_LOGW(TAG_PLAT, "sensor[%d] addr=0x%02X not found — skipping",
                          k, sensor_array[k].I2cDevAddr);
                 sensor_array[k].I2cDevAddr = 0;
+                i2c_bus_reset();
                 break;
             }
         }

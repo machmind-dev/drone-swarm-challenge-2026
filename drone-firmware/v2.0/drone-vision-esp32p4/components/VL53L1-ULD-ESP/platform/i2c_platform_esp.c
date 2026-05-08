@@ -149,3 +149,24 @@ void i2c_scan(void)
     }
     ESP_LOGI(TAG, "i2c scan: %d device(s) found", found);
 }
+
+/* Reset the I2C bus and evict the cached device handle for the VL53L1X default
+ * address (0x29 / 0x52).  Called after each sensor-skip so accumulated failed
+ * transactions don't leave the bus in a degraded state for the next slot. */
+void i2c_bus_reset(void)
+{
+    if (!s_bus) return;
+    i2c_master_bus_reset(s_bus);
+
+    /* Evict stale device handle for the default VL53L1X 7-bit address 0x29
+     * so the next sensor slot gets a fresh handle. */
+    const uint8_t default_addr7 = 0x29;
+    for (int i = 0; i < s_ndevs; i++) {
+        if (s_devs[i].addr7 == default_addr7) {
+            i2c_master_bus_rm_device(s_devs[i].h);
+            s_devs[i] = s_devs[--s_ndevs];
+            ESP_LOGD(TAG, "evicted device handle 0x%02X", default_addr7);
+            break;
+        }
+    }
+}
