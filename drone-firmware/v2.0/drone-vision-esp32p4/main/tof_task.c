@@ -7,14 +7,16 @@
  *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
  *
  *   Wiring: SDA→GPIO2, SCL→GPIO3, GND, 3V3
- *   XSHUT pins: slot0→GPIO4, slot1→GPIO31, slot2→GPIO30, slot3→GPIO29, slot4→GPIO28
+ *   XSHUT pins: slot0→GPIO4, slot1→GPIO31, slot2→GPIO30, slot3→GPIO29,
+ *               slot4→GPIO28, slot5→GPIO5 (up)
  *
- * Sensor slots (5 active):
+ * Sensor slots (6 active):
  *   Slot 0  XSHUT GPIO4   addr 0x54
  *   Slot 1  XSHUT GPIO31  addr 0x56
  *   Slot 2  XSHUT GPIO30  addr 0x58
  *   Slot 3  XSHUT GPIO29  addr 0x5A
  *   Slot 4  XSHUT GPIO28  addr 0x5C
+ *   Slot 5  XSHUT GPIO5   addr 0x5E  (upward-facing)
  *
  * Poll rate: ~20 Hz (50 ms; VL53L1X LONG mode needs ~33 ms/measurement)
  */
@@ -55,13 +57,16 @@ static VL53L1_Dev_t s_sensors[] = {
     { .I2cDevAddr = VL53L1_I2C_ADDRESS + 10, /* 0x5C */
       .shutdown_pin = TOF_XSHUT_PIN_4,        /* GPIO28 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
+    { .I2cDevAddr = VL53L1_I2C_ADDRESS + 12, /* 0x5E */
+      .shutdown_pin = TOF_XSHUT_PIN_5,        /* GPIO5  — upward-facing */
+      .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
 };
 
 static const uint8_t SENSOR_COUNT = sizeof(s_sensors) / sizeof(s_sensors[0]);
 
 /* ── Latest readings (written by tof_task, read by aruco task) ──────────── */
-static volatile uint16_t s_dist_mm[5]      = {0};
-static volatile uint8_t  s_range_status[5] = {255, 255, 255, 255, 255};
+static volatile uint16_t s_dist_mm[6]      = {0};
+static volatile uint8_t  s_range_status[6] = {255, 255, 255, 255, 255, 255};
 
 uint16_t tof_get_distance_mm(uint8_t idx)  { return (idx < SENSOR_COUNT) ? s_dist_mm[idx]      : 0;   }
 uint8_t  tof_get_range_status(uint8_t idx) { return (idx < SENSOR_COUNT) ? s_range_status[idx] : 255; }
