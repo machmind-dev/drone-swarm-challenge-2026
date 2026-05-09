@@ -48,7 +48,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <time.h>
 #include <stdbool.h>
 #include <sys/param.h>
 #include <math.h>
@@ -62,7 +61,9 @@
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_err.h"
+#include "esp_netif.h"
 #include "nvs_flash.h"
+#include "lwip/ip4_addr.h"
 
 #include <c_library_v2/common/mavlink.h>
 #include "driver/uart.h"
@@ -70,6 +71,7 @@
 
 #include <micro_ros_utilities/string_utilities.h>
 #include <micro_ros_utilities/type_utilities.h>
+#include <rosidl_runtime_c/string_functions.h>
 
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
@@ -455,8 +457,6 @@ static geometry_msgs__msg__PoseStamped   control_msg;
 static std_msgs__msg__String             state_pub_msg;
 static std_msgs__msg__String             role_pub_msg;
 static std_msgs__msg__Int8               battery_pub_msg;
-
-static struct timespec ts;
 
 static char topic_gcs_command[64];
 static char topic_gcs_config[64];

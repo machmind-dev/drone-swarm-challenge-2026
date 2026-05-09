@@ -14,8 +14,7 @@
 
 /* boards.h provides: S3_UART_PORT, S3_UART_TX, S3_UART_RX, S3_UART_BAUD */
 
-/* Relative path to shared protocol header */
-#include "../../shared/p4_link_protocol.h"
+#include "../shared/p4_link_protocol.h"
 
 static const char *TAG = "p4_tx";
 

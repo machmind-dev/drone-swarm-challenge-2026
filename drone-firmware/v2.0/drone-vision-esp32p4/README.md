@@ -79,6 +79,17 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 ## UART Output → ESP32-S3
 
-Next step: wire P4 TX → S3 UART2 (GPIO8).  S3 parses `POSE:` lines and forwards
-`VISION_POSITION_ESTIMATE` MAVLink messages to PX4 via the existing
-`mav_send_vision_estimate()` call.
+Binary framed COMBINED frames are transmitted over UART1 at 115200 baud at 20 Hz.
+
+| Signal | P4 GPIO | → | S3 GPIO |
+|--------|---------|---|---------|
+| TX | GPIO22 | → | GPIO3 (RX) |
+| RX | GPIO23 | ← | GPIO2 (TX) |
+| GND | GND | — | GND |
+
+Frame: `SOF(0xAB) | LEN | TYPE(0x03) | p4_combined_t(47B) | CRC8` = 51 bytes total.
+Protocol defined in `v2.0/shared/p4_link_protocol.h`, transmitted by `main/p4_link_tx.c`.
+
+The S3 decodes the frames and forwards obstacle data as `OBSTACLE_DISTANCE` and
+`DISTANCE_SENSOR` MAVLink messages to PX4, and relays ArUco pose as
+`VISION_POSITION_ESTIMATE` when vision is enabled from the GCS.

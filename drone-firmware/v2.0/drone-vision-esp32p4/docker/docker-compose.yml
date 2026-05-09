@@ -12,6 +12,8 @@ services:
       - /dev:/dev
       # Local components (VL53L1-ULD-ESP and any future additions)
       - ../components:/code/components
+      # Shared protocol header (p4_link_protocol.h)
+      - ../../shared:/code/shared
       # Project source files from the ESP32P4 subfolder
       - ../main:/code/main
       - ../CMakeLists.txt:/code/CMakeLists.txt

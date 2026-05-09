@@ -22,8 +22,7 @@
 #include "esp_timer.h"
 #include <string.h>
 
-/* Path to shared protocol header */
-#include "../../shared/p4_link_protocol.h"
+#include "../shared/p4_link_protocol.h"
 
 static const char *TAG = "p4_rx";
 

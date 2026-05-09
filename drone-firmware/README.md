@@ -170,5 +170,5 @@ drone-firmware/
 └── v2.0/
     ├── drone-vision-esp32p4/    # Navigation module — ESP32-P4
     ├── drone-comms-esp32s3/     # Communication module — ESP32-S3
-    └── shared/                  # UART protocol header (uart_protocol.h)
+    └── shared/                  # UART protocol header (p4_link_protocol.h)
 ```

@@ -11,7 +11,9 @@ services:
     volumes:
       - /dev:/dev
       # micro-ROS component — large (358 MB), shared from v1.0 archive
-      - /home/pihas/drone-swarm-challenge-2026/drone-firmware/v1.0/components/micro_ros_espidf_component:/code/components/micro_ros_espidf_component:ro
+      - /home/pihas/drone-swarm-challenge-2026/drone-firmware/v1.0/components/micro_ros_espidf_component:/code/components/micro_ros_espidf_component
+      # Shared protocol header (p4_link_protocol.h)
+      - ../../shared:/code/shared
       # Project source files from this subfolder
       - ../main:/code/main
       - ../CMakeLists.txt:/code/CMakeLists.txt

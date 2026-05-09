@@ -1,53 +1,100 @@
-# ESP32-S3 ArUco Vision Board
+# ESP32-S3 Communications Board
 
-ESP-IDF firmware for the Seeed Studio XIAO ESP32-S3 with OV3660 or OV2640 DVP camera.
-Performs ArUco marker detection and outputs world-frame pose estimates over USB-Serial.
+ESP-IDF firmware for the Seeed Studio XIAO ESP32-S3 acting as the communication bridge in the v2.0 dual-MCU architecture. Receives sensor data from the ESP32-P4 over UART, forwards obstacle distances and pose estimates to PX4 via MAVLink, and maintains the micro-ROS link to the Ground Control Station.
+
+## Role in the System
+
+```
+ESP32-P4 (Navigation)
+  │  UART binary frames @ 115200
+  │  GPIO22 TX → GPIO3 RX
+  ▼
+ESP32-S3 (Communications)
+  ├── MAVLink → PX4 (GPIO43 TX / GPIO44 RX, 57600 baud)
+  │     OBSTACLE_DISTANCE  — 5 horizontal ToF sensors, 30° FOV each
+  │     DISTANCE_SENSOR    — upward sensor (slot 5)
+  │     VISION_POSITION_ESTIMATE — ArUco pose (when vision enabled)
+  │     HEARTBEAT, SET_MODE, ARM, NAV commands
+  └── micro-ROS → GCS (Wi-Fi)
+        Publish: /drone_N/state, /drone_N/battery, /drone_N/role
+        Subscribe: /gcs/drone_N/command, /gcs/drone_N/config, /gcs/drone_N/control
+```
 
 ## Hardware
 
 | Component | Part |
 |-----------|------|
-| MCU | Seeed Studio XIAO ESP32-S3 Sense (240 MHz, 8 MB PSRAM) |
-| Camera | OV3660 or OV2640 DVP (auto-detected at boot) |
+| MCU | Seeed Studio XIAO ESP32-S3 (240 MHz, 8 MB PSRAM) |
+| P4 link | UART2 — GPIO3 RX ← P4 GPIO22, GPIO2 TX → P4 GPIO23 |
+| PX4 link | UART1 — GPIO43 TX, GPIO44 RX, 57600 baud |
 | USB-UART | USB-CDC → `/dev/ttyACM0` |
 
-## Modes
+## UART Protocol (P4 → S3)
 
-Two build modes selectable via `idf.py menuconfig`:
-
-| Mode | Description |
-|------|-------------|
-| `POSE` | Continuous ArUco detection, world-frame x/y/z + quaternion output |
-| `BENCH` | Multi-resolution FPS sweep (QQVGA → QVGA → HVGA → VGA), CSV output |
-
-## Console Output (POSE mode)
+Binary framed, 115200 8N1. Frame layout:
 
 ```
-[aruco]  M7  [known]    dist=2.34m  H=+5.2deg  V=-8.1deg
-[pose]   x=5.231  y=3.142  z=1.503  qw=0.9971 qx=0.0104 qy=-0.0198 qz=0.0502  (2 matched)
+SOF(1B) | LEN(1B) | TYPE(1B) | PAYLOAD(47B) | CRC8(1B)  =  51 bytes total
+```
+
+- SOF = `0xAB`, TYPE = `0x03` (COMBINED)
+- Payload = `p4_tof_t` (18 B: 6× uint16 dist + 6× uint8 status) + `p4_pose_t` (29 B: valid + 7× float)
+- CRC-8 (poly 0x07) computed over TYPE + PAYLOAD
+- Protocol header: `v2.0/shared/p4_link_protocol.h`
+
+## MAVLink Obstacle Distance Mapping
+
+72-bin circular map at 5°/bin, bin 0 = forward, clockwise:
+
+| Sensor | Direction | Bins |
+|--------|-----------|------|
+| Slot 0 | Left −90° | 51–56 |
+| Slot 1 | L-front −45° | 60–65 |
+| Slot 2 | Front 0° | 69, 70, 71, 0, 1, 2 |
+| Slot 3 | R-front +45° | 6–11 |
+| Slot 4 | Right +90° | 15–20 |
+| Slot 5 | Up | separate `DISTANCE_SENSOR` (PITCH_90) |
+
+## Console Output
+
+```
+[ToF] L90: 320mm L45: 450mm FWD: 880mm R45:  13mm R90:  12mm UP:   2mm | STATE:disarmed       VIS:N
 ```
 
 ## Build & Flash
 
-Use the launcher script (recommended):
+Use the desktop launcher (recommended):
 
-```bash
-launchers/ubuntu-gnome-pc/launch-drone-vision-s3.sh
-# or on Pi5:
-launchers/ubuntu-xfce-pi5/launch-node-ide.sh
+```
+IDE - Flash S3
 ```
 
 Or manually via Docker:
 
 ```bash
-cd drone-vision/ESP32S3
+cd drone-firmware/v2.0/drone-comms-esp32s3
 docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml exec esp32s3_vision bash
+docker compose -f docker/docker-compose.yml exec esp32s3_comms bash
 # inside container:
+source /opt/esp/idf/export.sh
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-## Relationship to ESP32-P4
+First build only — set the target once:
+```bash
+idf.py set-target esp32s3
+```
 
-The ESP32-S3 variant was the earlier prototype and benchmark platform. The ESP32-P4 (`ESP32P4/`) is the production vision board used on the drone — it runs at 360 MHz with MIPI-CSI and outputs POSE over UART to the drone firmware (ESP32-S3 node). The ArUco marker map and world-pose math are shared between both variants.
+## ESP-IDF Version
+
+IDF 5.0 (Docker image: `espressif/idf:release-v5.0`)
+
+## micro-ROS Vision Toggle
+
+Send from GCS to enable/disable VISION_POSITION_ESTIMATE relay to PX4:
+
+```
+/gcs/drone_1/config  →  "CONFIG_VISION_ENABLE"
+/gcs/drone_1/config  →  "CONFIG_VISION_DISABLE"
+```
