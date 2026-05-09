@@ -14,7 +14,7 @@
  *    21    VL53L1X XSHUT   Slot 2 open-drain XSHUT
  *    22    VL53L1X XSHUT   Slot 3 open-drain XSHUT
  *    23    VL53L1X XSHUT   Slot 4 open-drain XSHUT
- *    26    VL53L1X XSHUT   Slot 5 open-drain XSHUT (upward-facing)
+ *    27    VL53L1X XSHUT   Slot 5 open-drain XSHUT (upward-facing)
  *    37    UART0 TX         Console via CH343 USB-UART bridge → /dev/ttyACM0
  *    38    UART0 RX         Console via CH343 USB-UART bridge → /dev/ttyACM0
  *    51    (reserved)       WiFi6 (ESP32-C6) / camera PWDN — do not use
@@ -48,4 +48,4 @@
 #define TOF_XSHUT_PIN_2     GPIO_NUM_21   /* slot 2 XSHUT — open-drain          */
 #define TOF_XSHUT_PIN_3     GPIO_NUM_22   /* slot 3 XSHUT — open-drain          */
 #define TOF_XSHUT_PIN_4     GPIO_NUM_23   /* slot 4 XSHUT — open-drain          */
-#define TOF_XSHUT_PIN_5     GPIO_NUM_26   /* slot 5 XSHUT — upward-facing       */
+#define TOF_XSHUT_PIN_5     GPIO_NUM_27   /* slot 5 XSHUT — upward-facing       */

@@ -196,9 +196,7 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
     vTaskDelay(pdMS_TO_TICKS(100));
 
     for (int k = 0; k < sensor_count; k++) {
-        /* Reset bus while sensor is still in hardware reset — clock pulses must
-         * not arrive after XSHUT HIGH or they can corrupt the sensor's I2C boot. */
-        i2c_bus_reset();
+        bool already_at_addr = false;
         if (sensor_array[k].shutdown_pin != GPIO_NUM_NC)
             digitalWrite(sensor_array[k].shutdown_pin, HIGH);
         timeout_check = sensorState = 0;
@@ -211,16 +209,35 @@ VL53L1X_ERROR VL53L1X_InitSensorArray(VL53L1_DEV sensor_array, uint8_t sensor_co
             ESP_LOGI(TAG_PLAT, "BootState attempt %d: i2c_err=%d state=%d",
                      timeout_check, bst, sensorState);
             if (++timeout_check > 10) {
-                ESP_LOGW(TAG_PLAT, "sensor[%d] addr=0x%02X not found — skipping",
-                         k, sensor_array[k].I2cDevAddr);
-                sensor_array[k].I2cDevAddr = 0;
+                /* Not at default address — check if already at its target address.
+                 * This happens when VCC stays up across a warm ESP32 reset and
+                 * XSHUT is disconnected, so the sensor retained its previous
+                 * assigned address instead of resetting to 0x29. */
+                uint8_t probe_state = 0;
+                VL53L1X_ERROR probe = VL53L1X_SystemStatus(sensor_array[k].I2cDevAddr,
+                                                            &probe_state);
+                if (probe == VL53L1_ERROR_NONE) {
+                    ESP_LOGW(TAG_PLAT,
+                             "sensor[%d] already at 0x%02X (warm boot) — using directly",
+                             k, sensor_array[k].I2cDevAddr);
+                    already_at_addr = true;
+                    sensorState = 1;  /* exit while loop without marking as absent */
+                } else {
+                    ESP_LOGW(TAG_PLAT, "sensor[%d] addr=0x%02X not found — skipping",
+                             k, sensor_array[k].I2cDevAddr);
+                    sensor_array[k].I2cDevAddr = 0;
+                }
                 i2c_bus_reset();
                 break;
             }
         }
         if (sensor_array[k].I2cDevAddr == 0) continue;
-        VL53L1X_SensorInit(VL53L1_I2C_ADDRESS);
-        VL53L1X_SetI2CAddress(VL53L1_I2C_ADDRESS, sensor_array[k].I2cDevAddr);
+        if (already_at_addr) {
+            VL53L1X_SensorInit(sensor_array[k].I2cDevAddr);
+        } else {
+            VL53L1X_SensorInit(VL53L1_I2C_ADDRESS);
+            VL53L1X_SetI2CAddress(VL53L1_I2C_ADDRESS, sensor_array[k].I2cDevAddr);
+        }
         VL53L1X_SetFastI2C(sensor_array[k].I2cDevAddr);
         VL53L1X_SetDistanceMode(sensor_array[k].I2cDevAddr, sensor_array[k].distance_mode);
         if (sensor_array[k].timing_budget)
