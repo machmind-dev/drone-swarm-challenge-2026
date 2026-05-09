@@ -2,10 +2,10 @@
 
 Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigkair.com).
 
-| Version | Event | Hardware |
-|---------|-------|----------|
-| [v1.0](drone-firmware/v1.0/) | SDC 2026 Qualifying | Single ESP32-S3 (COTS dev board) |
-| [v2.0](drone-firmware/v2.0/) | SDC 2026 Finals | Dual ESP32-P4 + ESP32-S3 (custom PCB) |
+| Version | Event | MCU | CPU | Memory | ArUco Resolution | Detection Range |
+|---------|-------|-----|-----|--------|-----------------|-----------------|
+| [v1.0](drone-firmware/v1.0/) | SDC 2026 Qualifying | ESP32-S3 | 240 MHz | 8 MB PSRAM | 80×60 (QQVGA) | ~3–4 m |
+| [v2.0](drone-firmware/v2.0/) | SDC 2026 Finals | ESP32-P4 + ESP32-S3 | 360 MHz + 240 MHz | 32 MB + 8 MB PSRAM | 320×240 (QVGA) | ~8–12 m |
 
 ---
 
