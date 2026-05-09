@@ -15,8 +15,8 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 
 | Member | Disciplines |
 |--------|-------------|
-| **Mindaugas Jonauskis** — Team Founder | Firmware & Software Engineering · Electronics & Electrical Design · ECAD |
-| **Hauke Renk** | Mechanical Design & Integration · MCAD |
+| **Mindaugas Jonauskis** (Founder) | Firmware & Software Engineering · Electronics & Electrical Design |
+| **Hauke Renk** | Mechanical Design & Integration |
 
 ---
 
