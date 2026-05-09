@@ -2,6 +2,11 @@
 
 Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigkair.com).
 
+| Version | Event | Hardware |
+|---------|-------|----------|
+| [v1.0](drone-firmware/v1.0/) | SDC 2026 Qualifying | Single ESP32-S3 (COTS dev board) |
+| [v2.0](drone-firmware/v2.0/) | SDC 2026 Finals | Dual ESP32-P4 + ESP32-S3 (custom PCB) |
+
 ---
 
 ## Team
@@ -19,10 +24,12 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 
 ```
 drone-swarm-challenge-2026/
-├── drone-firmware/          # ESP32-S3 drone node firmware (ESP-IDF + micro-ROS)
-├── drone-vision/            # Vision board firmware (ArUco detection + POSE)
-│   ├── ESP32P4/             # Waveshare ESP32-P4 — OV5647 MIPI-CSI, world-frame POSE
-│   └── ESP32S3/             # Seeed XIAO ESP32-S3 — OV3660/OV2640 DVP, ArUco detection
+├── drone-firmware/          # All drone onboard firmware (v1.0 and v2.0)
+│   ├── v1.0/                # SDC 2026 Qualifying — single ESP32-S3
+│   └── v2.0/                # SDC 2026 Finals — dual ESP32-P4 + ESP32-S3
+│       ├── drone-vision-esp32p4/  # Navigation: ArUco, ToF, UART TX
+│       ├── drone-comms-esp32s3/   # Communication: MAVLink, micro-ROS
+│       └── shared/                # Binary UART protocol header
 ├── ground-station-software/ # ROS2 ground control station, swarm algorithms & vision
 ├── hardware/                # Mechanical and electrical design files
 ├── launchers/               # Platform-specific launch scripts
@@ -33,20 +40,13 @@ drone-swarm-challenge-2026/
 
 ### drone-firmware
 
-ESP-IDF firmware for the drone node running on a Seeed Studio XIAO ESP32-S3. Handles sensor fusion (VL53L1X ToF rangers), MAVLink telemetry to PX4, camera streaming over micro-ROS, and obstacle detection.
+ESP-IDF firmware for all onboard MCUs across both competition versions. See [drone-firmware/README.md](drone-firmware/README.md) for full architecture details and version comparison.
 
-Key components:
-- `components/esp32-camera` — ESP32 camera driver
-- `components/micro_ros_espidf_component` — micro-ROS ESP-IDF integration
-- `components/VL53L1-ULD-ESP` — VL53L1X time-of-flight sensor driver
-- `docker/` — Containerised IDF development environment
+**v1.0** — Single Seeed Studio XIAO ESP32-S3 handling camera, ArUco, ToF sensors, MAVLink, and micro-ROS.
 
-### drone-vision
-
-Vision board firmware in two variants:
-
-- **ESP32P4/** — Waveshare ESP32-P4 WiFi6 + OV5647 MIPI-CSI. Real-time ArUco detection at 360 MHz; outputs world-frame POSE over UART. IDF 5.3+.
-- **ESP32S3/** — Seeed XIAO ESP32-S3 + OV3660/OV2640 DVP. ArUco detection pipeline; used for benchmarking and earlier prototypes. IDF 5.0.
+**v2.0** — Dual-MCU split on a custom PCB:
+- `drone-vision-esp32p4/` — Waveshare ESP32-P4 (360 MHz): OV5647 MIPI-CSI camera, ArUco detection, 6× VL53L1X ToF, binary UART TX to S3
+- `drone-comms-esp32s3/` — ESP32-S3: receives UART frames from P4, forwards `OBSTACLE_DISTANCE` + `VISION_POSITION_ESTIMATE` to PX4 via MAVLink, maintains micro-ROS GCS link
 
 ### ground-station-software
 
@@ -81,8 +81,8 @@ See the platform-specific launcher README for setup and launch instructions:
 - [Ubuntu GNOME PC (x86\_64)](launchers/ubuntu-gnome-pc/README.md)
 - [Ubuntu XFCE Pi5 (ARM64)](launchers/ubuntu-xfce-pi5/README.md)
 - [Drone Firmware](drone-firmware/README.md)
-- [Vision Board — ESP32-P4](drone-vision/ESP32P4/README.md)
-- [Vision Board — ESP32-S3](drone-vision/ESP32S3/README.md)
+- [v2.0 Navigation — ESP32-P4](drone-firmware/v2.0/drone-vision-esp32p4/README.md)
+- [v2.0 Communications — ESP32-S3](drone-firmware/v2.0/drone-comms-esp32s3/README.md)
 
 ---
 
