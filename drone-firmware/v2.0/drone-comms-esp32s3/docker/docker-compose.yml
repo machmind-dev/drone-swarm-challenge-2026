@@ -1,5 +1,5 @@
 services:
-  esp32s3_vision:
+  esp32s3_comms:
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,11 +10,8 @@ services:
     tty: true
     volumes:
       - /dev:/dev
-      # OpenCV pre-built for ESP32-S3 (Xtensa) — lives in v1.0 archive
-      - /home/pihas/drone-swarm-challenge-2026/drone-firmware/v1.0/components/espressif__opencv:/code/components/espressif__opencv:ro
-      # esp32-camera and managed_components are NOT bind-mounted.
-      # idf.py fetches esp32-camera via component manager on first build;
-      # managed_components lives in the container writable layer (same as P4).
+      # micro-ROS component — large (358 MB), shared from v1.0 archive
+      - /home/pihas/drone-swarm-challenge-2026/drone-firmware/v1.0/components/micro_ros_espidf_component:/code/components/micro_ros_espidf_component:ro
       # Project source files from this subfolder
       - ../main:/code/main
       - ../CMakeLists.txt:/code/CMakeLists.txt
@@ -25,6 +22,7 @@ services:
       - ../partitions.csv:/code/partitions.csv
     # Keep container alive — use docker compose exec to run commands.
     # Typical workflow:
-    #   docker compose exec esp32s3_vision idf.py build
-    #   docker compose exec esp32s3_vision idf.py -p /dev/ttyACM0 flash monitor
+    #   docker compose exec esp32s3_comms idf.py set-target esp32s3
+    #   docker compose exec esp32s3_comms idf.py build
+    #   docker compose exec esp32s3_comms idf.py -p /dev/ttyACM0 flash monitor
     command: sleep infinity
