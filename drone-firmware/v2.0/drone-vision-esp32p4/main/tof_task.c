@@ -7,15 +7,16 @@
  *   Pull-ups: provided by the VL53L1X breakout board (4.7 kΩ to 3.3 V).
  *
  *   Wiring: SDA→GPIO2, SCL→GPIO3, GND, 3V3
- *   XSHUT pins: slot0→GPIO4, slot1→GPIO20, slot2→GPIO21, slot3→GPIO22,
- *               slot4→GPIO23, slot5→GPIO27 (up)
+ *   XSHUT pins: slot0→GPIO4, slot1→GPIO20, slot2→GPIO21, slot3→GPIO26,
+ *               slot4→GPIO32, slot5→GPIO27 (up)
+ *   GPIO22/23 reassigned to UART1 TX/RX → ESP32-S3
  *
  * Sensor slots (6 active):
  *   Slot 0  XSHUT GPIO4   addr 0x54
  *   Slot 1  XSHUT GPIO20  addr 0x56
  *   Slot 2  XSHUT GPIO21  addr 0x58
- *   Slot 3  XSHUT GPIO22  addr 0x5A
- *   Slot 4  XSHUT GPIO23  addr 0x5C
+ *   Slot 3  XSHUT GPIO26  addr 0x5A
+ *   Slot 4  XSHUT GPIO32  addr 0x5C
  *   Slot 5  XSHUT GPIO27  addr 0x5E  (upward-facing)
  *
  * Poll rate: ~20 Hz (50 ms; VL53L1X LONG mode needs ~33 ms/measurement)
@@ -53,10 +54,10 @@ static VL53L1_Dev_t s_sensors[SENSOR_COUNT] = {
       .shutdown_pin = TOF_XSHUT_PIN_2,        /* GPIO21 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
     { .I2cDevAddr = VL53L1_I2C_ADDRESS + 8,  /* 0x5A */
-      .shutdown_pin = TOF_XSHUT_PIN_3,        /* GPIO22 */
+      .shutdown_pin = TOF_XSHUT_PIN_3,        /* GPIO26 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
     { .I2cDevAddr = VL53L1_I2C_ADDRESS + 10, /* 0x5C */
-      .shutdown_pin = TOF_XSHUT_PIN_4,        /* GPIO23 */
+      .shutdown_pin = TOF_XSHUT_PIN_4,        /* GPIO32 */
       .distance_mode = DISTANCE_MODE_LONG, .timing_budget = 33, .inter_measurement = 40 },
     { .I2cDevAddr = VL53L1_I2C_ADDRESS + 12, /* 0x5E */
       .shutdown_pin = TOF_XSHUT_PIN_5,        /* GPIO27 — upward-facing */
