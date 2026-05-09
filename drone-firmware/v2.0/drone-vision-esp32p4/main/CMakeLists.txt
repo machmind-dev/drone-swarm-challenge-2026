@@ -1,4 +1,4 @@
-idf_component_register(SRCS main.c aruco_pose.cpp tof_task.c
+idf_component_register(SRCS main.c aruco_pose.cpp tof_task.c p4_link_tx.c
   PRIV_INCLUDE_DIRS .
   PRIV_REQUIRES nvs_flash esp_timer driver heap esp_pm espressif__opencv
                 espressif__esp_video

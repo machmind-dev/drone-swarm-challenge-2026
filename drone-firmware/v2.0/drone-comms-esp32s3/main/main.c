@@ -1,55 +1,1157 @@
-/* main.c — Mach Mind Drone Vision
+/* main.c — Mach Mind Drone ESP32S3 Comms Firmware (v2.0)
  *
- * Two modes, selected at build time via Kconfig → idf.py menuconfig:
+ * Role: communication bridge between ESP32-P4 sensor board and PX4/GCS.
  *
- *   BENCH  — multi-resolution ArUco FPS sweep, CSV output, auto-restart.
- *   POSE   — continuous ArUco detection, single-line rolling status,
- *             world pose (x/y/z) via solvePnP to USB-serial.
+ * Data sources:
+ *   ESP32-P4 → UART2 (115200 baud, binary framed):
+ *     - 6× VL53L1X ToF distances (slots 0–5, see sensor map below)
+ *     - ArUco world-pose estimate (x/y/z/quaternion, valid flag)
  *
- * Flash & monitor:
- *   docker compose exec esp32s3_vision bash
- *   idf.py -p /dev/ttyACM0 flash monitor
+ * Sensor map (body-frame angles, FRD convention):
+ *   Slot 0  Left     −90°   MAV_SENSOR_ROTATION_YAW_270
+ *   Slot 1  L-front  −45°   MAV_SENSOR_ROTATION_YAW_315
+ *   Slot 2  Front      0°   MAV_SENSOR_ROTATION_NONE
+ *   Slot 3  R-front  +45°   MAV_SENSOR_ROTATION_YAW_45
+ *   Slot 4  Right    +90°   MAV_SENSOR_ROTATION_YAW_90
+ *   Slot 5  Up        —     MAV_SENSOR_ROTATION_PITCH_90
+ *
+ * MAVLink → PX4 (UART1, 57600 baud):
+ *   HEARTBEAT, OBSTACLE_DISTANCE (5 horizontal sensors),
+ *   DISTANCE_SENSOR (slot 5, upward), VISION_POSITION_ESTIMATE,
+ *   COMPONENT_ARM_DISARM, SET_MODE,
+ *   SET_POSITION_TARGET_LOCAL_NED, NAV_LAND
+ *
+ * ROS topics (subscribed, via micro-ROS):
+ *   /gcs/drone_{ID}/command    std_msgs/String  — flight commands
+ *   /gcs/drone_{ID}/config     std_msgs/String  — CONFIG_VISION_ENABLE/DISABLE
+ *   /gcs/drone_{ID}/control    PoseStamped      — position setpoints
+ *
+ * ROS topics (published, via micro-ROS):
+ *   /drone_{ID}/state          std_msgs/String  — state machine
+ *   /drone_{ID}/role           std_msgs/String  — role
+ *   /drone_{ID}/battery        std_msgs/Int8    — battery % (0–100, -1=unknown)
+ *   /visualization_marker      visualization_msgs/Marker — RViz drone disc
+ *
+ * OBSTACLE_DISTANCE bin map (5°/bin, 72 bins, bin 0 = forward, CW):
+ *   Slot 2 Front    bins 69,70,71,0,1,2
+ *   Slot 3 R-front  bins 6,7,8,9,10,11
+ *   Slot 4 Right    bins 15,16,17,18,19,20
+ *   Slot 0 Left     bins 51,52,53,54,55,56
+ *   Slot 1 L-front  bins 60,61,62,63,64,65
+ *
+ * Takeoff altitude options:
+ *   A: 1.0 m  — tight formations only
+ *   B: 1.5 m  — recommended  ← default
+ *   C: 2.0 m  — close proximity swarm
  */
 
 #include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include <stdbool.h>
+#include <sys/param.h>
+#include <math.h>
+#include <stdlib.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_err.h"
 #include "nvs_flash.h"
-#include "sdkconfig.h"
 
-#include "vision_bench.h"
-#include "aruco_pose.h"
+#include <c_library_v2/common/mavlink.h>
+#include "driver/uart.h"
+#include "driver/gpio.h"
 
-static const char *TAG = "main";
+#include <micro_ros_utilities/string_utilities.h>
+#include <micro_ros_utilities/type_utilities.h>
 
-/* Pose mode needs a large stack for cv::Mat / std::vector / solvePnP. */
-#define POSE_TASK_STACK_KB  32
+#include <rcl/rcl.h>
+#include <rcl/error_handling.h>
+#include <rclc/rclc.h>
+#include <rclc/executor.h>
+#include <rmw_microros/rmw_microros.h>
 
-static void pose_task(void *arg)
+#include <std_msgs/msg/string.h>
+#include <std_msgs/msg/int8.h>
+#include <geometry_msgs/msg/pose_stamped.h>
+#include <visualization_msgs/msg/marker.h>
+
+#include "uros_network_interfaces.h"
+#include "boards.h"
+#include "p4_link.h"
+
+static const char *TAG = "drone";
+
+/* ── Identity ──────────────────────────────────────────────────────────── */
+#define DRONE_ID          1
+
+/* ── RViz marker IDs ────────────────────────────────────────────────────── */
+#define DRONE_DISC_DIAMETER_M  0.18f
+#define DRONE_DISC_THICKNESS_M 0.02f
+#define DRONE_DEFAULT_Z_M      0.5f
+#define VISION_TIMEOUT_MS      1500
+
+#define MARKER_ID_DISC(id)  ((id)*100)
+#define MARKER_ID_TEXT(id)  ((id)*100+1)
+
+/* ── Network ───────────────────────────────────────────────────────────── */
+#define DRONE_IP_BASE_OCTET 100
+#define DRONE_IP_NETMASK    "255.255.255.0"
+#define DRONE_IP_GATEWAY    "192.168.178.1"
+#define DRONE_IP_PREFIX     "192.168.178."
+
+/* ── MAVLink / PX4 ─────────────────────────────────────────────────────── */
+#define GCS_SYSID   42
+#define GCS_COMPID  200
+#define PX4_SYSID   1
+#define PX4_COMPID  1
+
+#define PX4_MODE_STABILIZED  0x00070000UL
+#define PX4_MODE_OFFBOARD    0x00060000UL
+
+/* ── C2 watchdog ───────────────────────────────────────────────────────── */
+#define C2_PING_TIMEOUT_MS   100
+#define C2_PING_ATTEMPTS     2
+#define C2_CHECK_INTERVAL_MS 1000
+#define C2_FAIL_THRESHOLD    2
+
+/* ── Mission parameters ────────────────────────────────────────────────── */
+#define MISSION_TAKEOFF_ALT_M      1.5f
+#define MISSION_TAKEOFF_WAIT_MS    5000
+#define MISSION_MAX_HOVER_MS       (15UL * 60UL * 1000UL)
+#define MISSION_LAND_DESCEND_MS    5000
+#define OFFBOARD_STREAM_PERIOD_MS  50
+
+/* ── OBSTACLE_DISTANCE — VL53L1X 30° FOV → 6 bins per sensor ───────────
+ * Bins filled: centre ± 3 bins (±15°).  Slots 0–4 (horizontal only).
+ * Slot 5 (up) sent separately as DISTANCE_SENSOR. */
+#define OD_BINS  72
+/* [slot][bin_index 0..5] */
+static const uint8_t OD_BIN_MAP[5][6] = {
+    { 51, 52, 53, 54, 55, 56 },   /* slot 0  Left  −90°  (270°) */
+    { 60, 61, 62, 63, 64, 65 },   /* slot 1  L-front −45° (315°) */
+    { 69, 70, 71,  0,  1,  2 },   /* slot 2  Front   0°          */
+    {  6,  7,  8,  9, 10, 11 },   /* slot 3  R-front +45°        */
+    { 15, 16, 17, 18, 19, 20 },   /* slot 4  Right  +90°         */
+};
+
+/* ── micro-ROS macros ──────────────────────────────────────────────────── */
+#define RCCHECK(fn) \
+    { rcl_ret_t _rc = (fn); \
+      if (_rc != RCL_RET_OK) { \
+          printf("Failed line %d: %d. Aborting.\n", __LINE__, (int)_rc); \
+          vTaskDelete(NULL); } }
+#define RCSOFTCHECK(fn) \
+    { rcl_ret_t _rc = (fn); \
+      if (_rc != RCL_RET_OK) \
+          printf("Soft fail line %d: %d.\n", __LINE__, (int)_rc); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * State machine
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+typedef enum {
+    DRONE_DISARMED = 0,
+    DRONE_ARMED,
+    DRONE_MISSION,
+    DRONE_RETURNING_HOME,
+    DRONE_LANDING,
+    DRONE_KILLED,
+} drone_state_t;
+
+static volatile drone_state_t drone_state = DRONE_DISARMED;
+static volatile bool          state_dirty = true;
+
+static const char * const state_names[] = {
+    "disarmed", "armed", "mission", "returning_home", "landing", "killed"
+};
+
+static volatile float home_x = 0.0f, home_y = 0.0f, home_z = 0.0f;
+static volatile int8_t battery_remaining_pct = -1;
+static volatile float px4_pos_x = 0.0f, px4_pos_y = 0.0f, px4_pos_z = 0.0f;
+static volatile bool  px4_pos_valid = false;
+static volatile float px4_home_x = 0.0f, px4_home_y = 0.0f, px4_home_z = 0.0f;
+static float map_home_x = 0.0f, map_home_y = 0.0f, map_home_z = 0.0f;
+
+static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
+static volatile float setpoint_yaw = 0.0f;
+static volatile bool  setpoint_received = false;
+
+volatile bool vision_enabled = false;
+
+/* Vision pose — written by main loop from p4_link data */
+volatile float vp_x = 0.0f, vp_y = 0.0f, vp_z = 0.0f;
+volatile float vp_qx = 0.0f, vp_qy = 0.0f, vp_qz = 0.0f, vp_qw = 1.0f;
+volatile bool    vision_pose_valid   = false;
+volatile int64_t last_vision_pose_ms = 0;
+
+static volatile bool  gcs_control_active = false;
+
+static TaskHandle_t mission_task_handle     = NULL;
+static TaskHandle_t return_home_task_handle = NULL;
+static TaskHandle_t eland_task_handle       = NULL;
+static TaskHandle_t prearm_stream_handle    = NULL;
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * UART / MAVLink
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static void uart_mavlink_init(void)
 {
-    (void)arg;
-    aruco_pose_start(); /* never returns */
+    uart_config_t cfg = {
+        .baud_rate  = PX4_UART_BAUD,
+        .data_bits  = UART_DATA_8_BITS,
+        .parity     = UART_PARITY_DISABLE,
+        .stop_bits  = UART_STOP_BITS_1,
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    ESP_ERROR_CHECK(uart_driver_install(PX4_UART_PORT, 2048, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(PX4_UART_PORT, &cfg));
+    ESP_ERROR_CHECK(uart_set_pin(PX4_UART_PORT, PX4_UART_TX, PX4_UART_RX,
+                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+}
+
+static void mav_send(const mavlink_message_t *msg)
+{
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, msg);
+    uart_write_bytes(PX4_UART_PORT, (const char *)buf, len);
+}
+
+static void send_heartbeat_once(void)
+{
+    mavlink_message_t msg;
+    mavlink_msg_heartbeat_pack(GCS_SYSID, GCS_COMPID, &msg,
+        MAV_TYPE_ONBOARD_CONTROLLER, MAV_AUTOPILOT_INVALID,
+        0, 0, MAV_STATE_ACTIVE);
+    mav_send(&msg);
+}
+
+static void mav_arm(bool arm)
+{
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(GCS_SYSID, GCS_COMPID, &msg,
+        PX4_SYSID, PX4_COMPID,
+        MAV_CMD_COMPONENT_ARM_DISARM, 0,
+        arm ? 1.0f : 0.0f, 0, 0, 0, 0, 0, 0);
+    mav_send(&msg);
+    ESP_LOGI(TAG, "MAV: %s", arm ? "ARM" : "DISARM");
+}
+
+static void mav_kill(void)
+{
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(GCS_SYSID, GCS_COMPID, &msg,
+        PX4_SYSID, PX4_COMPID,
+        MAV_CMD_COMPONENT_ARM_DISARM, 0,
+        0.0f, 21196.0f, 0, 0, 0, 0, 0);
+    mav_send(&msg);
+    ESP_LOGI(TAG, "MAV: KILL");
+}
+
+static void mav_eland(void)
+{
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(GCS_SYSID, GCS_COMPID, &msg,
+        PX4_SYSID, PX4_COMPID,
+        MAV_CMD_NAV_LAND, 0,
+        0, 0, 0, 0, NAN, NAN, NAN);
+    mav_send(&msg);
+    ESP_LOGI(TAG, "MAV: EMERGENCY LAND");
+}
+
+static void mav_set_position_ned(float x, float y, float z_ned)
+{
+    mavlink_message_t msg;
+    mavlink_msg_set_position_target_local_ned_pack(
+        GCS_SYSID, GCS_COMPID, &msg,
+        (uint32_t)(esp_timer_get_time() / 1000),
+        PX4_SYSID, PX4_COMPID,
+        MAV_FRAME_LOCAL_NED,
+        0b0000111111111000,
+        x, y, z_ned, 0, 0, 0, 0, 0, 0, 0, 0);
+    mav_send(&msg);
+}
+
+static void mav_set_position_yaw_ned(float x, float y, float z_ned, float yaw)
+{
+    mavlink_message_t msg;
+    mavlink_msg_set_position_target_local_ned_pack(
+        GCS_SYSID, GCS_COMPID, &msg,
+        (uint32_t)(esp_timer_get_time() / 1000),
+        PX4_SYSID, PX4_COMPID,
+        MAV_FRAME_LOCAL_NED,
+        0b0000101111111000,
+        x, y, z_ned, 0, 0, 0, 0, 0, 0, yaw, 0);
+    mav_send(&msg);
+}
+
+static void mav_set_mode(uint32_t custom_mode)
+{
+    mavlink_message_t msg;
+    mavlink_msg_set_mode_pack(GCS_SYSID, GCS_COMPID, &msg,
+        PX4_SYSID,
+        MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+        custom_mode);
+    mav_send(&msg);
+    ESP_LOGI(TAG, "MAV: SET_MODE 0x%08lX", (unsigned long)custom_mode);
+}
+
+void mav_send_vision_estimate(float x, float y, float z,
+                               float roll, float pitch, float yaw)
+{
+    mavlink_message_t msg;
+    mavlink_msg_vision_position_estimate_pack(
+        GCS_SYSID, GCS_COMPID, &msg,
+        (uint64_t)esp_timer_get_time(),
+        x, y, z, roll, pitch, yaw,
+        NULL, 0);
+    mav_send(&msg);
+}
+
+/* ── Obstacle distance — 5 horizontal sensors in one OBSTACLE_DISTANCE msg ── */
+static void send_obstacle_distance(const p4_tof_data_t *tof)
+{
+    mavlink_message_t msg;
+    uint16_t distances[OD_BINS];
+    for (int i = 0; i < OD_BINS; i++) distances[i] = UINT16_MAX;
+
+    /* Fill bins for each horizontal sensor (slots 0–4) */
+    for (int s = 0; s < 5; s++) {
+        uint16_t d_cm = tof->dist_mm[s] / 10;
+        /* Clamp: sensor min ~4 cm, max ~400 cm (LONG mode) */
+        if (d_cm < 4)   d_cm = 4;
+        if (d_cm > 400) d_cm = 400;
+        for (int b = 0; b < 6; b++)
+            distances[OD_BIN_MAP[s][b]] = d_cm;
+    }
+
+    mavlink_msg_obstacle_distance_pack(
+        GCS_SYSID, GCS_COMPID, &msg,
+        (uint64_t)esp_timer_get_time(),
+        MAV_DISTANCE_SENSOR_LASER,
+        distances,
+        5,       /* increment_f: 5° per bin */
+        4,       /* min_distance_cm */
+        400,     /* max_distance_cm */
+        5.0f,    /* angle_offset: 0° aligned to forward */
+        0.0f,
+        MAV_FRAME_BODY_FRD);
+    mav_send(&msg);
+}
+
+/* ── Upward sensor — dedicated DISTANCE_SENSOR message ──────────────────── */
+static void send_upward_distance_sensor(const p4_tof_data_t *tof)
+{
+    mavlink_message_t msg;
+    uint16_t d_cm = tof->dist_mm[5] / 10;
+    if (d_cm < 4)   d_cm = 4;
+    if (d_cm > 400) d_cm = 400;
+
+    mavlink_msg_distance_sensor_pack(
+        GCS_SYSID, GCS_COMPID, &msg,
+        (uint32_t)(esp_timer_get_time() / 1000),
+        4,    /* min_distance_cm */
+        400,  /* max_distance_cm */
+        d_cm,
+        MAV_DISTANCE_SENSOR_LASER,
+        5,    /* id — unique sensor ID */
+        MAV_SENSOR_ROTATION_PITCH_90,   /* pointing up */
+        255,  /* covariance unknown */
+        0, 0, NULL, 0);
+    mav_send(&msg);
+}
+
+/* ── Console output ──────────────────────────────────────────────────────── */
+static void tof_console_print(const p4_tof_data_t *tof)
+{
+    int64_t age = p4_link_age_ms();
+    if (age == INT64_MAX || age > 2000) {
+        printf("\r[ToF] waiting for P4 data...                                    ");
+    } else {
+        printf("\r[ToF] L90:%4umm L45:%4umm FWD:%4umm R45:%4umm R90:%4umm UP:%4umm | STATE:%-14s VIS:%-2s",
+               tof->dist_mm[0], tof->dist_mm[1], tof->dist_mm[2],
+               tof->dist_mm[3], tof->dist_mm[4], tof->dist_mm[5],
+               state_names[(int)drone_state],
+               vision_pose_valid ? "OK" : "NO");
+    }
+    fflush(stdout);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Helpers
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
+
+static float get_initial_x_from_drone_id(void) { return 1.0f; }
+static float get_initial_y_from_drone_id(void) { return (float)DRONE_ID; }
+static float get_initial_z_from_drone_id(void) { return DRONE_DEFAULT_Z_M; }
+
+static void quat_to_euler(float qx, float qy, float qz, float qw,
+                           float *roll, float *pitch, float *yaw)
+{
+    *roll  = atan2f(2.0f*(qw*qx + qy*qz), 1.0f - 2.0f*(qx*qx + qy*qy));
+    *pitch = asinf( 2.0f*(qw*qy - qz*qx));
+    *yaw   = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Drone ID LED burst
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static void drone_id_led_update(void)
+{
+    static TickType_t last_tick = 0;
+    static int state = 0, blink_index = 0;
+    const TickType_t on_time     = pdMS_TO_TICKS(120);
+    const TickType_t off_time    = pdMS_TO_TICKS(180);
+    const TickType_t burst_pause = pdMS_TO_TICKS(1800);
+    TickType_t now = xTaskGetTickCount();
+    switch (state) {
+        case 0:
+            if ((now - last_tick) >= burst_pause) {
+                blink_index = 0; gpio_set_level(DRONE_ID_LED_PIN, 1);
+                last_tick = now; state = 1; }
+            break;
+        case 1:
+            if ((now - last_tick) >= on_time) {
+                gpio_set_level(DRONE_ID_LED_PIN, 0);
+                last_tick = now; blink_index++; state = 2; }
+            break;
+        case 2:
+            if (blink_index >= DRONE_ID) { state = 0; last_tick = now; }
+            else if ((now - last_tick) >= off_time) {
+                gpio_set_level(DRONE_ID_LED_PIN, 1); last_tick = now; state = 1; }
+            break;
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * micro-ROS resources
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static rcl_publisher_t    publisher_marker;
+static rcl_publisher_t    publisher_state;
+static rcl_publisher_t    publisher_role;
+static rcl_publisher_t    publisher_battery;
+
+static rcl_subscription_t command_sub;
+static rcl_subscription_t config_sub;
+static rcl_subscription_t control_sub;
+
+static visualization_msgs__msg__Marker   drone_disc_msg;
+static visualization_msgs__msg__Marker   text_msg;
+static std_msgs__msg__String             command_msg;
+static std_msgs__msg__String             config_msg;
+static geometry_msgs__msg__PoseStamped   control_msg;
+static std_msgs__msg__String             state_pub_msg;
+static std_msgs__msg__String             role_pub_msg;
+static std_msgs__msg__Int8               battery_pub_msg;
+
+static struct timespec ts;
+
+static char topic_gcs_command[64];
+static char topic_gcs_config[64];
+static char topic_gcs_control[64];
+static char topic_state[64];
+static char topic_role[64];
+static char topic_battery[64];
+static char drone_ns[16];
+
+/* ── Apply pose to RViz drone disc ───────────────────────────────────────── */
+static void apply_pose_to_drone_markers(float px, float py, float pz,
+                                         float qx, float qy, float qz, float qw)
+{
+    drone_disc_msg.pose.position.x    = px;
+    drone_disc_msg.pose.position.y    = py;
+    drone_disc_msg.pose.position.z    = pz;
+    drone_disc_msg.pose.orientation.x = qx;
+    drone_disc_msg.pose.orientation.y = qy;
+    drone_disc_msg.pose.orientation.z = qz;
+    drone_disc_msg.pose.orientation.w = qw;
+
+    text_msg.pose.position.x = px;
+    text_msg.pose.position.y = py;
+    text_msg.pose.position.z = pz + 0.22f;
+    text_msg.pose.orientation.x = 0.0f;
+    text_msg.pose.orientation.y = 0.0f;
+    text_msg.pose.orientation.z = 0.0f;
+    text_msg.pose.orientation.w = 1.0f;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Pre-arm setpoint stream task
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void prearm_stream_task_fn(void *arg)
+{
+    ESP_LOGI("mission", "Prearm stream started");
+    while (drone_state == DRONE_ARMED) {
+        mav_set_position_ned(home_x, home_y, -0.1f);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+    }
+    ESP_LOGI("mission", "Prearm stream stopped (state→%d)", (int)drone_state);
+    prearm_stream_handle = NULL;
     vTaskDelete(NULL);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * Mission FreeRTOS task
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void mission_task_fn(void *arg)
+{
+    TickType_t t0;
+    uint32_t elapsed;
+
+    t0 = xTaskGetTickCount();
+    do {
+        if (drone_state != DRONE_MISSION) goto mission_abort;
+        mav_set_position_ned(home_x, home_y, -0.1f);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+        elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
+    } while (elapsed < 1000);
+
+    mav_set_mode(PX4_MODE_OFFBOARD);
+    {
+        TickType_t t_ob = xTaskGetTickCount();
+        while ((uint32_t)((xTaskGetTickCount() - t_ob) * portTICK_PERIOD_MS) < 500) {
+            if (drone_state != DRONE_MISSION) goto mission_abort;
+            mav_set_position_ned(home_x, home_y, -0.1f);
+            vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+        }
+    }
+    mav_arm(true);
+
+    t0 = xTaskGetTickCount();
+    do {
+        if (drone_state != DRONE_MISSION) goto mission_abort;
+        mav_set_position_ned(home_x, home_y, -MISSION_TAKEOFF_ALT_M);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+        elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
+    } while (elapsed < MISSION_TAKEOFF_WAIT_MS);
+
+    t0 = xTaskGetTickCount();
+    do {
+        if (drone_state != DRONE_MISSION) goto mission_abort;
+        float sp_x   = setpoint_received ? setpoint_x   : home_x;
+        float sp_y   = setpoint_received ? setpoint_y   : home_y;
+        float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
+        float sp_yaw = setpoint_received ? setpoint_yaw : 0.0f;
+        mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+        elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
+    } while (elapsed < MISSION_MAX_HOVER_MS);
+    ESP_LOGW(TAG, "Mission 15 min timeout — auto-landing");
+
+    drone_state = DRONE_LANDING;
+    state_dirty = true;
+    mav_eland();
+    vTaskDelay(pdMS_TO_TICKS(MISSION_LAND_DESCEND_MS));
+    mav_arm(false);
+    drone_state = DRONE_DISARMED;
+    state_dirty = true;
+    goto mission_done;
+
+mission_abort:
+    ESP_LOGW(TAG, "Mission aborted (state override)");
+mission_done:
+    mission_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Return-home FreeRTOS task
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void return_home_task_fn(void *arg)
+{
+    TickType_t t0 = xTaskGetTickCount();
+    uint32_t elapsed;
+    do {
+        if (drone_state != DRONE_RETURNING_HOME) goto rh_done;
+        mav_set_position_ned(home_x, home_y, -MISSION_TAKEOFF_ALT_M);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+        elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
+    } while (elapsed < 5000);
+    drone_state = DRONE_LANDING;
+    state_dirty = true;
+    mav_eland();
+    vTaskDelay(pdMS_TO_TICKS(MISSION_LAND_DESCEND_MS));
+    mav_arm(false);
+    drone_state = DRONE_DISARMED;
+    state_dirty = true;
+rh_done:
+    return_home_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Emergency-land FreeRTOS task
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void eland_task_fn(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(MISSION_LAND_DESCEND_MS));
+    mav_arm(false);
+    drone_state = DRONE_DISARMED;
+    state_dirty = true;
+    eland_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+static void trigger_eland(void)
+{
+    if (mission_task_handle)     { vTaskDelete(mission_task_handle);     mission_task_handle = NULL; }
+    if (return_home_task_handle) { vTaskDelete(return_home_task_handle); return_home_task_handle = NULL; }
+    if (eland_task_handle)       { vTaskDelete(eland_task_handle);       eland_task_handle = NULL; }
+    mav_eland();
+    drone_state = DRONE_LANDING;
+    state_dirty = true;
+    xTaskCreate(eland_task_fn, "eland", 2048, NULL, 5, &eland_task_handle);
+}
+
+static void publish_state_now(void)
+{
+    state_dirty = false;
+    const char *s = state_names[(int)drone_state];
+    rosidl_runtime_c__String__assign(&state_pub_msg.data, s);
+    RCSOFTCHECK(rcl_publish(&publisher_state, &state_pub_msg, NULL));
+    ESP_LOGI(TAG, "State → %s", s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * GCS command callback
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void command_callback(const void *msg_in)
+{
+    const std_msgs__msg__String *m = (const std_msgs__msg__String *)msg_in;
+    if (!m || !m->data.data || m->data.size == 0) return;
+
+    char buf[64] = {0};
+    size_t n = m->data.size < 63 ? m->data.size : 63;
+    memcpy(buf, m->data.data, n);
+    for (int i = (int)n - 1; i >= 0; i--) {
+        if (buf[i]==' '||buf[i]=='\n'||buf[i]=='\r'||buf[i]=='\t') buf[i]='\0'; else break;
+    }
+    ESP_LOGI(TAG, "CMD: %s", buf);
+
+    if (strcmp(buf, "COMMAND_ARM") == 0) {
+        if (vision_pose_valid) {
+            home_x = vp_x; home_y = vp_y; home_z = vp_z;
+            ESP_LOGI(TAG, "Home captured: (%.2f, %.2f, %.2f)", home_x, home_y, home_z);
+        }
+        if (px4_pos_valid) {
+            px4_home_x = px4_pos_x;
+            px4_home_y = px4_pos_y;
+            px4_home_z = px4_pos_z;
+        }
+        drone_state = DRONE_ARMED;
+        publish_state_now();
+        if (!prearm_stream_handle)
+            xTaskCreate(prearm_stream_task_fn, "prearm", 2048, NULL, 4, &prearm_stream_handle);
+
+    } else if (strcmp(buf, "COMMAND_DISARM") == 0) {
+        if (prearm_stream_handle) {
+            vTaskDelete(prearm_stream_handle);
+            prearm_stream_handle = NULL;
+        }
+        mav_arm(false);
+        drone_state = DRONE_DISARMED;
+        publish_state_now();
+
+    } else if (strcmp(buf, "COMMAND_MISSION_START") == 0) {
+        if (drone_state != DRONE_ARMED && drone_state != DRONE_RETURNING_HOME) {
+            ESP_LOGW(TAG, "Mission blocked — state: %s", state_names[drone_state]);
+            return;
+        }
+        if (return_home_task_handle) {
+            vTaskDelete(return_home_task_handle);
+            return_home_task_handle = NULL;
+        }
+        setpoint_received = false;
+        setpoint_yaw = 0.0f;
+        drone_state = DRONE_MISSION;
+        publish_state_now();
+        xTaskCreate(mission_task_fn, "mission", 4096, NULL, 5, &mission_task_handle);
+
+    } else if (strcmp(buf, "COMMAND_RETURN_HOME") == 0) {
+        if (drone_state != DRONE_MISSION && drone_state != DRONE_RETURNING_HOME) {
+            ESP_LOGW(TAG, "RTH blocked — not in flight");
+            return;
+        }
+        if (mission_task_handle) {
+            vTaskDelete(mission_task_handle);
+            mission_task_handle = NULL;
+        }
+        drone_state = DRONE_RETURNING_HOME;
+        publish_state_now();
+        mav_set_mode(PX4_MODE_OFFBOARD);
+        xTaskCreate(return_home_task_fn, "return_home", 4096, NULL, 5, &return_home_task_handle);
+
+    } else if (strcmp(buf, "COMMAND_ELAND") == 0) {
+        trigger_eland();
+
+    } else if (strcmp(buf, "COMMAND_KILL") == 0) {
+        if (mission_task_handle)     { vTaskDelete(mission_task_handle);     mission_task_handle = NULL; }
+        if (return_home_task_handle) { vTaskDelete(return_home_task_handle); return_home_task_handle = NULL; }
+        mav_kill();
+        drone_state = DRONE_KILLED;
+        publish_state_now();
+
+    } else {
+        ESP_LOGW(TAG, "CMD: unknown '%s'", buf);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * GCS config callback
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void config_callback(const void *msg_in)
+{
+    const std_msgs__msg__String *m = (const std_msgs__msg__String *)msg_in;
+    if (!m || !m->data.data || m->data.size == 0) return;
+
+    char buf[64] = {0};
+    size_t n = m->data.size < 63 ? m->data.size : 63;
+    memcpy(buf, m->data.data, n);
+    for (int i = (int)n - 1; i >= 0; i--) {
+        if (buf[i]==' '||buf[i]=='\n'||buf[i]=='\r'||buf[i]=='\t') buf[i]='\0'; else break;
+    }
+    ESP_LOGI(TAG, "CFG: %s", buf);
+
+    if (strcmp(buf, "CONFIG_VISION_ENABLE") == 0) {
+        vision_enabled = true;
+        ESP_LOGI(TAG, "Vision EKF: ON — relaying P4 pose to PX4");
+
+    } else if (strcmp(buf, "CONFIG_VISION_DISABLE") == 0) {
+        vision_enabled = false;
+        ESP_LOGI(TAG, "Vision EKF: OFF");
+
+    } else if (strcmp(buf, "CONFIG_SOURCE_RC") == 0) {
+        gcs_control_active = false;
+        mav_set_mode(PX4_MODE_STABILIZED);
+
+    } else if (strcmp(buf, "CONFIG_SOURCE_GCS") == 0) {
+        gcs_control_active = true;
+        mav_set_mode(PX4_MODE_OFFBOARD);
+
+    } else {
+        ESP_LOGW(TAG, "CFG: unknown '%s'", buf);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * GCS control callback
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void control_callback(const void *msg_in)
+{
+    const geometry_msgs__msg__PoseStamped *msg =
+        (const geometry_msgs__msg__PoseStamped *)msg_in;
+    if (!msg) return;
+
+    setpoint_x = (float)msg->pose.position.x;
+    setpoint_y = (float)msg->pose.position.y;
+    setpoint_z = (float)msg->pose.position.z;
+    float qx = (float)msg->pose.orientation.x;
+    float qy = (float)msg->pose.orientation.y;
+    float qz = (float)msg->pose.orientation.z;
+    float qw = (float)msg->pose.orientation.w;
+    setpoint_yaw = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
+    setpoint_received = true;
+
+    ESP_LOGI(TAG, "Setpoint: (%.2f, %.2f, %.2f up)", setpoint_x, setpoint_y, setpoint_z);
+
+    if (gcs_control_active && drone_state == DRONE_ARMED)
+        mav_set_position_ned(setpoint_x, setpoint_y, -setpoint_z);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Timer callback — 100 ms (state publish, vision timeout, RViz markers)
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
+{
+    RCLC_UNUSED(last_call_time);
+    if (!timer) return;
+
+    /* Vision timeout */
+    if (vision_pose_valid && (now_ms() - last_vision_pose_ms) > VISION_TIMEOUT_MS) {
+        vision_pose_valid = false;
+        ESP_LOGW(TAG, "Vision pose timeout");
+    }
+
+    /* State publish */
+    static uint32_t state_tick = 0;
+    if (state_dirty || (++state_tick >= 20)) {
+        state_dirty = false;
+        state_tick  = 0;
+        const char *s = state_names[(int)drone_state];
+        rosidl_runtime_c__String__assign(&state_pub_msg.data, s);
+        RCSOFTCHECK(rcl_publish(&publisher_state, &state_pub_msg, NULL));
+    }
+
+    /* Battery publish every 5 s */
+    static uint32_t bat_tick = 0;
+    if (++bat_tick >= 50) {
+        bat_tick = 0;
+        battery_pub_msg.data = battery_remaining_pct;
+        RCSOFTCHECK(rcl_publish(&publisher_battery, &battery_pub_msg, NULL));
+    }
+
+    /* Update RViz disc from P4 vision pose; fall back to PX4 inertial when no vision */
+    if (vision_pose_valid) {
+        apply_pose_to_drone_markers(vp_x, vp_y, vp_z, vp_qx, vp_qy, vp_qz, vp_qw);
+    } else if (px4_pos_valid) {
+        float disp_x = map_home_x + (px4_pos_x - px4_home_x);
+        float disp_y = map_home_y + (px4_pos_y - px4_home_y);
+        float disp_z = map_home_z + (px4_pos_z - px4_home_z);
+        apply_pose_to_drone_markers(disp_x, disp_y, disp_z, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
+    RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * MAVLink UART RX task
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void mavlink_rx_task_fn(void *arg)
+{
+    mavlink_message_t rx_msg;
+    mavlink_status_t  rx_status;
+    uint8_t           byte;
+
+    ESP_LOGI(TAG, "MAVLink RX task started");
+    while (true) {
+        int n = uart_read_bytes(PX4_UART_PORT, &byte, 1, pdMS_TO_TICKS(100));
+        if (n <= 0) continue;
+
+        if (mavlink_parse_char(MAVLINK_COMM_0, byte, &rx_msg, &rx_status)) {
+            if (rx_msg.msgid == MAVLINK_MSG_ID_BATTERY_STATUS) {
+                mavlink_battery_status_t bat;
+                mavlink_msg_battery_status_decode(&rx_msg, &bat);
+                battery_remaining_pct = bat.battery_remaining;
+            } else if (rx_msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
+                mavlink_local_position_ned_t lpos;
+                mavlink_msg_local_position_ned_decode(&rx_msg, &lpos);
+                px4_pos_x = lpos.x;
+                px4_pos_y = lpos.y;
+                px4_pos_z = -lpos.z;   /* NED z negated to up-positive */
+                px4_pos_valid = true;
+            }
+        }
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * micro-ROS task
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void micro_ros_task(void *arg)
+{
+    rcl_allocator_t allocator = rcl_get_default_allocator();
+    rclc_support_t  support;
+
+    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
+    RCCHECK(rcl_init_options_init(&init_options, allocator));
+
+#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+    rmw_init_options_t *rmw_options =
+        rcl_init_options_get_rmw_init_options(&init_options);
+    RCCHECK(rmw_uros_options_set_udp_address(
+        CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
+    RCCHECK(rmw_uros_options_set_client_key((uint32_t)DRONE_ID, rmw_options));
+#endif
+
+    ESP_LOGI(TAG, "uros_task: agent=%s:%s",
+             CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT);
+    while (rclc_support_init_with_options(&support, 0, NULL,
+                                           &init_options, &allocator) != RCL_RET_OK) {
+        ESP_LOGW(TAG, "Agent not reachable, retrying...");
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    ESP_LOGI(TAG, "micro-ROS agent connected!");
+
+    rcl_node_t node;
+    char node_name[32];
+    snprintf(node_name, sizeof(node_name), "esp32_drone_brain_%d", DRONE_ID);
+    RCCHECK(rclc_node_init_default(&node, node_name, "", &support));
+
+    /* ── Publishers ──────────────────────────────────────────────────────── */
+    RCCHECK(rclc_publisher_init_default(&publisher_marker, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
+        "/visualization_marker"));
+
+    RCCHECK(rclc_publisher_init_default(&publisher_state, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_state));
+
+    RCCHECK(rclc_publisher_init_default(&publisher_role, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_role));
+
+    RCCHECK(rclc_publisher_init_default(&publisher_battery, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int8), topic_battery));
+
+    /* ── Subscribers ─────────────────────────────────────────────────────── */
+    RCCHECK(rclc_subscription_init_best_effort(&command_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_gcs_command));
+
+    RCCHECK(rclc_subscription_init_best_effort(&config_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_gcs_config));
+
+    RCCHECK(rclc_subscription_init_best_effort(&control_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
+        topic_gcs_control));
+
+    /* ── Message buffers ─────────────────────────────────────────────────── */
+    command_msg.data.data = (char *)malloc(64);
+    command_msg.data.size = 0; command_msg.data.capacity = 64;
+
+    config_msg.data.data = (char *)malloc(64);
+    config_msg.data.size = 0; config_msg.data.capacity = 64;
+
+    geometry_msgs__msg__PoseStamped__init(&control_msg);
+
+    state_pub_msg.data.data = (char *)malloc(32);
+    state_pub_msg.data.size = 0; state_pub_msg.data.capacity = 32;
+
+    role_pub_msg.data.data = (char *)malloc(32);
+    role_pub_msg.data.size = 0; role_pub_msg.data.capacity = 32;
+
+    rosidl_runtime_c__String__assign(&role_pub_msg.data, "idle");
+    RCSOFTCHECK(rcl_publish(&publisher_role, &role_pub_msg, NULL));
+
+    /* ── Timer + executor (1 timer + 3 subscriptions = 4 handles) ───────── */
+    rcl_timer_t timer;
+    RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(100), timer_callback));
+
+    rclc_executor_t executor;
+    RCCHECK(rclc_executor_init(&executor, &support.context, 4, &allocator));
+    RCCHECK(rclc_executor_add_timer(&executor, &timer));
+    RCCHECK(rclc_executor_add_subscription(&executor, &command_sub,
+                &command_msg, &command_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &config_sub,
+                &config_msg, &config_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &control_sub,
+                &control_msg, &control_callback, ON_NEW_DATA));
+
+    int64_t last_c2_check_ms = now_ms();
+    int     c2_failures       = 0;
+
+    while (true) {
+        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(50));
+
+        int64_t t = now_ms();
+        if (t - last_c2_check_ms >= C2_CHECK_INTERVAL_MS) {
+            last_c2_check_ms = t;
+            if (rmw_uros_ping_agent(C2_PING_TIMEOUT_MS, C2_PING_ATTEMPTS) == RMW_RET_OK) {
+                c2_failures = 0;
+            } else {
+                c2_failures++;
+                ESP_LOGW(TAG, "C2 ping failed (%d/%d)", c2_failures, C2_FAIL_THRESHOLD);
+                if (c2_failures >= C2_FAIL_THRESHOLD) {
+                    c2_failures = 0;
+                    if (drone_state == DRONE_DISARMED || drone_state == DRONE_KILLED) {
+                        ESP_LOGE(TAG, "C2 link lost while disarmed — restarting");
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        esp_restart();
+                    } else if (drone_state != DRONE_LANDING) {
+                        ESP_LOGE(TAG, "C2 link lost — initiating emergency landing");
+                        trigger_eland();
+                    }
+                }
+            }
+        }
+        usleep(10000);
+    }
+
+    RCCHECK(rcl_publisher_fini(&publisher_marker,  &node));
+    RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
+    RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
+    RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
+    RCCHECK(rcl_subscription_fini(&command_sub, &node));
+    RCCHECK(rcl_subscription_fini(&config_sub,  &node));
+    RCCHECK(rcl_subscription_fini(&control_sub, &node));
+    RCCHECK(rcl_node_fini(&node));
+    vTaskDelete(NULL);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Network helpers
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void set_device_hostname_from_drone_id(void)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!netif) return;
+    char hostname[32];
+    snprintf(hostname, sizeof(hostname), "mach-mind-drone-%d", DRONE_ID);
+    if (esp_netif_set_hostname(netif, hostname) == ESP_OK)
+        ESP_LOGI(TAG, "Hostname: %s", hostname);
+}
+
+static esp_err_t set_preferred_ip_from_drone_id(void)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!netif) return ESP_FAIL;
+    esp_err_t err = esp_netif_dhcpc_stop(netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) return err;
+    esp_netif_ip_info_t ip_info;
+    memset(&ip_info, 0, sizeof(ip_info));
+    char ip_str[16];
+    snprintf(ip_str, sizeof(ip_str), DRONE_IP_PREFIX "%d", DRONE_IP_BASE_OCTET + DRONE_ID);
+    ip4addr_aton(ip_str,           (ip4_addr_t *)&ip_info.ip);
+    ip4addr_aton(DRONE_IP_GATEWAY, (ip4_addr_t *)&ip_info.gw);
+    ip4addr_aton(DRONE_IP_NETMASK, (ip4_addr_t *)&ip_info.netmask);
+    err = esp_netif_set_ip_info(netif, &ip_info);
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Static IP: %s", ip_str);
+    return err;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * app_main
+ * ══════════════════════════════════════════════════════════════════════════ */
 void app_main(void)
 {
+    printf("app_main started\r\n"); fflush(stdout);
+
+#if defined(CONFIG_MICRO_ROS_ESP_NETIF_WLAN) || defined(CONFIG_MICRO_ROS_ESP_NETIF_ENET)
+    ESP_ERROR_CHECK(uros_network_interface_initialize());
+    set_device_hostname_from_drone_id();
+    ESP_ERROR_CHECK(set_preferred_ip_from_drone_id());
+#endif
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-#if CONFIG_VISION_MODE_POSE
-    ESP_LOGI(TAG, "Mach Mind — ESP32S3 ArUco Pose Estimator boot");
-    xTaskCreatePinnedToCore(pose_task, "aruco_pose",
-                            POSE_TASK_STACK_KB * 1024,
-                            NULL, 5, NULL,
-                            1 /* CPU1 */);
-    vTaskDelete(NULL);
-#else
-    ESP_LOGI(TAG, "Mach Mind — ESP32S3 Vision Benchmark boot");
-    vision_bench_start(); /* never returns */
-#endif
+    /* Build per-drone topic strings */
+    snprintf(drone_ns,           sizeof(drone_ns),           "drone_%d",                   DRONE_ID);
+    snprintf(topic_gcs_command,  sizeof(topic_gcs_command),   "/gcs/drone_%d/command",      DRONE_ID);
+    snprintf(topic_gcs_config,   sizeof(topic_gcs_config),    "/gcs/drone_%d/config",       DRONE_ID);
+    snprintf(topic_gcs_control,  sizeof(topic_gcs_control),   "/gcs/drone_%d/control",      DRONE_ID);
+    snprintf(topic_state,        sizeof(topic_state),          "/drone_%d/state",            DRONE_ID);
+    snprintf(topic_role,         sizeof(topic_role),           "/drone_%d/role",             DRONE_ID);
+    snprintf(topic_battery,      sizeof(topic_battery),        "/drone_%d/battery",          DRONE_ID);
+
+    ESP_LOGI(TAG, "==============================");
+    ESP_LOGI(TAG, "DRONE ID   : %d",     DRONE_ID);
+    ESP_LOGI(TAG, "CMD topic  : %s",     topic_gcs_command);
+    ESP_LOGI(TAG, "CFG topic  : %s",     topic_gcs_config);
+    ESP_LOGI(TAG, "Takeoff alt: %.1f m", MISSION_TAKEOFF_ALT_M);
+    ESP_LOGI(TAG, "==============================");
+
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << DRONE_ID_LED_PIN),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = 0, .pull_down_en = 0,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    /* Initialise RViz drone disc at start position */
+    const float ix = get_initial_x_from_drone_id();
+    const float iy = get_initial_y_from_drone_id();
+    const float iz = get_initial_z_from_drone_id();
+
+    visualization_msgs__msg__Marker__init(&drone_disc_msg);
+    rosidl_runtime_c__String__assign(&drone_disc_msg.header.frame_id, "map");
+    rosidl_runtime_c__String__assign(&drone_disc_msg.ns, drone_ns);
+    drone_disc_msg.id     = MARKER_ID_DISC(DRONE_ID);
+    drone_disc_msg.type   = visualization_msgs__msg__Marker__CYLINDER;
+    drone_disc_msg.action = visualization_msgs__msg__Marker__ADD;
+    drone_disc_msg.pose.position.x    = ix;
+    drone_disc_msg.pose.position.y    = iy;
+    drone_disc_msg.pose.position.z    = iz;
+    drone_disc_msg.pose.orientation.w = 1.0f;
+    drone_disc_msg.scale.x = DRONE_DISC_DIAMETER_M;
+    drone_disc_msg.scale.y = DRONE_DISC_DIAMETER_M;
+    drone_disc_msg.scale.z = DRONE_DISC_THICKNESS_M;
+    drone_disc_msg.color.r = 0.2f;
+    drone_disc_msg.color.g = 0.6f;
+    drone_disc_msg.color.b = 1.0f;
+    drone_disc_msg.color.a = 0.95f;
+
+    visualization_msgs__msg__Marker__init(&text_msg);
+    rosidl_runtime_c__String__assign(&text_msg.header.frame_id, "map");
+    rosidl_runtime_c__String__assign(&text_msg.ns, drone_ns);
+    text_msg.id     = MARKER_ID_TEXT(DRONE_ID);
+    text_msg.type   = visualization_msgs__msg__Marker__TEXT_VIEW_FACING;
+    text_msg.action = visualization_msgs__msg__Marker__ADD;
+    text_msg.pose.position.x    = ix;
+    text_msg.pose.position.y    = iy;
+    text_msg.pose.position.z    = iz + 0.22f;
+    text_msg.pose.orientation.w = 1.0f;
+    text_msg.scale.z = 0.16f;
+    text_msg.color.r = text_msg.color.g = text_msg.color.b = text_msg.color.a = 1.0f;
+    char drone_label[8];
+    snprintf(drone_label, sizeof(drone_label), "D%d", DRONE_ID);
+    rosidl_runtime_c__String__assign(&text_msg.text, drone_label);
+
+    map_home_x = ix;
+    map_home_y = iy;
+    map_home_z = iz;
+    apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    uart_mavlink_init();
+    xTaskCreate(mavlink_rx_task_fn, "mav_rx", 4096, NULL, 4, NULL);
+
+    p4_link_init();   /* start P4 UART2 receiver task */
+
+    ESP_LOGI(TAG, "Free heap: %u B internal",
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+
+    static StaticTask_t uros_tcb;
+    static StackType_t  uros_stack[CONFIG_MICRO_ROS_APP_STACK];
+    TaskHandle_t uros_handle = xTaskCreateStatic(
+                micro_ros_task, "uros_task",
+                CONFIG_MICRO_ROS_APP_STACK, NULL,
+                CONFIG_MICRO_ROS_APP_TASK_PRIO,
+                uros_stack, &uros_tcb);
+    if (!uros_handle)
+        ESP_LOGE(TAG, "uros_task creation FAILED");
+    else
+        ESP_LOGI(TAG, "uros_task created OK");
+
+    /* ── Main loop — 20 Hz ────────────────────────────────────────────── */
+    p4_tof_data_t  tof  = {0};
+    p4_pose_data_t pose = {0};
+
+    while (1) {
+        drone_id_led_update();
+
+        /* Read latest P4 sensor data */
+        p4_link_get_tof(&tof);
+        p4_link_get_pose(&pose);
+
+        /* Update vision pose globals from UART data */
+        if (pose.valid) {
+            vp_x = pose.x; vp_y = pose.y; vp_z = pose.z;
+            vp_qx = pose.qx; vp_qy = pose.qy; vp_qz = pose.qz; vp_qw = pose.qw;
+            vision_pose_valid   = true;
+            last_vision_pose_ms = now_ms();
+
+            if (vision_enabled) {
+                float roll, pitch, yaw;
+                quat_to_euler(pose.qx, pose.qy, pose.qz, pose.qw,
+                              &roll, &pitch, &yaw);
+                mav_send_vision_estimate(pose.x, pose.y, pose.z,
+                                         roll, pitch, yaw);
+            }
+        }
+
+        /* MAVLink obstacle + heartbeat */
+        send_heartbeat_once();
+        send_obstacle_distance(&tof);
+        send_upward_distance_sensor(&tof);
+
+        /* Console — overwrite line at 20 Hz */
+        tof_console_print(&tof);
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 }

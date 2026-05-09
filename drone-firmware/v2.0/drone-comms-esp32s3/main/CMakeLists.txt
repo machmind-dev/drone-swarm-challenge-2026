@@ -1,6 +1,5 @@
-idf_component_register(SRCS main.c vision_bench.cpp aruco_pose.cpp
+idf_component_register(SRCS main.c p4_link.c
   PRIV_INCLUDE_DIRS .
-  PRIV_REQUIRES esp_psram nvs_flash esp_timer driver heap espressif__opencv psram_bss_scheme
+  PRIV_REQUIRES esp_psram nvs_flash esp_timer driver heap
+                micro_ros_espidf_component
 )
-
-target_compile_options(${COMPONENT_LIB} PRIVATE "-UEPS")

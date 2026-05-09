@@ -1,78 +1,15 @@
-menu "Drone Vision"
+menu "micro-ROS example-app settings"
 
-    choice VISION_MODE
-        bool "Application mode"
-        default VISION_MODE_POSE
+    config MICRO_ROS_APP_STACK
+        int "Stack the micro-ROS app (Bytes)"
+        default 16000
         help
-            BENCH: multi-resolution ArUco FPS sweep, prints table + CSV.
-            POSE:  continuous ArUco detection, world pose via solvePnP,
-                   single-line rolling status to USB-serial.
+        Stack size in Bytes of the micro-ROS app
 
-        config VISION_MODE_BENCH
-            bool "Benchmark (FPS sweep across all resolutions)"
-        config VISION_MODE_POSE
-            bool "Pose estimation (continuous ArUco world-pose)"
-    endchoice
-
-    choice VISION_BOARD
-        bool "Target board / camera module"
-        default VISION_BOARD_XIAO_ESP32S3
-
-        config VISION_BOARD_XIAO_ESP32S3
-            bool "XIAO ESP32S3 Sense (OV2640 / OV5640)"
-        config VISION_BOARD_OV3660_DEVKIT
-            bool "M5Stack Timer Camera X / OV3660 breakout"
-    endchoice
-
-    config VISION_ARUCO_DICT
-        int "ArUco dictionary (cv::aruco::PredefinedDictionaryType)"
-        default 0
-        range 0 20
+    config MICRO_ROS_APP_TASK_PRIO
+        int "Priority of the micro-ROS app"
+        default 5
         help
-            0 = DICT_4X4_50  (SDC26 regulation, recommended)
-            1 = DICT_4X4_100
-            7 = DICT_5X5_50
-
-    # ── Benchmark options ─────────────────────────────────────────────────────
-
-    config VISION_BENCH_FRAMES
-        int "Frames per resolution stage (bench mode)"
-        default 200
-        range 50 2000
-        depends on VISION_MODE_BENCH
-
-    config VISION_MARKER_SIZE_CM
-        int "Marker side length for bench solvePnP (cm)"
-        default 15
-        range 1 200
-        depends on VISION_MODE_BENCH
-
-    config VISION_SHOW_POSE
-        bool "Print solvePnP pose per detected bench frame"
-        default n
-        depends on VISION_MODE_BENCH
-
-    # ── Pose-mode options ─────────────────────────────────────────────────────
-
-    choice VISION_POSE_RES
-        bool "Capture resolution for pose mode"
-        default VISION_POSE_RES_QQVGA
-        depends on VISION_MODE_POSE
-
-        config VISION_POSE_RES_QQVGA
-            bool "QQVGA 160x120  (fastest, fits in DRAM)"
-        config VISION_POSE_RES_QVGA
-            bool "QVGA 320x240  (higher accuracy, PSRAM path)"
-        config VISION_POSE_RES_HVGA
-            bool "HVGA 480x320  (highest accuracy, slow)"
-    endchoice
-
-    config VISION_POSE_MARKER_SIZE_CM
-        int "Physical marker side length for pose mode (cm)"
-        default 50
-        range 1 200
-        depends on VISION_MODE_POSE
-        help
-            SDC26 regulation: 50 cm x 50 cm markers.
+        Priority of micro-ros task; higher value means higher priority
 
 endmenu

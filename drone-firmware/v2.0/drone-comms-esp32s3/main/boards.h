@@ -1,64 +1,42 @@
 /**
- * boards.h — Camera pin definitions for drone-vision benchmark
+ * boards.h — GPIO pin map for XIAO ESP32S3 Sense (Mach Mind comms node)
  *
- * Supported boards:
- *   CAMERA_MODEL_XIAO_ESP32S3       Seeed XIAO ESP32S3 Sense (OV2640 / OV5640)
- *   CAMERA_MODEL_OV3660_DEVKIT      M5Stack Timer Camera X / generic OV3660 breakout
+ * ── GPIO allocation ─────────────────────────────────────────────────────────
+ *   GPIO   Function          Notes
+ *   ─────  ────────────────  ────────────────────────────────────────────────
+ *     1    Drone ID LED       Blink pattern = DRONE_ID pulses
+ *     2    P4 link TX (D1)    UART2 → ESP32-P4 GPIO23 (RX)
+ *     3    P4 link RX (D2)    UART2 ← ESP32-P4 GPIO22 (TX)
+ *    43    PX4 UART1 TX       UART1 → PX4 flight controller
+ *    44    PX4 UART1 RX       UART1 ← PX4 flight controller
  *
- * Select via Kconfig (CONFIG_VISION_BOARD_*) or by defining the macro before
- * including this header.
+ * ── UART topology ───────────────────────────────────────────────────────────
+ *   UART_NUM_0  GPIO43/44  Console (USB-SERIAL-JTAG or UART0 bridge)
+ *   UART_NUM_1  GPIO43/44  MAVLink to PX4 (57600 baud)
+ *   UART_NUM_2  GPIO2/3    Binary link to ESP32-P4 (115200 baud)
+ *
+ * Note: on XIAO ESP32S3, GPIO43/44 are the default console UART0 pins.
+ * CONFIG_ESP_CONSOLE_UART_DEFAULT selects UART0 for console monitor.
+ * UART_NUM_1 is reassigned here to PX4 link — make sure to set
+ * CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y in sdkconfig.defaults if monitoring
+ * without a USB-UART bridge.
  */
 
 #pragma once
+#include "driver/gpio.h"
+#include "driver/uart.h"
 
-/* ── XIAO ESP32S3 Sense ─────────────────────────────────────────────────── */
-#ifdef CAMERA_MODEL_XIAO_ESP32S3
-  #define CAMERA_PIN_PWDN    -1
-  #define CAMERA_PIN_RESET   -1
-  #define CAMERA_PIN_XCLK    10
-  #define CAMERA_PIN_SIOD    40
-  #define CAMERA_PIN_SIOC    39
+/* ── Drone identity ──────────────────────────────────────────────────────── */
+#define DRONE_ID_LED_PIN    GPIO_NUM_1
 
-  #define CAMERA_PIN_D0      15
-  #define CAMERA_PIN_D1      17
-  #define CAMERA_PIN_D2      18
-  #define CAMERA_PIN_D3      16
-  #define CAMERA_PIN_D4      14
-  #define CAMERA_PIN_D5      12
-  #define CAMERA_PIN_D6      11
-  #define CAMERA_PIN_D7      48
+/* ── MAVLink / PX4 link (UART1) ──────────────────────────────────────────── */
+#define PX4_UART_PORT       UART_NUM_1
+#define PX4_UART_TX         GPIO_NUM_43    /* → PX4 RX */
+#define PX4_UART_RX         GPIO_NUM_44    /* ← PX4 TX */
+#define PX4_UART_BAUD       57600
 
-  #define CAMERA_PIN_VSYNC   38
-  #define CAMERA_PIN_HREF    47
-  #define CAMERA_PIN_PCLK    13
-
-  #define LED_0_PIN          21
-#endif
-
-/* ── M5Stack Timer Camera X / OV3660 breakout ───────────────────────────── *
- * OV3660: 3 MP, supports up to QXGA (2048×1536) hardware, but ESP32-S3 DMA  *
- * caps usable output at VGA (640×480) before frame-buffer PSRAM fills.       *
- * Recommended test resolutions: 160×120, 320×240, 480×320, 640×480.          *
- * ─────────────────────────────────────────────────────────────────────── */
-#ifdef CAMERA_MODEL_OV3660_DEVKIT
-  #define CAMERA_PIN_PWDN     0
-  #define CAMERA_PIN_RESET   15
-  #define CAMERA_PIN_XCLK    27
-  #define CAMERA_PIN_SIOD    25
-  #define CAMERA_PIN_SIOC    23
-
-  #define CAMERA_PIN_D0      32
-  #define CAMERA_PIN_D1      35
-  #define CAMERA_PIN_D2      34
-  #define CAMERA_PIN_D3      5
-  #define CAMERA_PIN_D4      39
-  #define CAMERA_PIN_D5      18
-  #define CAMERA_PIN_D6      36
-  #define CAMERA_PIN_D7      19
-
-  #define CAMERA_PIN_VSYNC   22
-  #define CAMERA_PIN_HREF    26
-  #define CAMERA_PIN_PCLK    21
-
-  #define LED_0_PIN          2
-#endif
+/* ── P4 sensor link (UART2) ──────────────────────────────────────────────── */
+#define P4_UART_PORT        UART_NUM_2
+#define P4_UART_TX          GPIO_NUM_2     /* D1 → P4 GPIO23 (RX) */
+#define P4_UART_RX          GPIO_NUM_3     /* D2 ← P4 GPIO22 (TX) */
+#define P4_UART_BAUD        115200
