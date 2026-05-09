@@ -29,7 +29,7 @@ sleep 1
 
 PROJECT_DIR="$HOME/drone-swarm-challenge-2026/drone-firmware/v2.0/drone-comms-esp32s3"
 COMPOSE_FILE="docker/docker-compose.yml"
-SERVICE_NAME="esp32s3_vision"
+SERVICE_NAME="esp32s3_comms"
 
 if [ ! -d "$PROJECT_DIR" ]; then
     echo "[ERROR] Project directory not found: $PROJECT_DIR"
