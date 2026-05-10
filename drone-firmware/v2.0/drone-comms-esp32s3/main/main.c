@@ -306,15 +306,32 @@ static void mav_set_mode(uint32_t custom_mode)
     ESP_LOGI(TAG, "MAV: SET_MODE 0x%08lX", (unsigned long)custom_mode);
 }
 
-void mav_send_vision_estimate(float x, float y, float z,
-                               float roll, float pitch, float yaw)
+void mav_send_vision_estimate(float x, float y, float z)
 {
+    /* Upper triangle of 6×6 pose covariance (position then attitude).
+     * Diagonal indices: [0]=xx [6]=yy [11]=zz [15]=rr [18]=pp [20]=yy_att
+     * Position: 0.1 m noise → variance 0.01.
+     * Attitude: NaN → EKF2 skips attitude fusion entirely. */
+    static float cov[21];
+    static bool cov_init = false;
+    if (!cov_init) {
+        cov_init = true;
+        for (int i = 0; i < 21; i++) cov[i] = 0.0f;
+        cov[0]  = 0.01f;   /* x variance */
+        cov[6]  = 0.01f;   /* y variance */
+        cov[11] = 0.01f;   /* z variance */
+        cov[15] = __builtin_nanf("");  /* roll  — no attitude fusion */
+        cov[18] = __builtin_nanf("");  /* pitch — no attitude fusion */
+        cov[20] = __builtin_nanf("");  /* yaw   — no attitude fusion */
+    }
+
     mavlink_message_t msg;
     mavlink_msg_vision_position_estimate_pack(
         GCS_SYSID, GCS_COMPID, &msg,
         (uint64_t)esp_timer_get_time(),
-        x, y, z, roll, pitch, yaw,
-        NULL, 0);
+        x, y, z,
+        0.0f, 0.0f, 0.0f,   /* roll/pitch/yaw: zeros, attitude not fused */
+        cov, 0);
     mav_send(&msg);
 }
 
@@ -404,13 +421,6 @@ static float get_initial_x_from_drone_id(void) { return 1.0f; }
 static float get_initial_y_from_drone_id(void) { return (float)DRONE_ID; }
 static float get_initial_z_from_drone_id(void) { return DRONE_DEFAULT_Z_M; }
 
-static void quat_to_euler(float qx, float qy, float qz, float qw,
-                           float *roll, float *pitch, float *yaw)
-{
-    *roll  = atan2f(2.0f*(qw*qx + qy*qz), 1.0f - 2.0f*(qx*qx + qy*qy));
-    *pitch = asinf( 2.0f*(qw*qy - qz*qx));
-    *yaw   = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
  * Drone ID LED burst
@@ -1144,11 +1154,7 @@ void app_main(void)
             last_vision_pose_ms = now_ms();
 
             if (vision_enabled) {
-                float roll, pitch, yaw;
-                quat_to_euler(pose.qx, pose.qy, pose.qz, pose.qw,
-                              &roll, &pitch, &yaw);
-                mav_send_vision_estimate(pose.x, pose.y, pose.z,
-                                         roll, pitch, yaw);
+                mav_send_vision_estimate(pose.x, pose.y, pose.z);
             }
         }
 
