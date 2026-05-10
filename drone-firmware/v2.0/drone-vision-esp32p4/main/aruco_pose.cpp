@@ -74,6 +74,23 @@
 
 static const char *TAG = "aruco_pose";
 
+/* ── Shared pose state — written by aruco task (CPU0), read by tof task (CPU1) */
+static portMUX_TYPE s_pose_mux  = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool  s_pose_valid = false;
+static volatile float s_px, s_py, s_pz;
+static volatile float s_pqx, s_pqy, s_pqz, s_pqw;
+
+extern "C" bool aruco_pose_get_latest(float *x, float *y, float *z,
+                                       float *qx, float *qy, float *qz, float *qw)
+{
+    taskENTER_CRITICAL(&s_pose_mux);
+    bool v = s_pose_valid;
+    *x = s_px; *y = s_py; *z = s_pz;
+    *qx = s_pqx; *qy = s_pqy; *qz = s_pqz; *qw = s_pqw;
+    taskEXIT_CRITICAL(&s_pose_mux);
+    return v;
+}
+
 /* ── __register_exitproc stub ────────────────────────────────────────────────
  * cv::aruco::getPredefinedDictionary() holds a function-local static Dictionary.
  * The espressif__opencv RISC-V build emits a direct call to __register_exitproc
@@ -878,10 +895,25 @@ void aruco_pose_start(void)
                        mbuf, pose_n,
                        px_sum / pose_n, py_sum / pose_n, pz_sum / pose_n,
                        qx_out, qy_out, qz_out, qw_out);
+                taskENTER_CRITICAL(&s_pose_mux);
+                s_pose_valid = true;
+                s_px = (float)(px_sum / pose_n);
+                s_py = (float)(py_sum / pose_n);
+                s_pz = (float)(pz_sum / pose_n);
+                s_pqx = qx_out; s_pqy = qy_out; s_pqz = qz_out; s_pqw = qw_out;
+                taskEXIT_CRITICAL(&s_pose_mux);
             } else {
                 printf("%s\n", mbuf);
+                taskENTER_CRITICAL(&s_pose_mux);
+                s_pose_valid = false;
+                taskEXIT_CRITICAL(&s_pose_mux);
             }
             fflush(stdout);
+        } else {
+            /* No markers detected — clear pose so tof_task stops sending valid pose */
+            taskENTER_CRITICAL(&s_pose_mux);
+            s_pose_valid = false;
+            taskEXIT_CRITICAL(&s_pose_mux);
         }
 
         /* ── ToF distance output — every frame ──────────────────────────────── */

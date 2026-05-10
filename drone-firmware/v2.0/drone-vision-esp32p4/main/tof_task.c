@@ -28,6 +28,7 @@
 #include "i2c_platform_esp.h"
 #include "boards.h"
 #include "p4_link_tx.h"
+#include "aruco_pose.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -139,9 +140,11 @@ static void tof_task(void *arg)
             }
         }
         /* Transmit COMBINED frame to ESP32-S3 over UART1. */
+        float px = 0, py = 0, pz = 0, pqx = 0, pqy = 0, pqz = 0, pqw = 1;
+        bool pv = aruco_pose_get_latest(&px, &py, &pz, &pqx, &pqy, &pqz, &pqw);
         p4_link_send_combined(
             (const uint16_t *)s_dist_mm, (const uint8_t *)s_range_status,
-            false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            pv, px, py, pz, pqx, pqy, pqz, pqw);
 
         /* VL53L1X LONG mode measurement time ~33 ms; poll at 50 ms -> ~20 Hz */
         vTaskDelay(pdMS_TO_TICKS(50));
