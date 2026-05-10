@@ -20,6 +20,7 @@ Usage:
 
 import sys
 import re
+import math
 import struct
 import time
 import signal
@@ -49,13 +50,17 @@ signal.signal(signal.SIGTERM, lambda _s, _f: sys.exit(0))
 signal.signal(signal.SIGHUP,  lambda _s, _f: sys.exit(0))
 
 # ── POSE + TOF state (updated from UART text lines between frames) ───────────
-_latest_pose_txt = ""   # cyan overlay on panel 1, empty when no fix
-_latest_tof_txt  = ""   # yellow overlay on panel 3, empty until first reading
+_latest_pose_txt  = ""    # cyan overlay on panel 1
+_latest_pose_time = 0.0   # monotonic time of last valid POSE fix
+_latest_tof_txt   = ""    # yellow overlay on panel 3
+
+_POSE_TIMEOUT_S = 1.0   # seconds before "no fix" appears
 
 _POSE_RE = re.compile(
     r'POSE:(\d+):([-\d.]+):([-\d.]+):([-\d.]+)'
     r':([-\d.]+):([-\d.]+):([-\d.]+):([-\d.]+)'
 )
+_MARKER_RE = re.compile(r'M(\d+):([\d.]+)m')
 # TOF:<dist0>,<dist1>,...mm  where each value is a number or ---
 _TOF_RE = re.compile(r'TOF:([\d,\-]+)mm')
 
@@ -66,8 +71,14 @@ def _tof_bar(mm: int) -> str:
     filled = round(min(mm, _TOF_MAX_MM) / _TOF_MAX_MM * _TOF_BAR_W)
     return '█' * filled + '░' * (_TOF_BAR_W - filled)
 
+def _quat_to_yaw_deg(qx, qy, qz, qw) -> float:
+    """Extract yaw (rotation around world Z) from quaternion."""
+    siny_cosp = 2.0 * (qw * qz + qx * qy)
+    cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+    return math.degrees(math.atan2(siny_cosp, cosy_cosp))
+
 def _handle_text_line(raw: bytes) -> None:
-    global _latest_pose_txt, _latest_tof_txt
+    global _latest_pose_txt, _latest_pose_time, _latest_tof_txt
     try:
         line = raw.decode('ascii', errors='replace').strip()
     except Exception:
@@ -75,13 +86,28 @@ def _handle_text_line(raw: bytes) -> None:
     if not line:
         return
     print(f"[uart] {line}", flush=True)
-    m = _POSE_RE.search(line)
-    if m:
-        n  = int(m.group(1))
-        x, y, z = float(m.group(2)), float(m.group(3)), float(m.group(4))
-        _latest_pose_txt = f"POSE n={n}  x={x:.2f} y={y:.2f} z={z:.2f} m"
-    elif line.startswith('M') and not m:
-        _latest_pose_txt = line
+
+    pose_m = _POSE_RE.search(line)
+    marker_hits = _MARKER_RE.findall(line)   # [(id, dist_m), ...]
+
+    if pose_m:
+        n  = int(pose_m.group(1))
+        x, y, z = float(pose_m.group(2)), float(pose_m.group(3)), float(pose_m.group(4))
+        qx, qy, qz, qw = (float(pose_m.group(i)) for i in range(5, 9))
+        yaw = _quat_to_yaw_deg(qx, qy, qz, qw)
+        markers_str = "  ".join(f"M{mid}:{float(dm):.2f}m" for mid, dm in marker_hits)
+        _latest_pose_txt = (
+            f"{markers_str}\n"
+            f"POSE  n={n}  yaw={yaw:.1f}°\n"
+            f"x={x:.3f}  y={y:.3f}  z={z:.3f} m"
+        )
+        _latest_pose_time = time.monotonic()
+    elif marker_hits:
+        # Markers seen but none in the world map — show IDs + distances only
+        markers_str = "  ".join(f"M{mid}:{float(dm):.2f}m" for mid, dm in marker_hits)
+        _latest_pose_txt = f"{markers_str}\n(not in map — no pose)"
+        _latest_pose_time = 0.0   # don't count as a valid fix
+
     t = _TOF_RE.search(line)
     if t:
         parts = t.group(1).split(',')
@@ -234,7 +260,16 @@ def display_frame(W, H, raw):
         f"frame #{frame_n}  {fps:.1f} fps  {W}×{H}   "
         f"R={r_mean:.0f} G={g_mean:.0f} B={b_mean:.0f}  max={max_val}  {status}"
     )
-    pose_txt.set_text(_latest_pose_txt)
+    age = time.monotonic() - _latest_pose_time
+    if _latest_pose_time > 0 and age <= _POSE_TIMEOUT_S:
+        pose_txt.set_color('cyan')
+        pose_txt.set_text(_latest_pose_txt)
+    elif _latest_pose_txt and _latest_pose_time == 0:
+        pose_txt.set_color('#aaaaaa')
+        pose_txt.set_text(_latest_pose_txt)
+    else:
+        pose_txt.set_color('#666666')
+        pose_txt.set_text("no ArUco fix")
     tof_txt.set_text(_latest_tof_txt)
 
     fig.canvas.draw()
