@@ -378,11 +378,18 @@ static void tof_console_print(const p4_tof_data_t *tof)
     if (age == INT64_MAX || age > 2000) {
         printf("\r[ToF] waiting for P4 data...                                    ");
     } else {
-        printf("\r[ToF] L90:%4umm L45:%4umm FWD:%4umm R45:%4umm R90:%4umm UP:%4umm | STATE:%-14s VIS:%-2s",
-               tof->dist_mm[0], tof->dist_mm[1], tof->dist_mm[2],
-               tof->dist_mm[3], tof->dist_mm[4], tof->dist_mm[5],
-               state_names[(int)drone_state],
-               vision_pose_valid ? "OK" : "NO");
+        if (vision_pose_valid) {
+            printf("\r[ToF] L90:%4umm L45:%4umm FWD:%4umm R45:%4umm R90:%4umm UP:%4umm | STATE:%-14s VIS:OK x=%.2f y=%.2f z=%.2f",
+                   tof->dist_mm[0], tof->dist_mm[1], tof->dist_mm[2],
+                   tof->dist_mm[3], tof->dist_mm[4], tof->dist_mm[5],
+                   state_names[(int)drone_state],
+                   (double)vp_x, (double)vp_y, (double)vp_z);
+        } else {
+            printf("\r[ToF] L90:%4umm L45:%4umm FWD:%4umm R45:%4umm R90:%4umm UP:%4umm | STATE:%-14s VIS:NO              ",
+                   tof->dist_mm[0], tof->dist_mm[1], tof->dist_mm[2],
+                   tof->dist_mm[3], tof->dist_mm[4], tof->dist_mm[5],
+                   state_names[(int)drone_state]);
+        }
     }
     fflush(stdout);
 }
