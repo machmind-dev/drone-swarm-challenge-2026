@@ -214,7 +214,7 @@ static void uart_mavlink_init(void)
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(uart_driver_install(PX4_UART_PORT, 2048, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(PX4_UART_PORT, 2048, 512, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(PX4_UART_PORT, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(PX4_UART_PORT, PX4_UART_TX, PX4_UART_RX,
                                   UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
