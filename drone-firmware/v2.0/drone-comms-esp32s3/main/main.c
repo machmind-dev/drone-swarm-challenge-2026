@@ -185,7 +185,7 @@ static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
 static volatile float setpoint_yaw = 0.0f;
 static volatile bool  setpoint_received = false;
 
-volatile bool vision_enabled = false;
+volatile bool vision_enabled = true;
 
 /* Vision pose — written by main loop from p4_link data */
 volatile float vp_x = 0.0f, vp_y = 0.0f, vp_z = 0.0f;
