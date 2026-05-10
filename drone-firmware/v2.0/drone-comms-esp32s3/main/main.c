@@ -340,11 +340,11 @@ static void send_obstacle_distance(const p4_tof_data_t *tof)
         (uint64_t)esp_timer_get_time(),
         MAV_DISTANCE_SENSOR_LASER,
         distances,
-        5,       /* increment_f: 5° per bin */
+        5,       /* increment (legacy uint8_t, 5°/bin) */
         4,       /* min_distance_cm */
         400,     /* max_distance_cm */
-        5.0f,    /* angle_offset: 0° aligned to forward */
-        0.0f,
+        5.0f,    /* increment_f: 5°/bin */
+        0.0f,    /* angle_offset: bin 0 = forward (0°) */
         MAV_FRAME_BODY_FRD);
     mav_send(&msg);
 }
@@ -1120,6 +1120,7 @@ void app_main(void)
     /* ── Main loop — 20 Hz ────────────────────────────────────────────── */
     p4_tof_data_t  tof  = {0};
     p4_pose_data_t pose = {0};
+    uint32_t hb_tick = 0;
 
     while (1) {
         drone_id_led_update();
@@ -1144,8 +1145,8 @@ void app_main(void)
             }
         }
 
-        /* MAVLink obstacle + heartbeat */
-        send_heartbeat_once();
+        /* MAVLink: heartbeat at 1 Hz, obstacle data at 20 Hz */
+        if (++hb_tick >= 20) { hb_tick = 0; send_heartbeat_once(); }
         send_obstacle_distance(&tof);
         send_upward_distance_sensor(&tof);
 
