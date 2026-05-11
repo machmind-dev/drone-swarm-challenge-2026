@@ -17,6 +17,17 @@
  *
  * Device handles are cached in a small table keyed by 7-bit I2C address so
  * i2c_master_bus_add_device() is only called once per address.
+ *
+ * Post-create bus reset
+ * ---------------------
+ * The IO_MUX pin-reconfiguration inside i2c_new_master_bus() generates a brief
+ * transient on SDA that the hardware bus monitor latches as a START condition,
+ * leaving bus_busy=1.  Without clearing this immediately:
+ *   - i2c_master_probe() fires trans_start into a stuck bus → probe times out
+ *   - The 3rd probe enters the s_i2c_send_commands:544 spin-loop on NACK → WDT
+ * i2c_master_bus_reset() uses the hardware 9-pulse SCL generator to clear the
+ * flag.  On a bench with short wires and 4.7 kΩ pull-ups the transient was
+ * brief enough to self-clear; on the drone frame with longer wiring it persists.
  */
 
 #include "i2c_platform_esp.h"
@@ -75,12 +86,17 @@ void i2c_init_config(i2c_port_num_t port, gpio_num_t sda,
         .sda_io_num            = sda,
         .scl_io_num            = scl,
         .clk_source            = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt     = 7,
+        .glitch_ignore_cnt     = 15,  /* hardware max — better filters long-wire transient */
         .flags.enable_internal_pullup = true,
     };
     esp_err_t ret = i2c_new_master_bus(&cfg, &s_bus);
     if (ret == ESP_OK) {
         s_owned = true;
+        /* Clear bus_busy=1 left by the IO_MUX transient during bus creation.
+         * See file header for full explanation. */
+        esp_err_t rst = i2c_master_bus_reset(s_bus);
+        if (rst != ESP_OK)
+            ESP_LOGW(TAG, "post-create bus reset: %s", esp_err_to_name(rst));
         ESP_LOGI(TAG, "created I2C bus  port=%d  SDA=%d SCL=%d  %lu Hz",
                  (int)port, (int)sda, (int)scl, (unsigned long)freq);
         return;
@@ -139,7 +155,7 @@ void i2c_scan(void)
         ESP_LOGI(TAG, "i2c scan: no bus initialised");
         return;
     }
-    ESP_LOGI(TAG, "i2c scan: probing 0x08–0x77 ...");
+    ESP_LOGI(TAG, "i2c scan: probing 0x08\xe2\x80\x930x77 ...");
     int found = 0;
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
         if (i2c_master_probe(s_bus, addr, pdMS_TO_TICKS(20)) == ESP_OK) {
