@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 #  Mach Mind GCS — micro-ROS Agent Launcher
-#  Starts one dedicated agent per drone on its own port:
+#  One dedicated agent per drone in one terminal window:
 #    Drone 1 → port 8881
 #    Drone 2 → port 8882
 #    Drone 3 → port 8883
@@ -9,15 +9,16 @@
 #    Drone 5 → port 8885
 #
 #  Usage:  ./start_agents.sh [1|2|3|4|5]
-#    No argument → launch all 5 agents (one terminal tab each)
-#    With ID     → launch only that drone's agent (foreground)
+#    No argument → all 5 agents, one tab each
+#    With ID     → that drone's agent in the foreground (debug)
 # ============================================================
 
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
 DRONE_COUNT=5
 BASE_PORT=8880
+RUNNER_DIR="/tmp/mach_mind_agents"
 
-# ── Single drone (foreground, useful for debugging) ───────────
+# ── Single-drone foreground mode (debug) ──────────────────────
 if [[ -n "$1" ]]; then
     ID="$1"
     PORT=$((BASE_PORT + ID))
@@ -26,33 +27,58 @@ if [[ -n "$1" ]]; then
     exec ros2 run micro_ros_agent micro_ros_agent udp4 --port "$PORT"
 fi
 
-# ── All drones — one terminal tab per agent ───────────────────
-if ! command -v xfce4-terminal &>/dev/null && \
-   ! command -v gnome-terminal &>/dev/null && \
-   ! command -v lxterminal &>/dev/null && \
-   ! command -v xterm &>/dev/null; then
-    echo "ERROR: No terminal emulator found"
-    exit 1
-fi
-
-SCRIPT="$(realpath "$0")"
+# ── Write one runner script per drone ────────────────────────
+mkdir -p "$RUNNER_DIR"
 
 for ID in $(seq 1 $DRONE_COUNT); do
     PORT=$((BASE_PORT + ID))
-    TITLE="Agent D${ID} :${PORT}"
-    CMD="bash -c 'source $ROS_SETUP && ros2 run micro_ros_agent micro_ros_agent udp4 --port $PORT; echo Agent exited; read -p \"Press Enter to close...\"'"
-
-    if command -v xfce4-terminal &>/dev/null; then
-        xfce4-terminal --tab --title="$TITLE" -e "bash -c '$SCRIPT $ID; read -p \"Press Enter...\"'" &
-    elif command -v gnome-terminal &>/dev/null; then
-        gnome-terminal --tab --title="$TITLE" -- bash -c "$SCRIPT $ID; read -p 'Press Enter...'" &
-    elif command -v lxterminal &>/dev/null; then
-        lxterminal --title="$TITLE" -e "bash -c '$SCRIPT $ID; read -p \"Press Enter...\"'" &
-    else
-        xterm -title "$TITLE" -e "bash -c '$SCRIPT $ID; read -p \"Press Enter...\"'" &
-    fi
-
-    sleep 0.3   # stagger launches so tabs open in order
+    RUNNER="$RUNNER_DIR/agent_d${ID}.sh"
+    cat > "$RUNNER" << RUNNER_EOF
+#!/bin/bash
+echo "=== Mach Mind micro-ROS Agent — Drone ${ID} (port ${PORT}) ==="
+echo "Date: \$(date)"
+echo ""
+source "${ROS_SETUP}"
+echo "ROS 2: \$ROS_DISTRO"
+echo ""
+ros2 run micro_ros_agent micro_ros_agent udp4 --port ${PORT}
+echo ""
+echo "Agent D${ID} exited (port ${PORT})."
+read -p "Press Enter to close..."
+RUNNER_EOF
+    chmod +x "$RUNNER"
 done
+
+# ── Launch all tabs in one terminal window ────────────────────
+if command -v xfce4-terminal &>/dev/null; then
+    CMD=(xfce4-terminal)
+    for ID in $(seq 1 $DRONE_COUNT); do
+        PORT=$((BASE_PORT + ID))
+        CMD+=(--tab --title="Agent D${ID} :${PORT}" --command="$RUNNER_DIR/agent_d${ID}.sh")
+    done
+    "${CMD[@]}" &
+
+elif command -v gnome-terminal &>/dev/null; then
+    CMD=(gnome-terminal)
+    for ID in $(seq 1 $DRONE_COUNT); do
+        PORT=$((BASE_PORT + ID))
+        CMD+=(--tab --title="Agent D${ID} :${PORT}" -- "$RUNNER_DIR/agent_d${ID}.sh")
+    done
+    "${CMD[@]}" &
+
+elif command -v lxterminal &>/dev/null; then
+    for ID in $(seq 1 $DRONE_COUNT); do
+        PORT=$((BASE_PORT + ID))
+        lxterminal --title="Agent D${ID} :${PORT}" -e "$RUNNER_DIR/agent_d${ID}.sh" &
+        sleep 0.3
+    done
+
+else
+    for ID in $(seq 1 $DRONE_COUNT); do
+        PORT=$((BASE_PORT + ID))
+        xterm -title "Agent D${ID} :${PORT}" -e "$RUNNER_DIR/agent_d${ID}.sh" &
+        sleep 0.3
+    done
+fi
 
 echo "All $DRONE_COUNT agents launched (ports ${BASE_PORT}1–${BASE_PORT}${DRONE_COUNT})."
