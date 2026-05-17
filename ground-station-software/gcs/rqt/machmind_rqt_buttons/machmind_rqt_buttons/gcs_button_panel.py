@@ -22,10 +22,9 @@ from rqt_gui_py.plugin import Plugin
 class GcsButtonPanel(Plugin):
 
     DRONE_COUNT = 5
-    EMERGENCY_HOLD_SECONDS = 3
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.3"
+    VERSION = "1.3.4"
 
     def __init__(self, context):
         super().__init__(context)
@@ -51,19 +50,7 @@ class GcsButtonPanel(Plugin):
         self.role_subscribers = {}
         self.battery_subscribers = {}
 
-        # Global emergency countdown
-        self.global_emergency_counter = self.EMERGENCY_HOLD_SECONDS
-        self.global_emergency_hold = False
-        self.global_emergency_timer = QTimer()
-        self.global_emergency_timer.setInterval(1000)
-        self.global_emergency_timer.timeout.connect(self._global_emergency_tick)
-        self._sw_emerg_active      = False   # True after ELAND/KILL fired; press again to reset
-        self._sw_emerg_reset_press = False   # marks a press that is resetting active state
-
-        # Per-drone emergency countdown
-        self.drone_emergency_timers = {}
-        self.drone_emergency_counters = {}
-        self.drone_emergency_holds = {}
+        self._sw_emerg_active = False   # True after ELAND fired; shows button as active
 
         # Scene publishers
         self.marker_pub = self.node.create_publisher(Marker, "/visualization_marker", 10)
@@ -89,13 +76,6 @@ class GcsButtonPanel(Plugin):
                 Int8, f"/drone_{i}/battery",
                 lambda msg, drone_id=i: self._battery_callback(msg, drone_id), 10
             )
-
-            timer = QTimer()
-            timer.setInterval(1000)
-            timer.timeout.connect(partial(self._drone_emergency_tick, i))
-            self.drone_emergency_timers[i] = timer
-            self.drone_emergency_counters[i] = self.EMERGENCY_HOLD_SECONDS
-            self.drone_emergency_holds[i] = False
 
         self._widget = QWidget()
         self._widget.setWindowTitle("Mach Mind GCS")
@@ -192,7 +172,7 @@ class GcsButtonPanel(Plugin):
         layout.addWidget(self.mission_all_btn)
         self._mission_all_base_style = base_style
 
-        self.emergency_all_btn = QPushButton("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
+        self.emergency_all_btn = QPushButton("EMERGENCY ALL\nE-LAND")
         self.emergency_all_btn.setStyleSheet("""
             QPushButton {
                 background-color: #ff8c00;
@@ -205,12 +185,11 @@ class GcsButtonPanel(Plugin):
                 border: 1px solid #d97a00;
             }
             QPushButton:pressed {
-                background-color: #ff3b30;
+                background-color: #cc5500;
                 color: white;
             }
         """)
-        self.emergency_all_btn.pressed.connect(self._start_global_emergency)
-        self.emergency_all_btn.released.connect(self._release_global_emergency)
+        self.emergency_all_btn.clicked.connect(self._emergency_all)
         layout.addWidget(self.emergency_all_btn)
 
         box.setLayout(layout)
@@ -308,8 +287,7 @@ class GcsButtonPanel(Plugin):
                 color: white;
             }
         """)
-        emergency_btn.pressed.connect(partial(self._start_drone_emergency, drone_id))
-        emergency_btn.released.connect(partial(self._release_drone_emergency, drone_id))
+        emergency_btn.clicked.connect(partial(self._publish, drone_id, "COMMAND_ELAND"))
         layout.addWidget(emergency_btn)
 
         small_toggle_style = """
@@ -418,56 +396,22 @@ class GcsButtonPanel(Plugin):
         return box
 
     # ================= Emergency Logic =================
-    def _start_global_emergency(self):
+    def _emergency_all(self):
         if self._sw_emerg_active:
-            # Press while active → reset, swallow the press so release doesn't re-trigger
             self._sw_emerg_active = False
-            self._sw_emerg_reset_press = True
-            self._reset_global_emergency_text()
+            self._set_emerg_btn_style("idle")
+            self.emergency_all_btn.setText("EMERGENCY ALL\nE-LAND")
             return
-        self._sw_emerg_reset_press = False
-        self.global_emergency_hold = True
-        self.global_emergency_counter = self.EMERGENCY_HOLD_SECONDS
-        self.emergency_all_btn.setText(f"KILL IN {self.global_emergency_counter} (SW)")
-        self.global_emergency_timer.start()
-
-    def _global_emergency_tick(self):
-        if not self.global_emergency_hold:
-            return
-        self.global_emergency_counter -= 1
-        if self.global_emergency_counter > 0:
-            self.emergency_all_btn.setText(f"KILL IN {self.global_emergency_counter} (SW)")
-        else:
-            self.global_emergency_timer.stop()
-            self.global_emergency_hold = False
-            self._sw_emerg_active = True
-            self._set_emerg_btn_style("kill")
-            self.emergency_all_btn.setText("KILL ALL (SW)")
-            self._kill_all()
-
-    def _release_global_emergency(self):
-        if self._sw_emerg_reset_press:
-            self._sw_emerg_reset_press = False
-            return
-        if self.global_emergency_hold and self.global_emergency_timer.isActive():
-            self.global_emergency_timer.stop()
-            self.global_emergency_hold = False
-            self._sw_emerg_active = True
-            self._set_emerg_btn_style("eland")
-            self.emergency_all_btn.setText("EMERGENCY LAND (SW)")
-            for drone_id in range(1, self.DRONE_COUNT + 1):
-                self._publish(drone_id, "COMMAND_ELAND")
-
-    def _reset_global_emergency_text(self):
-        self._set_emerg_btn_style("idle")
-        self.emergency_all_btn.setText("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
+        self._sw_emerg_active = True
+        self._set_emerg_btn_style("eland")
+        self.emergency_all_btn.setText("EMERGENCY LAND (ACTIVE)")
+        for drone_id in range(1, self.DRONE_COUNT + 1):
+            self._publish(drone_id, "COMMAND_ELAND")
 
     def _set_emerg_btn_style(self, state: str):
-        """Apply background colour to reflect emergency state: idle / eland / kill."""
         styles = {
             "idle":  ("#ff8c00", "#d97a00", "black"),
             "eland": ("#cc5500", "#993d00", "white"),
-            "kill":  ("#cc0000", "#990000", "white"),
         }
         bg, border, fg = styles.get(state, styles["idle"])
         self.emergency_all_btn.setStyleSheet(f"""
@@ -483,33 +427,6 @@ class GcsButtonPanel(Plugin):
             }}
             QPushButton:pressed {{ background-color: #ff3b30; color: white; }}
         """)
-
-    def _start_drone_emergency(self, drone_id):
-        self.drone_emergency_holds[drone_id] = True
-        self.drone_emergency_counters[drone_id] = self.EMERGENCY_HOLD_SECONDS
-        self.ui_refs[drone_id]["emergency"].setText(f"KILL {self.drone_emergency_counters[drone_id]}")
-        self.drone_emergency_timers[drone_id].start()
-
-    def _drone_emergency_tick(self, drone_id):
-        if not self.drone_emergency_holds[drone_id]:
-            return
-        self.drone_emergency_counters[drone_id] -= 1
-        btn = self.ui_refs[drone_id]["emergency"]
-        if self.drone_emergency_counters[drone_id] > 0:
-            btn.setText(f"KILL {self.drone_emergency_counters[drone_id]}")
-        else:
-            self.drone_emergency_timers[drone_id].stop()
-            self.drone_emergency_holds[drone_id] = False
-            btn.setText("EMERG")
-            self._publish(drone_id, "COMMAND_KILL")
-
-    def _release_drone_emergency(self, drone_id):
-        timer = self.drone_emergency_timers[drone_id]
-        if self.drone_emergency_holds[drone_id] and timer.isActive():
-            timer.stop()
-            self.drone_emergency_holds[drone_id] = False
-            self.ui_refs[drone_id]["emergency"].setText("EMERG")
-            self._publish(drone_id, "COMMAND_ELAND")
 
     # ================= Axis Publishing =================
     def _publish_axis_markers(self):
@@ -812,10 +729,6 @@ class GcsButtonPanel(Plugin):
             else:
                 self.mission_all_btn.setText("MISSION ALL")
 
-    def _kill_all(self):
-        for drone_id in range(1, self.DRONE_COUNT + 1):
-            self._publish(drone_id, "COMMAND_KILL")
-
     def _send_command(self, drone_id: int, command: str):
         if command == "COMMAND_MISSION_START":
             if self.drone_states.get(drone_id) not in {"armed", "returning_home"}:
@@ -1008,25 +921,16 @@ class GcsButtonPanel(Plugin):
         self._hw_emerg_locked = active
         self.emergency_all_btn.setEnabled(not active)
         if data == "OK":
+            self._sw_emerg_active = False
             self._set_emerg_btn_style("idle")
-            self.emergency_all_btn.setText("EMERGENCY ALL\nE-LAND / HOLD 3s: KILL")
-        elif data == "EMERGENCY_LAND":
+            self.emergency_all_btn.setText("EMERGENCY ALL\nE-LAND")
+        else:
             self._set_emerg_btn_style("eland")
             self.emergency_all_btn.setText("EMERGENCY LAND (HW)")
-        elif data == "KILL_ALL":
-            self._set_emerg_btn_style("kill")
-            self.emergency_all_btn.setText("KILL ALL (HW)")
-        else:
-            # KILL_IN_* countdown — keep idle style, show countdown text
-            label = data.replace("_", " ")
-            self.emergency_all_btn.setText(f"{label} (HW)")
 
     def shutdown_plugin(self):
         self.timer.stop()
         self._online_timer.stop()
-        self.global_emergency_timer.stop()
-        for t in self.drone_emergency_timers.values():
-            t.stop()
         if hasattr(self, "node"):
             self.node.destroy_node()
         if rclpy.ok():
