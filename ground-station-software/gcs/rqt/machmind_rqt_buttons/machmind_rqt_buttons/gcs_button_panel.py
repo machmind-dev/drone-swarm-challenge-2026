@@ -25,7 +25,7 @@ class GcsButtonPanel(Plugin):
     EMERGENCY_HOLD_SECONDS = 3
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.2"
+    VERSION = "1.3.3"
 
     def __init__(self, context):
         super().__init__(context)
@@ -42,6 +42,9 @@ class GcsButtonPanel(Plugin):
         self.drone_last_seen: dict[int, float] = {}  # monotonic time of last state message per drone
         self.ui_refs = {}
         self._arm_sent_times: dict[int, float] = {}  # monotonic time when ARM was sent per drone
+        self._mission_all_active: bool = False       # True while _mission_all_attempt loop is running
+        self._mission_sent_ids: set = set()          # drones that received MISSION_START this cycle
+        self._mission_start_time: float = 0.0        # monotonic time _mission_all was first called
         self.command_publishers = {}
         self.config_publishers = {}
         self.state_subscribers = {}
@@ -184,7 +187,6 @@ class GcsButtonPanel(Plugin):
         layout.addWidget(self.arm_all_btn)
 
         self.mission_all_btn = QPushButton("MISSION ALL")
-        self.mission_all_btn.setCheckable(True)
         self.mission_all_btn.setStyleSheet(base_style + "QPushButton { background-color: #3a3a3a; }")
         self.mission_all_btn.clicked.connect(self._mission_all)
         layout.addWidget(self.mission_all_btn)
@@ -739,38 +741,76 @@ class GcsButtonPanel(Plugin):
             self._publish(drone_id, command)
 
     def _mission_all(self):
-        if not self.mission_all_btn.isChecked():
+        if self._mission_all_active:
+            # Second click while dispatching in progress — cancel the retry loop
+            self._mission_all_active = False
+            self.mission_all_btn.setText("MISSION ALL")
+            return
+
+        arm_candidates = set(self._arm_sent_times.keys())
+        if not arm_candidates:
+            self.node.get_logger().warn("MISSION ALL: no ARM candidates — press ARM ALL first")
+            return
+
+        self._mission_all_active = True
+        self._mission_sent_ids = set()
+        self._mission_start_time = time.monotonic()
+        self.mission_all_btn.setText("MISSION ALL (dispatching…)")
+        self._mission_all_attempt()
+
+    def _mission_all_attempt(self):
+        """Retry loop: sends MISSION_START per-drone once its state confirms 'armed'."""
+        MAX_WAIT_S = 8.0
+        RETRY_MS   = 400
+
+        if not self._mission_all_active:
+            return
+
+        arm_candidates = set(self._arm_sent_times.keys())
+        if not arm_candidates:
+            self._mission_all_active = False
             self.mission_all_btn.setText("MISSION ALL")
             return
 
         now = time.monotonic()
-        ready, pending_ms = [], 0
-        for i in range(1, self.DRONE_COUNT + 1):
-            state_ok = self.drone_states.get(i) in {"armed", "returning_home"}
-            arm_sent = i in self._arm_sent_times
-            # Accept drones confirmed armed OR arm was sent but state hasn't round-tripped
-            # back yet (WiFi + micro-ROS latency). Firmware guards against MISSION when
-            # actually disarmed, so sending early is safe.
-            if not (state_ok or arm_sent):
+        elapsed_total = now - self._mission_start_time
+        newly_ready, still_waiting = [], []
+
+        for i in sorted(arm_candidates):
+            if i in self._mission_sent_ids:
                 continue
-            elapsed_ms = (now - self._arm_sent_times.get(i, 0)) * 1000
-            if elapsed_ms < self.ARM_MISSION_GUARD_MS:
-                pending_ms = max(pending_ms, self.ARM_MISSION_GUARD_MS - elapsed_ms)
+            state = self.drone_states.get(i)
+            if state in {"armed", "returning_home"}:
+                newly_ready.append(i)
+            elif state in {"mission", "landing"}:
+                self._mission_sent_ids.add(i)   # already flying — count as done
+            elif elapsed_total < MAX_WAIT_S:
+                still_waiting.append(i)
             else:
-                ready.append(i)
+                self.node.get_logger().warn(
+                    f"D{i}: gave up waiting for arm confirm after {elapsed_total:.1f}s "
+                    f"(state={state})")
 
-        for drone_id in ready:
+        self.node.get_logger().info(
+            f"MISSION ALL: sending={newly_ready} waiting={still_waiting} "
+            f"done={sorted(self._mission_sent_ids)} elapsed={elapsed_total:.1f}s"
+        )
+
+        for drone_id in newly_ready:
             self._publish(drone_id, "COMMAND_MISSION_START")
+            self._mission_sent_ids.add(drone_id)
 
-        if pending_ms > 0:
-            retry_ms = int(pending_ms) + 10
-            self.node.get_logger().info(f"ARM guard active, retrying MISSION ALL in {retry_ms} ms")
-            QTimer.singleShot(retry_ms, self._mission_all)
-        elif not ready:
-            self.mission_all_btn.setChecked(False)
-            self.mission_all_btn.setText("MISSION ALL")
+        if still_waiting:
+            self.mission_all_btn.setText(
+                f"MISSION ALL (waiting {len(still_waiting)}…)")
+            QTimer.singleShot(RETRY_MS, self._mission_all_attempt)
         else:
-            self.mission_all_btn.setText("MISSION STARTING (SW)")
+            self._mission_all_active = False
+            if self._mission_sent_ids:
+                self.mission_all_btn.setText(
+                    f"MISSION STARTING ({len(self._mission_sent_ids)})")
+            else:
+                self.mission_all_btn.setText("MISSION ALL")
 
     def _kill_all(self):
         for drone_id in range(1, self.DRONE_COUNT + 1):
@@ -865,10 +905,12 @@ class GcsButtonPanel(Plugin):
             self.mission_all_btn.setText("MISSION (RUNNING)")
         elif any_armed:
             mission_all_color = "#2d6a4f"
-            self.mission_all_btn.setText("MISSION ALL")
+            if not self._mission_all_active:
+                self.mission_all_btn.setText("MISSION ALL")
         else:
             mission_all_color = "#3a3a3a"
-            self.mission_all_btn.setText("MISSION ALL")
+            if not self._mission_all_active:
+                self.mission_all_btn.setText("MISSION ALL")
         self.mission_all_btn.setStyleSheet(
             self._mission_all_base_style + f"QPushButton {{ background-color: {mission_all_color}; }}"
         )
