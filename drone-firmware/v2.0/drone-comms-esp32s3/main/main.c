@@ -801,9 +801,9 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         ESP_LOGW(TAG, "Vision pose timeout");
     }
 
-    /* State publish */
+    /* State publish — every 10 × 100 ms = 1 s (was 2 s); keeps OFFLINE margin at 2 s */
     static uint32_t state_tick = 0;
-    if (state_dirty || (++state_tick >= 20)) {
+    if (state_dirty || (++state_tick >= 10)) {
         state_dirty = false;
         state_tick  = 0;
         const char *s = state_names[(int)drone_state];
@@ -829,8 +829,13 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         apply_pose_to_drone_markers(disp_x, disp_y, disp_z, 0.0f, 0.0f, 0.0f, 1.0f);
     }
 
-    RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
-    RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
+    /* RViz markers at 2 Hz (every 5th tick) — was 10 Hz; reduces micro-ROS UDP load 5× */
+    static uint32_t marker_tick = 0;
+    if (++marker_tick >= 5) {
+        marker_tick = 0;
+        RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
+        RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -878,8 +883,10 @@ static void micro_ros_task(void *arg)
 #ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
     rmw_init_options_t *rmw_options =
         rcl_init_options_get_rmw_init_options(&init_options);
+    char agent_port[8];
+    snprintf(agent_port, sizeof(agent_port), "%d", 8880 + DRONE_ID);
     RCCHECK(rmw_uros_options_set_udp_address(
-        CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT, rmw_options));
+        CONFIG_MICRO_ROS_AGENT_IP, agent_port, rmw_options));
     RCCHECK(rmw_uros_options_set_client_key((uint32_t)DRONE_ID, rmw_options));
 #endif
 
