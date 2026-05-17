@@ -91,7 +91,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          1
+#define DRONE_ID          5
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
