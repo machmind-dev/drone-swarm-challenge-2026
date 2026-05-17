@@ -91,7 +91,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          5
+#define DRONE_ID          1
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -118,10 +118,10 @@ static const char *TAG = "drone";
 #define PX4_MODE_OFFBOARD    0x00060000UL
 
 /* ── C2 watchdog ───────────────────────────────────────────────────────── */
-#define C2_PING_TIMEOUT_MS   100
+#define C2_PING_TIMEOUT_MS   500   /* was 100 — allows for WiFi RTT variance */
 #define C2_PING_ATTEMPTS     2
 #define C2_CHECK_INTERVAL_MS 1000
-#define C2_FAIL_THRESHOLD    2
+#define C2_FAIL_THRESHOLD    3     /* was 2 — needs ~3 s continuous loss to restart */
 
 /* ── Mission parameters ────────────────────────────────────────────────── */
 #define MISSION_TAKEOFF_ALT_M      1.5f
