@@ -746,7 +746,12 @@ class GcsButtonPanel(Plugin):
         now = time.monotonic()
         ready, pending_ms = [], 0
         for i in range(1, self.DRONE_COUNT + 1):
-            if self.drone_states.get(i) != "armed":
+            state_ok = self.drone_states.get(i) in {"armed", "returning_home"}
+            arm_sent = i in self._arm_sent_times
+            # Accept drones confirmed armed OR arm was sent but state hasn't round-tripped
+            # back yet (WiFi + micro-ROS latency). Firmware guards against MISSION when
+            # actually disarmed, so sending early is safe.
+            if not (state_ok or arm_sent):
                 continue
             elapsed_ms = (now - self._arm_sent_times.get(i, 0)) * 1000
             if elapsed_ms < self.ARM_MISSION_GUARD_MS:
@@ -758,8 +763,6 @@ class GcsButtonPanel(Plugin):
             self._publish(drone_id, "COMMAND_MISSION_START")
 
         if pending_ms > 0:
-            # Some drones still within ARM guard — retry for them regardless of whether
-            # other drones were already sent (previously they were silently dropped).
             retry_ms = int(pending_ms) + 10
             self.node.get_logger().info(f"ARM guard active, retrying MISSION ALL in {retry_ms} ms")
             QTimer.singleShot(retry_ms, self._mission_all)
