@@ -65,18 +65,21 @@ EOLOGO
 }
 EOF
 
-cat > "$TMPDIR/tab_agent.sh" <<'EOF'
+for _ID in 1 2 3 4 5; do
+    _PORT=$((8880 + _ID))
+    cat > "$TMPDIR/tab_agent_d${_ID}.sh" << AGENTEOF
 #!/bin/bash
-source /tmp/$(basename "$(dirname "$0")")/common_logo.sh
-print_logo "                            [micro-ROS Agent]"
+source /tmp/\$(basename "\$(dirname "\$0")")/common_logo.sh
+print_logo "           [micro-ROS Agent — Drone ${_ID} :${_PORT}]"
 source /opt/ros/jazzy/setup.bash
 [ -f ~/uros_ws/install/local_setup.bash ] && source ~/uros_ws/install/local_setup.bash
 export ROS_DOMAIN_ID=0
 export NO_AT_BRIDGE=1
-echo "[INFO] Starting micro-ROS Agent..."
-ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888 -v6
+echo "[INFO] Starting micro-ROS Agent — Drone ${_ID} port ${_PORT}..."
+ros2 run micro_ros_agent micro_ros_agent udp4 --port ${_PORT}
 exec bash
-EOF
+AGENTEOF
+done
 
 cat > "$TMPDIR/tab_topics.sh" <<'EOF'
 #!/bin/bash
@@ -113,7 +116,11 @@ sleep 1
 
 xfce4-terminal \
   --title="Mach Mind GCS" \
-  --tab --title="micro-ROS Agent" --command="bash '$TMPDIR/tab_agent.sh'" \
+  --tab --title="Agent D1 :8881" --command="bash '$TMPDIR/tab_agent_d1.sh'" \
+  --tab --title="Agent D2 :8882" --command="bash '$TMPDIR/tab_agent_d2.sh'" \
+  --tab --title="Agent D3 :8883" --command="bash '$TMPDIR/tab_agent_d3.sh'" \
+  --tab --title="Agent D4 :8884" --command="bash '$TMPDIR/tab_agent_d4.sh'" \
+  --tab --title="Agent D5 :8885" --command="bash '$TMPDIR/tab_agent_d5.sh'" \
   --tab --title="ROS2 Topics / Publisher" --command="bash '$TMPDIR/tab_topics.sh'" \
   --tab --title="RQT Control Panel" --command="bash '$TMPDIR/tab_rqt.sh'" &
 
