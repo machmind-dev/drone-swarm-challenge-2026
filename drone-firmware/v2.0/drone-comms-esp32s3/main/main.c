@@ -91,7 +91,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          1
+#define DRONE_ID          5
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -118,10 +118,10 @@ static const char *TAG = "drone";
 #define PX4_MODE_OFFBOARD    0x00060000UL
 
 /* ── C2 watchdog ───────────────────────────────────────────────────────── */
-#define C2_PING_TIMEOUT_MS   500   /* was 100 — allows for WiFi RTT variance */
+#define C2_PING_TIMEOUT_MS   200   /* 200 ms: tolerates WiFi RTT, limits executor block */
 #define C2_PING_ATTEMPTS     2
-#define C2_CHECK_INTERVAL_MS 1000
-#define C2_FAIL_THRESHOLD    3     /* was 2 — needs ~3 s continuous loss to restart */
+#define C2_CHECK_INTERVAL_MS 2000  /* check every 2 s — reduces executor block frequency */
+#define C2_FAIL_THRESHOLD    3     /* 3 × 2 s = 6 s continuous loss before restart */
 
 /* ── Mission parameters ────────────────────────────────────────────────── */
 #define MISSION_TAKEOFF_ALT_M      1.5f
@@ -660,7 +660,11 @@ static void command_callback(const void *msg_in)
     if (strcmp(buf, "COMMAND_ARM") == 0) {
         if (vision_pose_valid) {
             home_x = vp_x; home_y = vp_y; home_z = vp_z;
-            ESP_LOGI(TAG, "Home captured: (%.2f, %.2f, %.2f)", home_x, home_y, home_z);
+            ESP_LOGI(TAG, "Home captured from vision: (%.2f, %.2f, %.2f)", home_x, home_y, home_z);
+        } else if (px4_pos_valid) {
+            /* No ArUco fix — use PX4 inertial position so prearm setpoints match reality */
+            home_x = px4_pos_x; home_y = px4_pos_y; home_z = px4_pos_z;
+            ESP_LOGW(TAG, "Home captured from PX4 inertial: (%.2f, %.2f, %.2f)", home_x, home_y, home_z);
         }
         if (px4_pos_valid) {
             px4_home_x = px4_pos_x;
