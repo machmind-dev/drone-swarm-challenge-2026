@@ -262,6 +262,48 @@ Rotor arm length: 15 cm (±0.15 m in `CA_ROTOR*_PX/PY`).
 
 ---
 
+---
+
+## Fixes & Known Issues
+
+### ArUco false-positive on cold start with covered/dark camera (v2.0)
+
+**Symptom:** `VIS:OK` with plausible-looking coordinates appears on the ESP32-S3 console immediately after boot, even though no ArUco marker is visible (camera lens covered or scene completely dark).
+
+**Root cause — two interacting issues:**
+
+1. **OV5647 AEC at maximum gain on a black scene.**
+   The 5-second ISP stabilisation delay lets auto-exposure converge. With the camera covered the AEC ramps to maximum gain trying to brighten the scene, maximising sensor noise in the first frame after stabilisation.
+
+2. **98th-percentile normaliser amplifies noise into a false marker.**
+   `aruco_pose.cpp` normalises each frame so its 98th-percentile luma maps to 255 — a technique that handles dim scenes well. With a covered camera the p98 raw luma is 2–8 (pure noise), giving a normalisation scale of `(255 × 256) / 8 = 8160`. Sensor noise is boosted into high-contrast pseudo-edges that `cv::aruco::detectMarkers` can match to a valid marker.
+
+3. **S3 does not immediately clear `vision_pose_valid` on `pose.valid = false`.**
+   Even if the false detection is short-lived, the S3 kept showing `VIS:OK` for up to 1 500 ms (the `VISION_TIMEOUT_MS` window) after the last valid packet because the receive loop had no `else` branch.
+
+**Fix applied:**
+
+- **`drone-vision-esp32p4/main/aruco_pose.cpp`** — brightness gate added before `detectMarkers()`:
+  ```cpp
+  if (norm_max < 20) {          // raw 98th-percentile luma; real scenes are 30+
+      s_pose_valid = false;
+      continue;                  // skip detection, don't amplify noise
+  }
+  ```
+  `norm_max` is the raw p98 luma **before** normalisation. A well-lit indoor scene reads 50–200+. A covered camera or pitch-dark room reads 2–10. The threshold of 20 gives a safe margin in both directions.
+
+- **`drone-comms-esp32s3/main/main.c`** — immediate clear on the S3 side:
+  ```c
+  } else {
+      vision_pose_valid = false;   // clear immediately, don't wait for timeout
+  }
+  ```
+  The 1 500 ms timeout remains as a safety net for UART dropout, but `pose.valid = false` packets now clear the flag straight away.
+
+**Tuning the threshold:** the diagnostic log printed every 50 frames (`diag frame=N mean=X min=Y max=Z`) shows the actual pixel range. If operating in a genuinely dim environment where real markers are visible, lower the threshold — but keep it above the covered-camera noise floor observed on your hardware.
+
+---
+
 ## Repository layout
 
 ```

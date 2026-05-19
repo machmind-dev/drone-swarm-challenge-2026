@@ -786,6 +786,18 @@ void aruco_pose_start(void)
             ioctl(video_fd, VIDIOC_QBUF, &qbuf);
         }
 
+        /* Scene-brightness gate: if the raw 98th-percentile luma is below 20
+         * the camera is covered or the environment is completely dark.
+         * The normaliser would amplify sensor noise into false ArUco detections
+         * (cold-start false positive when AEC converges at max gain on black scene).
+         * Skip detection and clear pose so the S3 sees pose.valid=false. */
+        if (norm_max < 20) {
+            taskENTER_CRITICAL(&s_pose_mux);
+            s_pose_valid = false;
+            taskEXIT_CRITICAL(&s_pose_mux);
+            continue;
+        }
+
         /* Detect ArUco markers in fast_frame (SRAM — no PSRAM access).
          * detectMarkers() calls malloc(76800) internally; with
          * SPIRAM_MALLOC_ALWAYSINTERNAL=131072 this lands in SRAM, so there is

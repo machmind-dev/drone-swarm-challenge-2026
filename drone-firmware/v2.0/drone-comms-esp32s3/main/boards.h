@@ -28,6 +28,8 @@
 
 /* ── Drone identity ──────────────────────────────────────────────────────── */
 #define DRONE_ID_LED_PIN    GPIO_NUM_1
+/* Active-low: HIGH = off, LOW = on */
+#define USER_LED_PIN        GPIO_NUM_21
 
 /* ── MAVLink / PX4 link (UART1) ──────────────────────────────────────────── */
 #define PX4_UART_PORT       UART_NUM_1
