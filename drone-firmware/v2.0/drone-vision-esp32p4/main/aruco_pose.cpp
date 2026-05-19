@@ -710,12 +710,10 @@ void aruco_pose_start(void)
         /* One-pass RGB565→grayscale + center-crop + nearest-neighbour resize
          * PSRAM→SRAM.  DMA is streaming on the other buffer — reading this
          * buffer is safe because DQBUF gives us exclusive ownership of it. */
-        /* norm_max declared here (not inside the block) so the brightness gate
-         * below can read it after the block closes. */
-        static uint8_t norm_max = 16;
         {
             /* 98th-percentile normalisation: bright point sources saturate
              * but do NOT collapse ambient scene to black. */
+            static uint8_t norm_max = 16;
             const uint32_t ns = (255u * 256u) /
                                 (norm_max < 8u ? 8u : (uint32_t)norm_max);
             const uint16_t *src = (const uint16_t *)(void *)frame_ptr;
@@ -786,18 +784,6 @@ void aruco_pose_start(void)
             qbuf.memory = V4L2_MEMORY_MMAP;
             qbuf.index  = buf.index;
             ioctl(video_fd, VIDIOC_QBUF, &qbuf);
-        }
-
-        /* Scene-brightness gate: if the raw 98th-percentile luma is below 20
-         * the camera is covered or the environment is completely dark.
-         * The normaliser would amplify sensor noise into false ArUco detections
-         * (cold-start false positive when AEC converges at max gain on black scene).
-         * Skip detection and clear pose so the S3 sees pose.valid=false. */
-        if (norm_max < 20) {
-            taskENTER_CRITICAL(&s_pose_mux);
-            s_pose_valid = false;
-            taskEXIT_CRITICAL(&s_pose_mux);
-            continue;
         }
 
         /* Detect ArUco markers in fast_frame (SRAM — no PSRAM access).

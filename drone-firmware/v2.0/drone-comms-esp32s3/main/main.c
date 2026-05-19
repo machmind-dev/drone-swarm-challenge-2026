@@ -91,7 +91,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          4
+#define DRONE_ID          3
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -1074,13 +1074,12 @@ void app_main(void)
     ESP_LOGI(TAG, "==============================");
 
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << DRONE_ID_LED_PIN) | (1ULL << USER_LED_PIN),
+        .pin_bit_mask = (1ULL << DRONE_ID_LED_PIN),
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = 0, .pull_down_en = 0,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-    gpio_set_level(USER_LED_PIN, 1);   /* active-low: drive HIGH to keep off */
 
     /* Initialise RViz drone disc at start position */
     const float ix = get_initial_x_from_drone_id();
@@ -1168,8 +1167,6 @@ void app_main(void)
             if (vision_enabled) {
                 mav_send_vision_estimate(pose.x, pose.y, pose.z);
             }
-        } else {
-            vision_pose_valid = false;
         }
 
         /* MAVLink: heartbeat at 1 Hz, obstacle data at 20 Hz */
