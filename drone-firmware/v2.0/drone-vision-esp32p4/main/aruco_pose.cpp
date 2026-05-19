@@ -710,10 +710,12 @@ void aruco_pose_start(void)
         /* One-pass RGB565→grayscale + center-crop + nearest-neighbour resize
          * PSRAM→SRAM.  DMA is streaming on the other buffer — reading this
          * buffer is safe because DQBUF gives us exclusive ownership of it. */
+        /* norm_max declared here (not inside the block) so the brightness gate
+         * below can read it after the block closes. */
+        static uint8_t norm_max = 16;
         {
             /* 98th-percentile normalisation: bright point sources saturate
              * but do NOT collapse ambient scene to black. */
-            static uint8_t norm_max = 16;
             const uint32_t ns = (255u * 256u) /
                                 (norm_max < 8u ? 8u : (uint32_t)norm_max);
             const uint16_t *src = (const uint16_t *)(void *)frame_ptr;
