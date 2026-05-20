@@ -31,7 +31,7 @@ static const char *TAG = "p4_rx";
 #define P4_RX_GPIO_RX     GPIO_NUM_3   /* D2 ← P4 GPIO22 TX */
 #define P4_RX_GPIO_TX     GPIO_NUM_2   /* D1 → P4 GPIO23 RX */
 #define P4_RX_BAUD        115200
-#define P4_RX_BUF         256
+#define P4_RX_BUF         512   /* bumped: 131B frame needs ~2× headroom */
 
 /* ── Shared state ─────────────────────────────────────────────────────── */
 static portMUX_TYPE   s_mux       = portMUX_INITIALIZER_UNLOCKED;
