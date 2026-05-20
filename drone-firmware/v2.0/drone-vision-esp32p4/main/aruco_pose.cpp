@@ -866,8 +866,11 @@ void aruco_pose_start(void)
             float  qx_out = 0, qy_out = 0, qz_out = 0, qw_out = 1;
             int    pose_n = 0;
             float  best_dist = 1e9f;
-            cv::Mat best_R_wc;   /* world-from-camera rotation for closest map marker */
-            float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
+            /* Static: persist last valid world-camera transform across frames so
+             * box positions can be computed even when no arena map marker is
+             * currently visible (uses most-recent known pose). */
+            static cv::Mat best_R_wc;
+            static float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
 
             for (int i = 0; i < (int)ids.size(); i++) {
                 std::vector<cv::Point2f> &c = corners[i];
@@ -919,7 +922,7 @@ void aruco_pose_start(void)
             /* Compute world positions for detected box markers (31-36, 41-46).
              * Uses world-from-camera transform from the closest arena map marker. */
             p4_boxes_t new_boxes = {};
-            if (pose_n > 0 && !best_R_wc.empty()) {
+            if (!best_R_wc.empty()) {
                 for (int i = 0; i < (int)ids.size(); i++) {
                     if (new_boxes.count >= P4_LINK_BOX_MAX) break;
                     int bid = ids[i];
