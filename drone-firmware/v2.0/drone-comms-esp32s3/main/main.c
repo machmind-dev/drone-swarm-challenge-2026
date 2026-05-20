@@ -743,7 +743,7 @@ static void command_callback(const void *msg_in)
         drone_state = DRONE_ARMED;
         publish_state_now();
         if (!prearm_stream_handle)
-            xTaskCreate(prearm_stream_task_fn, "prearm", 2048, NULL, 4, &prearm_stream_handle);
+            xTaskCreate(prearm_stream_task_fn, "prearm", 4096, NULL, 4, &prearm_stream_handle);
 
     } else if (strcmp(buf, "COMMAND_DISARM") == 0) {
         if (prearm_stream_handle) {
@@ -1315,6 +1315,15 @@ void app_main(void)
             vp_qx = pose.qx; vp_qy = pose.qy; vp_qz = pose.qz; vp_qw = pose.qw;
             vision_pose_valid   = true;
             last_vision_pose_ms = now_ms();
+
+            /* Keep inertial anchor in sync with current vision position so the
+             * RViz disc doesn't teleport when vision times out: the fallback
+             * formula (map_home + (px4_pos - px4_home)) then starts from the
+             * last known vision location rather than (0,0,0). */
+            if (px4_pos_valid) {
+                map_home_x = pose.x; map_home_y = pose.y; map_home_z = pose.z;
+                px4_home_x = px4_pos_x; px4_home_y = px4_pos_y; px4_home_z = px4_pos_z;
+            }
 
             if (vision_enabled) {
                 mav_send_vision_estimate(pose.x, pose.y, pose.z);
