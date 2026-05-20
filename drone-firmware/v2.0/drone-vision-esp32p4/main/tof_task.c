@@ -141,10 +141,13 @@ static void tof_task(void *arg)
         }
         /* Transmit COMBINED frame to ESP32-S3 over UART1. */
         float px = 0, py = 0, pz = 0, pqx = 0, pqy = 0, pqz = 0, pqw = 1;
-        bool pv = aruco_pose_get_latest(&px, &py, &pz, &pqx, &pqy, &pqz, &pqw);
+        uint8_t tid = 0xFF;
+        p4_boxes_t boxes;
+        bool pv = aruco_pose_get_latest(&px, &py, &pz, &pqx, &pqy, &pqz, &pqw, &tid);
+        aruco_boxes_get_latest(&boxes);
         p4_link_send_combined(
             (const uint16_t *)s_dist_mm, (const uint8_t *)s_range_status,
-            pv, px, py, pz, pqx, pqy, pqz, pqw);
+            pv, px, py, pz, pqx, pqy, pqz, pqw, tid, &boxes);
 
         /* VL53L1X LONG mode measurement time ~33 ms; poll at 50 ms -> ~20 Hz */
         vTaskDelay(pdMS_TO_TICKS(50));

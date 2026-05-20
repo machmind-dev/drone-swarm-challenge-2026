@@ -121,7 +121,8 @@ static const char *TAG = "drone";
 #define C2_PING_TIMEOUT_MS   200   /* 200 ms: tolerates WiFi RTT, limits executor block */
 #define C2_PING_ATTEMPTS     2
 #define C2_CHECK_INTERVAL_MS 2000  /* check every 2 s — reduces executor block frequency */
-#define C2_FAIL_THRESHOLD    3     /* 3 × 2 s = 6 s continuous loss before restart */
+#define C2_FAIL_THRESHOLD    3     /* 3 × 2 s = 6 s — raised from 2 for WiFi RTT tolerance.
+                                    * TODO: lower to 1 (2 s) before official finals flight. */
 
 /* ── Mission parameters ────────────────────────────────────────────────── */
 #define MISSION_TAKEOFF_ALT_M      1.5f
@@ -129,6 +130,18 @@ static const char *TAG = "drone";
 #define MISSION_MAX_HOVER_MS       (15UL * 60UL * 1000UL)
 #define MISSION_LAND_DESCEND_MS    5000
 #define OFFBOARD_STREAM_PERIOD_MS  50
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * TEST — ArUco approach on marker 22.  Remove this block after test flight.
+ * Place physical marker 22 at arena position (10.0, 5.0) z=2 m.
+ * When detected during MISSION: fly 1 m toward marker, hold 5 s, RTH.
+ * ════════════════════════════════════════════════════════════════════════════ */
+#define TEST_ARUCO_APPROACH
+#define TEST_TRIGGER_ID       22
+#define TEST_APPROACH_DIST_M  1.0f
+#define TEST_HOLD_MS          5000
+#define TEST_M22_WORLD_X      10.0f
+#define TEST_M22_WORLD_Y       5.0f
 
 /* ── OBSTACLE_DISTANCE — VL53L1X 30° FOV → 6 bins per sensor ───────────
  * Bins filled: centre ± 3 bins (±15°).  Slots 0–4 (horizontal only).
@@ -199,6 +212,10 @@ static TaskHandle_t mission_task_handle     = NULL;
 static TaskHandle_t return_home_task_handle = NULL;
 static TaskHandle_t eland_task_handle       = NULL;
 static TaskHandle_t prearm_stream_handle    = NULL;
+
+#ifdef TEST_ARUCO_APPROACH
+static volatile bool s_test_aruco_triggered = false;
+#endif
 
 /* ══════════════════════════════════════════════════════════════════════════
  * UART / MAVLink
@@ -462,6 +479,18 @@ static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 static rcl_publisher_t    publisher_battery;
 
+/* ── Box marker publishers (IDs 31-36 = blue, 41-46 = red) ─────────────────── */
+#define BOX_COUNT      12
+#define BOX_TIMEOUT_MS 3000
+
+static const uint8_t BOX_IDS[BOX_COUNT] = {
+    31, 32, 33, 34, 35, 36,   /* blue team */
+    41, 42, 43, 44, 45, 46,   /* red team  */
+};
+static rcl_publisher_t                  box_publishers[BOX_COUNT];
+static visualization_msgs__msg__Marker  box_marker_msgs[BOX_COUNT];
+static char                             box_topic_names[BOX_COUNT][12];
+
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
 static rcl_subscription_t control_sub;
@@ -621,6 +650,47 @@ static void eland_task_fn(void *arg)
     vTaskDelete(NULL);
 }
 
+#ifdef TEST_ARUCO_APPROACH
+static void aruco_approach_task_fn(void *arg)
+{
+    (void)arg;
+    /* Kill mission task — no setpoint conflict during approach */
+    if (mission_task_handle) {
+        vTaskDelete(mission_task_handle);
+        mission_task_handle = NULL;
+    }
+
+    /* Capture current world position; approach 1 m toward marker 22 */
+    float from_x = vp_x, from_y = vp_y;
+    float dx = TEST_M22_WORLD_X - from_x;
+    float dy = TEST_M22_WORLD_Y - from_y;
+    float d  = sqrtf(dx * dx + dy * dy);
+    if (d < 0.01f) d = 0.01f;
+    float tgt_x = from_x + (dx / d) * TEST_APPROACH_DIST_M;
+    float tgt_y = from_y + (dy / d) * TEST_APPROACH_DIST_M;
+
+    ESP_LOGI(TAG, "[TEST] M22 approach: (%.2f,%.2f) -> tgt(%.2f,%.2f) hold=%ds",
+             from_x, from_y, tgt_x, tgt_y, TEST_HOLD_MS / 1000);
+
+    int64_t t0 = now_ms();
+    while (now_ms() - t0 < TEST_HOLD_MS) {
+        mav_set_position_yaw_ned(tgt_x, tgt_y, -MISSION_TAKEOFF_ALT_M, 0.0f);
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
+    }
+
+    ESP_LOGI(TAG, "[TEST] M22 approach done — returning home");
+    if (drone_state == DRONE_MISSION) {
+        drone_state = DRONE_RETURNING_HOME;
+        state_dirty = true;
+        mav_set_mode(PX4_MODE_OFFBOARD);
+        if (!return_home_task_handle)
+            xTaskCreate(return_home_task_fn, "return_home", 4096, NULL, 5,
+                        &return_home_task_handle);
+    }
+    vTaskDelete(NULL);
+}
+#endif /* TEST_ARUCO_APPROACH */
+
 static void trigger_eland(void)
 {
     if (mission_task_handle)     { vTaskDelete(mission_task_handle);     mission_task_handle = NULL; }
@@ -696,6 +766,9 @@ static void command_callback(const void *msg_in)
         }
         setpoint_received = false;
         setpoint_yaw = 0.0f;
+#ifdef TEST_ARUCO_APPROACH
+        s_test_aruco_triggered = false;
+#endif
         drone_state = DRONE_MISSION;
         publish_state_now();
         xTaskCreate(mission_task_fn, "mission", 4096, NULL, 5, &mission_task_handle);
@@ -833,12 +906,57 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         apply_pose_to_drone_markers(disp_x, disp_y, disp_z, 0.0f, 0.0f, 0.0f, 1.0f);
     }
 
-    /* RViz markers at 2 Hz (every 5th tick) — was 10 Hz; reduces micro-ROS UDP load 5× */
+    /* RViz markers at 2 Hz (every 5th tick) — was 10 Hz; reduces micro-ROS UDP load 5x */
     static uint32_t marker_tick = 0;
     if (++marker_tick >= 5) {
         marker_tick = 0;
         RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
         RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
+    }
+
+    /* Box marker publishing — every tick (100 ms).
+     * ADD when detected; DELETE once after BOX_TIMEOUT_MS without detection. */
+    {
+        static int64_t s_box_last_ms[BOX_COUNT];
+        static float   s_box_x[BOX_COUNT];
+        static float   s_box_y[BOX_COUNT];
+        static float   s_box_z[BOX_COUNT];
+        static bool    s_box_add_sent[BOX_COUNT];
+
+        p4_boxes_t boxes;
+        p4_link_get_boxes(&boxes);
+        int64_t t = now_ms();
+
+        /* Update last-seen from current P4 frame */
+        for (int j = 0; j < (int)boxes.count; j++) {
+            uint8_t bid = boxes.entries[j].id;
+            for (int bi = 0; bi < BOX_COUNT; bi++) {
+                if (BOX_IDS[bi] == bid) {
+                    s_box_last_ms[bi] = t;
+                    s_box_x[bi] = boxes.entries[j].x;
+                    s_box_y[bi] = boxes.entries[j].y;
+                    s_box_z[bi] = boxes.entries[j].z;
+                    break;
+                }
+            }
+        }
+
+        for (int bi = 0; bi < BOX_COUNT; bi++) {
+            bool seen = (s_box_last_ms[bi] > 0 &&
+                         (t - s_box_last_ms[bi]) < BOX_TIMEOUT_MS);
+            if (seen) {
+                box_marker_msgs[bi].action = visualization_msgs__msg__Marker__ADD;
+                box_marker_msgs[bi].pose.position.x = s_box_x[bi];
+                box_marker_msgs[bi].pose.position.y = s_box_y[bi];
+                box_marker_msgs[bi].pose.position.z = s_box_z[bi];
+                RCSOFTCHECK(rcl_publish(&box_publishers[bi], &box_marker_msgs[bi], NULL));
+                s_box_add_sent[bi] = true;
+            } else if (s_box_add_sent[bi]) {
+                box_marker_msgs[bi].action = visualization_msgs__msg__Marker__DELETE;
+                RCSOFTCHECK(rcl_publish(&box_publishers[bi], &box_marker_msgs[bi], NULL));
+                s_box_add_sent[bi] = false;
+            }
+        }
     }
 }
 
@@ -922,6 +1040,19 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_publisher_init_default(&publisher_battery, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int8), topic_battery));
 
+    /* Box publishers — TRANSIENT_LOCAL so late-joining subscribers get last pose */
+    {
+        rmw_qos_profile_t box_qos = rmw_qos_profile_default;
+        box_qos.durability  = RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL;
+        box_qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
+        box_qos.depth       = 1;
+        for (int bi = 0; bi < BOX_COUNT; bi++) {
+            RCCHECK(rclc_publisher_init(&box_publishers[bi], &node,
+                ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
+                box_topic_names[bi], &box_qos));
+        }
+    }
+
     /* ── Subscribers ─────────────────────────────────────────────────────── */
     RCCHECK(rclc_subscription_init_best_effort(&command_sub, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_gcs_command));
@@ -999,6 +1130,8 @@ static void micro_ros_task(void *arg)
     RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
     RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
     RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
+    for (int bi = 0; bi < BOX_COUNT; bi++)
+        RCCHECK(rcl_publisher_fini(&box_publishers[bi], &node));
     RCCHECK(rcl_subscription_fini(&command_sub, &node));
     RCCHECK(rcl_subscription_fini(&config_sub,  &node));
     RCCHECK(rcl_subscription_fini(&control_sub, &node));
@@ -1125,6 +1258,36 @@ void app_main(void)
     map_home_z = iz;
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
 
+    /* ── Box marker messages — one per capture-zone box ID ──────────────────── */
+    for (int bi = 0; bi < BOX_COUNT; bi++) {
+        snprintf(box_topic_names[bi], sizeof(box_topic_names[bi]),
+                 "/box_%u", BOX_IDS[bi]);
+        visualization_msgs__msg__Marker__init(&box_marker_msgs[bi]);
+        rosidl_runtime_c__String__assign(&box_marker_msgs[bi].header.frame_id, "map");
+        /* ns encodes team colour for Python swarming scripts */
+        const char *ns = (BOX_IDS[bi] <= 36) ? "blue" : "red";
+        rosidl_runtime_c__String__assign(&box_marker_msgs[bi].ns, ns);
+        box_marker_msgs[bi].id     = BOX_IDS[bi];
+        box_marker_msgs[bi].type   = visualization_msgs__msg__Marker__CUBE;
+        box_marker_msgs[bi].action = visualization_msgs__msg__Marker__ADD;
+        box_marker_msgs[bi].pose.orientation.w = 1.0f;
+        box_marker_msgs[bi].scale.x = 0.25f;
+        box_marker_msgs[bi].scale.y = 0.25f;
+        box_marker_msgs[bi].scale.z = 0.25f;
+        if (BOX_IDS[bi] <= 36) {
+            /* blue team */
+            box_marker_msgs[bi].color.r = 0.1f;
+            box_marker_msgs[bi].color.g = 0.3f;
+            box_marker_msgs[bi].color.b = 0.9f;
+        } else {
+            /* red team */
+            box_marker_msgs[bi].color.r = 0.9f;
+            box_marker_msgs[bi].color.g = 0.1f;
+            box_marker_msgs[bi].color.b = 0.1f;
+        }
+        box_marker_msgs[bi].color.a = 0.75f;
+    }
+
     uart_mavlink_init();
     xTaskCreate(mavlink_rx_task_fn, "mav_rx", 4096, NULL, 4, NULL);
 
@@ -1168,6 +1331,15 @@ void app_main(void)
                 mav_send_vision_estimate(pose.x, pose.y, pose.z);
             }
         }
+
+#ifdef TEST_ARUCO_APPROACH
+        if (pose.valid && pose.trigger_id == TEST_TRIGGER_ID &&
+                drone_state == DRONE_MISSION && !s_test_aruco_triggered) {
+            s_test_aruco_triggered = true;
+            xTaskCreate(aruco_approach_task_fn, "aruco_trig", 3072, NULL, 5, NULL);
+            ESP_LOGI(TAG, "[TEST] M%d detected — approach triggered", TEST_TRIGGER_ID);
+        }
+#endif
 
         /* MAVLink: heartbeat at 1 Hz, obstacle data at 20 Hz */
         if (++hb_tick >= 20) { hb_tick = 0; send_heartbeat_once(); }

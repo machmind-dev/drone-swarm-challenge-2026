@@ -563,55 +563,74 @@ class GcsButtonPanel(Plugin):
         return m
 
     def _publish_monuments(self):
+        # SDC2026 arena pole layout (confirmed 2026-05-20):
+        #   8 poles total; each pole carries TOP marker (z=4m) and BOTTOM marker (z=2m).
+        #   y=10 wall: x=5 (6/14), x=10 (7/15), x=15 (8/16)  — face -Y (mesh rot=0°)
+        #   y=0  wall: x=5 (4/12), x=10 (3/11), x=15 (2/10)  — face +Y (mesh rot=180°)
+        #   x=0  end:  y=5 (5/13)                             — face +X (mesh rot=90°)
+        #   x=20 end:  y=5 (1/9)                              — face -X (mesh rot=270°)
         arr = MarkerArray()
 
-        # Meshes — row y=0 (rotation 180°)
-        for mid, x in zip(range(1, 5), [4.0, 8.0, 12.0, 16.0]):
-            arr.markers.append(self._monument_mesh(mid, x, 0.0, 1.0, 0.0))
-        # Meshes — row y=10 (rotation 0°)
-        for mid, x in zip(range(5, 9), [4.0, 8.0, 12.0, 16.0]):
+        # Meshes — y=10 wall, face -Y (rotation 0°: qz=0, qw=1)
+        for mid, x in zip(range(1, 4), [5.0, 10.0, 15.0]):
             arr.markers.append(self._monument_mesh(mid, x, 10.0, 0.0, 1.0))
-        # Meshes — left side (rotation 90°)
-        arr.markers.append(self._monument_mesh(9,  0.0, 6.66,  0.70710678,  0.70710678))
-        arr.markers.append(self._monument_mesh(10, 0.0, 3.33,  0.70710678,  0.70710678))
-        # Meshes — right side (rotation 270°)
-        arr.markers.append(self._monument_mesh(11, 20.0, 6.66, -0.70710678, 0.70710678))
-        arr.markers.append(self._monument_mesh(12, 20.0, 3.33, -0.70710678, 0.70710678))
+        # Meshes — y=0 wall, face +Y (rotation 180°: qz=1, qw=0)
+        for mid, x in zip(range(4, 7), [5.0, 10.0, 15.0]):
+            arr.markers.append(self._monument_mesh(mid, x, 0.0, 1.0, 0.0))
+        # Mesh — x=0 end, face +X (rotation 90°)
+        arr.markers.append(self._monument_mesh(7, 0.0, 5.0,  0.70710678, 0.70710678))
+        # Mesh — x=20 end, face -X (rotation 270°)
+        arr.markers.append(self._monument_mesh(8, 20.0, 5.0, -0.70710678, 0.70710678))
+        # Delete stale mesh IDs from old 12-pole layout
+        for stale_id in [9, 10, 11, 12]:
+            m = Marker()
+            m.header.frame_id = "map"
+            m.ns = "monuments"
+            m.id = stale_id
+            m.action = Marker.DELETE
+            arr.markers.append(m)
 
         self.marker_array_pub.publish(arr)
 
         # Labels
         label_arr = MarkerArray()
-        # Bottom row (y=-0.9): pairs (top_id, bottom_id, x, top_text, bottom_text)
-        bottom_row = [
-            (101, 102, 4.0,  '12', '11'),
-            (103, 104, 8.0,  '10', '9'),
-            (105, 106, 12.0, '8',  '7'),
-            (107, 108, 16.0, '6',  '5'),
-        ]
-        for top_id, bot_id, x, top_txt, bot_txt in bottom_row:
-            label_arr.markers.append(self._monument_label("labels_top",    top_id, x, -0.9, 4.0, top_txt))
-            label_arr.markers.append(self._monument_label("labels_bottom", bot_id, x, -0.9, 2.0, bot_txt))
-        # Top row (y=10.9)
+        # y=10 wall (y=10.9): x=5/10/15, top/bottom marker IDs
         top_row = [
-            (109, 110, 4.0,  '18', '17'),
-            (111, 112, 8.0,  '20', '19'),
-            (113, 114, 12.0, '22', '21'),
-            (115, 116, 16.0, '24', '23'),
+            (109, 110,  5.0, '6',  '14'),
+            (111, 112, 10.0, '7',  '15'),
+            (113, 114, 15.0, '8',  '16'),
         ]
         for top_id, bot_id, x, top_txt, bot_txt in top_row:
             label_arr.markers.append(self._monument_label("labels_top",    top_id, x, 10.9, 4.0, top_txt))
             label_arr.markers.append(self._monument_label("labels_bottom", bot_id, x, 10.9, 2.0, bot_txt))
-        # Left side (x=-0.9)
-        label_arr.markers.append(self._monument_label("labels_top",    117, -0.9, 6.66, 4.0, '16'))
-        label_arr.markers.append(self._monument_label("labels_bottom", 118, -0.9, 6.66, 2.0, '15'))
-        label_arr.markers.append(self._monument_label("labels_top",    119, -0.9, 3.33, 4.0, '14'))
-        label_arr.markers.append(self._monument_label("labels_bottom", 120, -0.9, 3.33, 2.0, '13'))
-        # Right side (x=20.9)
-        label_arr.markers.append(self._monument_label("labels_top",    121, 20.9, 6.66, 4.0, '2'))
-        label_arr.markers.append(self._monument_label("labels_bottom", 122, 20.9, 6.66, 2.0, '1'))
-        label_arr.markers.append(self._monument_label("labels_top",    123, 20.9, 3.33, 4.0, '4'))
-        label_arr.markers.append(self._monument_label("labels_bottom", 124, 20.9, 3.33, 2.0, '3'))
+        # y=0 wall (y=-0.9): x=5/10/15, top/bottom marker IDs
+        bottom_row = [
+            (101, 102,  5.0, '4',  '12'),
+            (103, 104, 10.0, '3',  '11'),
+            (105, 106, 15.0, '2',  '10'),
+        ]
+        for top_id, bot_id, x, top_txt, bot_txt in bottom_row:
+            label_arr.markers.append(self._monument_label("labels_top",    top_id, x, -0.9, 4.0, top_txt))
+            label_arr.markers.append(self._monument_label("labels_bottom", bot_id, x, -0.9, 2.0, bot_txt))
+        # x=0 end pole (x=-0.9, y=5)
+        label_arr.markers.append(self._monument_label("labels_top",    117, -0.9, 5.0, 4.0, '5'))
+        label_arr.markers.append(self._monument_label("labels_bottom", 118, -0.9, 5.0, 2.0, '13'))
+        # x=20 end pole (x=20.9, y=5)
+        label_arr.markers.append(self._monument_label("labels_top",    119, 20.9, 5.0, 4.0, '1'))
+        label_arr.markers.append(self._monument_label("labels_bottom", 120, 20.9, 5.0, 2.0, '9'))
+        # Delete stale label IDs from old 12-pole layout
+        for stale_ns, stale_id in [
+            ("labels_top",    107), ("labels_bottom", 108),   # old y=0 x=16 pole
+            ("labels_top",    115), ("labels_bottom", 116),   # old y=10 x=16 pole
+            ("labels_top",    121), ("labels_bottom", 122),   # old x=20 y=6.66 pole
+            ("labels_top",    123), ("labels_bottom", 124),   # old x=20 y=3.33 pole
+        ]:
+            m = Marker()
+            m.header.frame_id = "map"
+            m.ns = stale_ns
+            m.id = stale_id
+            m.action = Marker.DELETE
+            label_arr.markers.append(m)
 
         self.marker_array_pub.publish(label_arr)
 

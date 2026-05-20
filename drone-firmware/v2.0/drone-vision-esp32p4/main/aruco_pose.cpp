@@ -76,19 +76,30 @@ static const char *TAG = "aruco_pose";
 
 /* ── Shared pose state — written by aruco task (CPU0), read by tof task (CPU1) */
 static portMUX_TYPE s_pose_mux  = portMUX_INITIALIZER_UNLOCKED;
-static volatile bool  s_pose_valid = false;
-static volatile float s_px, s_py, s_pz;
-static volatile float s_pqx, s_pqy, s_pqz, s_pqw;
+static volatile bool    s_pose_valid = false;
+static volatile float   s_px, s_py, s_pz;
+static volatile float   s_pqx, s_pqy, s_pqz, s_pqw;
+static volatile uint8_t s_trigger_id = 0xFF; /* TEST: 0xFF=none, else first detected marker ID */
+static p4_boxes_t       s_boxes = {};  /* protected by s_pose_mux */
 
 extern "C" bool aruco_pose_get_latest(float *x, float *y, float *z,
-                                       float *qx, float *qy, float *qz, float *qw)
+                                       float *qx, float *qy, float *qz, float *qw,
+                                       uint8_t *trigger_id)
 {
     taskENTER_CRITICAL(&s_pose_mux);
     bool v = s_pose_valid;
     *x = s_px; *y = s_py; *z = s_pz;
     *qx = s_pqx; *qy = s_pqy; *qz = s_pqz; *qw = s_pqw;
+    *trigger_id = s_trigger_id;
     taskEXIT_CRITICAL(&s_pose_mux);
     return v;
+}
+
+extern "C" void aruco_boxes_get_latest(p4_boxes_t *out)
+{
+    taskENTER_CRITICAL(&s_pose_mux);
+    *out = s_boxes;
+    taskEXIT_CRITICAL(&s_pose_mux);
 }
 
 /* ── __register_exitproc stub ────────────────────────────────────────────────
@@ -108,34 +119,38 @@ extern "C" int __register_exitproc(int type, void (*fn)(void), void *arg, void *
 }
 
 /* ── SDC26 arena marker map ─────────────────────────────────────────────────
- * Source: aruco_params.yaml, regulations Figure 3, Section 2.1.
  * Arena: x=[0,20] y=[0,10] z=height above floor (all in metres).
- * yaw = direction the marker face points INTO the arena.
+ * Pole layout (confirmed 2026-05-20):
+ *   8 poles, each with TOP marker (z=4 m) and BOTTOM marker (z=2 m).
+ *   yaw = direction the marker face points INTO the arena.
+ *
+ *  y=10  [6/14 x=5]  [7/15 x=10]  [8/16 x=15]   face -Y  yaw=0°
+ *  x=0   [5/13 y=5]                              face +X  yaw=90°
+ *  x=20  [1/9  y=5]                              face -X  yaw=270°
+ *  y=0   [4/12 x=5]  [3/11 x=10]  [2/10 x=15]   face +Y  yaw=180°
  * ───────────────────────────────────────────────────────────────────────── */
 typedef struct { int id; float x, y, z, yaw_deg; } world_marker_t;
 
 static const world_marker_t MARKER_MAP[] = {
-    {  0, 10.0f,  5.0f, 2.0f,   0.0f },  /* back wall centre, world origin */
+    /* x=20 end pole — faces -X (yaw=270°) */
+    {  1, 20.0f,  5.0f, 4.0f, 270.0f }, {  9, 20.0f,  5.0f, 2.0f, 270.0f },
 
-    /* y=0 wall (faces +Y, yaw=180) */
-    { 12,  4.0f,  0.0f, 4.0f, 180.0f }, { 11,  4.0f,  0.0f, 2.0f, 180.0f },
-    { 10,  8.0f,  0.0f, 4.0f, 180.0f }, {  9,  8.0f,  0.0f, 2.0f, 180.0f },
-    {  8, 12.0f,  0.0f, 4.0f, 180.0f }, {  7, 12.0f,  0.0f, 2.0f, 180.0f },
-    {  6, 16.0f,  0.0f, 4.0f, 180.0f }, {  5, 16.0f,  0.0f, 2.0f, 180.0f },
+    /* x=0 end pole — faces +X (yaw=90°) */
+    {  5,  0.0f,  5.0f, 4.0f,  90.0f }, { 13,  0.0f,  5.0f, 2.0f,  90.0f },
 
-    /* y=10 wall (faces -Y, yaw=0) */
-    { 18,  4.0f, 10.0f, 4.0f,   0.0f }, { 17,  4.0f, 10.0f, 2.0f,   0.0f },
-    { 20,  8.0f, 10.0f, 4.0f,   0.0f }, { 19,  8.0f, 10.0f, 2.0f,   0.0f },
-    { 22, 12.0f, 10.0f, 4.0f,   0.0f }, { 21, 12.0f, 10.0f, 2.0f,   0.0f },
-    { 24, 16.0f, 10.0f, 4.0f,   0.0f }, { 23, 16.0f, 10.0f, 2.0f,   0.0f },
+    /* y=10 wall poles — face -Y (yaw=0°), x=5/10/15 */
+    {  6,  5.0f, 10.0f, 4.0f,   0.0f }, { 14,  5.0f, 10.0f, 2.0f,   0.0f },
+    {  7, 10.0f, 10.0f, 4.0f,   0.0f }, { 15, 10.0f, 10.0f, 2.0f,   0.0f },
+    {  8, 15.0f, 10.0f, 4.0f,   0.0f }, { 16, 15.0f, 10.0f, 2.0f,   0.0f },
 
-    /* x=0 wall (faces +X, yaw=90) */
-    { 16,  0.0f,  6.66f, 4.0f,  90.0f }, { 15,  0.0f,  6.66f, 2.0f,  90.0f },
-    { 14,  0.0f,  3.33f, 4.0f,  90.0f }, { 13,  0.0f,  3.33f, 2.0f,  90.0f },
+    /* y=0 wall poles — face +Y (yaw=180°), x=5/10/15 */
+    {  4,  5.0f,  0.0f, 4.0f, 180.0f }, { 12,  5.0f,  0.0f, 2.0f, 180.0f },
+    {  3, 10.0f,  0.0f, 4.0f, 180.0f }, { 11, 10.0f,  0.0f, 2.0f, 180.0f },
+    {  2, 15.0f,  0.0f, 4.0f, 180.0f }, { 10, 15.0f,  0.0f, 2.0f, 180.0f },
 
-    /* x=20 wall (faces -X, yaw=270) */
-    {  2, 20.0f,  6.66f, 4.0f, 270.0f }, {  1, 20.0f,  6.66f, 2.0f, 270.0f },
-    {  4, 20.0f,  3.33f, 4.0f, 270.0f }, {  3, 20.0f,  3.33f, 2.0f, 270.0f },
+    /* TEST — place physical marker 22 at arena centre (10,5) z=2 m.
+     * Remove after approach test. */
+    { 22, 10.0f,  5.0f, 2.0f,   0.0f },
 };
 #define NUM_MAP_MARKERS  (int)(sizeof(MARKER_MAP) / sizeof(MARKER_MAP[0]))
 
@@ -851,6 +866,8 @@ void aruco_pose_start(void)
             float  qx_out = 0, qy_out = 0, qz_out = 0, qw_out = 1;
             int    pose_n = 0;
             float  best_dist = 1e9f;
+            cv::Mat best_R_wc;   /* world-from-camera rotation for closest map marker */
+            float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
 
             for (int i = 0; i < (int)ids.size(); i++) {
                 std::vector<cv::Point2f> &c = corners[i];
@@ -882,13 +899,48 @@ void aruco_pose_start(void)
                     pz_sum += p_world.at<double>(2);
                     if (dist < best_dist) {
                         best_dist = dist;
-                        rot_to_quat(R_lw * R_l2c.t(),
-                                    &qx_out, &qy_out, &qz_out, &qw_out);
+                        best_R_wc  = R_lw * R_l2c.t();
+                        best_pw_x  = (float)p_world.at<double>(0);
+                        best_pw_y  = (float)p_world.at<double>(1);
+                        best_pw_z  = (float)p_world.at<double>(2);
+                        rot_to_quat(best_R_wc, &qx_out, &qy_out, &qz_out, &qw_out);
                     }
                     pose_n++;
                 }
             }
             if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
+
+            /* TEST: scan ids for trigger marker 22; report 0xFF otherwise */
+            uint8_t new_tid = 0xFF;
+            for (int i = 0; i < (int)ids.size(); i++) {
+                if (ids[i] == 22) { new_tid = 22; break; }
+            }
+
+            /* Compute world positions for detected box markers (31-36, 41-46).
+             * Uses world-from-camera transform from the closest arena map marker. */
+            p4_boxes_t new_boxes = {};
+            if (pose_n > 0 && !best_R_wc.empty()) {
+                for (int i = 0; i < (int)ids.size(); i++) {
+                    if (new_boxes.count >= P4_LINK_BOX_MAX) break;
+                    int bid = ids[i];
+                    if ((bid >= 31 && bid <= 36) || (bid >= 41 && bid <= 46)) {
+                        cv::Mat rvec_b, tvec_b;
+                        cv::solvePnP(single_obj, corners[i], K, D,
+                                     rvec_b, tvec_b, false, cv::SOLVEPNP_IPPE_SQUARE);
+                        /* box_world = drone_world + R_world_cam * tvec_box */
+                        cv::Mat p_box = (cv::Mat_<double>(3,1) <<
+                                         (double)best_pw_x,
+                                         (double)best_pw_y,
+                                         (double)best_pw_z)
+                                        + best_R_wc * tvec_b;
+                        p4_box_entry_t &e = new_boxes.entries[new_boxes.count++];
+                        e.id = (uint8_t)bid;
+                        e.x  = (float)p_box.at<double>(0);
+                        e.y  = (float)p_box.at<double>(1);
+                        e.z  = (float)p_box.at<double>(2);
+                    }
+                }
+            }
 
             if (pose_n > 0) {
                 printf("%s POSE:%d:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f\n",
@@ -901,11 +953,15 @@ void aruco_pose_start(void)
                 s_py = (float)(py_sum / pose_n);
                 s_pz = (float)(pz_sum / pose_n);
                 s_pqx = qx_out; s_pqy = qy_out; s_pqz = qz_out; s_pqw = qw_out;
+                s_trigger_id = new_tid;
+                s_boxes = new_boxes;
                 taskEXIT_CRITICAL(&s_pose_mux);
             } else {
                 printf("%s\n", mbuf);
                 taskENTER_CRITICAL(&s_pose_mux);
                 s_pose_valid = false;
+                s_trigger_id = new_tid;
+                s_boxes.count = 0;
                 taskEXIT_CRITICAL(&s_pose_mux);
             }
             fflush(stdout);
@@ -913,6 +969,8 @@ void aruco_pose_start(void)
             /* No markers detected — clear pose so tof_task stops sending valid pose */
             taskENTER_CRITICAL(&s_pose_mux);
             s_pose_valid = false;
+            s_trigger_id = 0xFF;
+            s_boxes.count = 0;
             taskEXIT_CRITICAL(&s_pose_mux);
         }
 

@@ -1,8 +1,8 @@
-/* p4_link_tx.c — P4→S3 binary frame transmitter.
+/* p4_link_tx.c — P4->S3 binary frame transmitter.
  *
  * Sends P4_LINK_TYPE_COMBINED frames at the ToF poll rate (20 Hz).
- * Frame: SOF(1) + LEN(1) + TYPE(1) + p4_combined_t(47) + CRC8(1) = 51 bytes.
- * At 115200 baud: 51 × 10 bits / 115200 = 4.4 ms  →  well within the 50 ms budget.
+ * Frame: SOF(1) + LEN(1) + TYPE(1) + p4_combined_t(127) + CRC8(1) = 131 bytes.
+ * At 115200 baud: 131 x 10 bits / 115200 = 11.4 ms  ->  well within the 50 ms budget.
  */
 
 #include "p4_link_tx.h"
@@ -40,7 +40,9 @@ void p4_link_tx_init(void)
 void p4_link_send_combined(const uint16_t *dist_mm, const uint8_t *status,
                             bool pose_valid,
                             float x, float y, float z,
-                            float qx, float qy, float qz, float qw)
+                            float qx, float qy, float qz, float qw,
+                            uint8_t trigger_id,
+                            const p4_boxes_t *boxes)
 {
     p4_combined_t payload;
 
@@ -48,10 +50,17 @@ void p4_link_send_combined(const uint16_t *dist_mm, const uint8_t *status,
         payload.tof.dist_mm[i] = dist_mm[i];
         payload.tof.status[i]  = status[i];
     }
-    payload.pose.valid = pose_valid ? 1 : 0;
+    payload.pose.valid      = pose_valid ? 1 : 0;
+    payload.pose.trigger_id = trigger_id;
     payload.pose.x  = x;  payload.pose.y  = y;  payload.pose.z  = z;
     payload.pose.qx = qx; payload.pose.qy = qy; payload.pose.qz = qz;
     payload.pose.qw = qw;
+
+    if (boxes) {
+        payload.boxes = *boxes;
+    } else {
+        memset(&payload.boxes, 0, sizeof(payload.boxes));
+    }
 
     /* Build frame: SOF | LEN | TYPE | PAYLOAD | CRC */
     uint8_t frame[P4_LINK_FRAME_LEN];

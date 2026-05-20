@@ -37,6 +37,7 @@ static const char *TAG = "p4_rx";
 static portMUX_TYPE   s_mux       = portMUX_INITIALIZER_UNLOCKED;
 static p4_tof_data_t  s_tof       = {0};
 static p4_pose_data_t s_pose      = {0};
+static p4_boxes_t     s_boxes     = {0};
 static bool           s_received  = false;
 static int64_t        s_last_rx_us = 0;
 
@@ -104,10 +105,12 @@ static void rx_task(void *arg)
                         s_tof.dist_mm[i] = c->tof.dist_mm[i];
                         s_tof.status[i]  = c->tof.status[i];
                     }
-                    s_pose.valid = (c->pose.valid != 0);
+                    s_pose.valid      = (c->pose.valid != 0);
+                    s_pose.trigger_id = c->pose.trigger_id;
                     s_pose.x  = c->pose.x;  s_pose.y  = c->pose.y;  s_pose.z  = c->pose.z;
                     s_pose.qx = c->pose.qx; s_pose.qy = c->pose.qy;
                     s_pose.qz = c->pose.qz; s_pose.qw = c->pose.qw;
+                    s_boxes      = c->boxes;
                     s_received   = true;
                     s_last_rx_us = esp_timer_get_time();
                     portEXIT_CRITICAL(&s_mux);
@@ -167,6 +170,13 @@ bool p4_link_get_pose(p4_pose_data_t *out)
     if (ok) *out = s_pose;
     portEXIT_CRITICAL(&s_mux);
     return ok;
+}
+
+void p4_link_get_boxes(p4_boxes_t *out)
+{
+    portENTER_CRITICAL(&s_mux);
+    *out = s_boxes;
+    portEXIT_CRITICAL(&s_mux);
 }
 
 int64_t p4_link_age_ms(void)
