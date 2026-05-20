@@ -964,7 +964,7 @@ void aruco_pose_start(void)
                 taskENTER_CRITICAL(&s_pose_mux);
                 s_pose_valid = false;
                 s_trigger_id = new_tid;
-                s_boxes.count = 0;
+                s_boxes = new_boxes;   /* still commit box positions even without arena ref */
                 taskEXIT_CRITICAL(&s_pose_mux);
             }
             fflush(stdout);
