@@ -945,6 +945,9 @@ void aruco_pose_start(void)
                 }
             }
 
+            if (new_boxes.count > 0)
+                printf("BOXES:%d id=%d\n", (int)new_boxes.count, (int)new_boxes.entries[0].id);
+
             if (pose_n > 0) {
                 printf("%s POSE:%d:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f:%.3f\n",
                        mbuf, pose_n,

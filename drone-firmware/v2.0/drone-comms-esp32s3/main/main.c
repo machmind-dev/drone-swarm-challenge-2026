@@ -83,7 +83,6 @@
 #include <std_msgs/msg/int8.h>
 #include <geometry_msgs/msg/pose_stamped.h>
 #include <visualization_msgs/msg/marker.h>
-#include <visualization_msgs/msg/marker_array.h>
 
 #include "uros_network_interfaces.h"
 #include "boards.h"
@@ -480,7 +479,8 @@ static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 static rcl_publisher_t    publisher_battery;
 
-/* ── Box marker publisher (single MarkerArray on /box_markers) ──────────────── */
+/* ── Box markers — published on existing publisher_marker (/visualization_marker) ── */
+/* IDs 31-36, 41-46 don't conflict with drone disc (100) or text label (101). */
 #define BOX_COUNT      12
 #define BOX_TIMEOUT_MS 3000
 
@@ -488,9 +488,7 @@ static const uint8_t BOX_IDS[BOX_COUNT] = {
     31, 32, 33, 34, 35, 36,   /* blue team */
     41, 42, 43, 44, 45, 46,   /* red team  */
 };
-static rcl_publisher_t                       publisher_box_markers;
-static visualization_msgs__msg__MarkerArray  box_marker_array_msg;
-static visualization_msgs__msg__Marker       box_markers_storage[BOX_COUNT];
+static visualization_msgs__msg__Marker box_markers_storage[BOX_COUNT];
 
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
@@ -915,7 +913,7 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
     }
 
-    /* Box marker publishing — every tick (100 ms) as a single MarkerArray.
+    /* Box marker publishing — every tick (100 ms).
      * ADD when detected within BOX_TIMEOUT_MS; DELETE once after timeout. */
     {
         static int64_t s_box_last_ms[BOX_COUNT];
@@ -927,6 +925,9 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         p4_boxes_t boxes;
         p4_link_get_boxes(&boxes);
         int64_t t = now_ms();
+
+        if (boxes.count > 0)
+            ESP_LOGI(TAG, "boxes rx: count=%d id[0]=%d", boxes.count, boxes.entries[0].id);
 
         for (int j = 0; j < (int)boxes.count; j++) {
             uint8_t bid = boxes.entries[j].id;
@@ -941,10 +942,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
             }
         }
 
-        /* Build the full MarkerArray (all 12 entries, storage[bi] == bi).
-         * DELETE on an absent marker is a RViz no-op. */
-        box_marker_array_msg.markers.size = BOX_COUNT;
-        bool any_active = false;
+        /* Publish each active box as an individual Marker on /visualization_marker.
+         * Reuses publisher_marker — box IDs 31-46 don't conflict with disc(100)/text(101). */
         for (int bi = 0; bi < BOX_COUNT; bi++) {
             bool seen = (s_box_last_ms[bi] > 0 &&
                          (t - s_box_last_ms[bi]) < BOX_TIMEOUT_MS);
@@ -953,15 +952,14 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                 box_markers_storage[bi].pose.position.x = s_box_x[bi];
                 box_markers_storage[bi].pose.position.y = s_box_y[bi];
                 box_markers_storage[bi].pose.position.z = s_box_z[bi];
+                RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
                 s_box_add_sent[bi] = true;
-                any_active = true;
-            } else {
+            } else if (s_box_add_sent[bi]) {
                 box_markers_storage[bi].action = visualization_msgs__msg__Marker__DELETE;
-                if (s_box_add_sent[bi]) { s_box_add_sent[bi] = false; any_active = true; }
+                RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
+                s_box_add_sent[bi] = false;
             }
         }
-        if (any_active)
-            RCSOFTCHECK(rcl_publish(&publisher_box_markers, &box_marker_array_msg, NULL));
     }
 }
 
@@ -1045,11 +1043,7 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_publisher_init_default(&publisher_battery, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int8), topic_battery));
 
-    /* Single MarkerArray publisher for all box detections — stays within
-     * the RMW_UXRCE_MAX_PUBLISHERS=5 limit compiled into libmicroros.a */
-    RCCHECK(rclc_publisher_init_default(&publisher_box_markers, &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, MarkerArray),
-        "/box_markers"));
+    /* Box markers reuse publisher_marker — no extra publisher slot needed */
 
     /* ── Subscribers ─────────────────────────────────────────────────────── */
     RCCHECK(rclc_subscription_init_best_effort(&command_sub, &node,
@@ -1128,7 +1122,6 @@ static void micro_ros_task(void *arg)
     RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
     RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
     RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
-    RCCHECK(rcl_publisher_fini(&publisher_box_markers, &node));
     RCCHECK(rcl_subscription_fini(&command_sub, &node));
     RCCHECK(rcl_subscription_fini(&config_sub,  &node));
     RCCHECK(rcl_subscription_fini(&control_sub, &node));
@@ -1255,11 +1248,7 @@ void app_main(void)
     map_home_z = iz;
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
 
-    /* ── Box MarkerArray — static storage, bi index == storage index ───────── */
-    memset(&box_marker_array_msg, 0, sizeof(box_marker_array_msg));
-    box_marker_array_msg.markers.data     = box_markers_storage;
-    box_marker_array_msg.markers.capacity = BOX_COUNT;
-    box_marker_array_msg.markers.size     = BOX_COUNT;
+    /* ── Box marker messages ────────────────────────────────────────────────── */
     for (int bi = 0; bi < BOX_COUNT; bi++) {
         visualization_msgs__msg__Marker__init(&box_markers_storage[bi]);
         rosidl_runtime_c__String__assign(&box_markers_storage[bi].header.frame_id, "map");
@@ -1267,7 +1256,7 @@ void app_main(void)
         rosidl_runtime_c__String__assign(&box_markers_storage[bi].ns, ns);
         box_markers_storage[bi].id     = BOX_IDS[bi];
         box_markers_storage[bi].type   = visualization_msgs__msg__Marker__CUBE;
-        box_markers_storage[bi].action = visualization_msgs__msg__Marker__DELETE;
+        box_markers_storage[bi].action = visualization_msgs__msg__Marker__ADD;
         box_markers_storage[bi].pose.orientation.w = 1.0f;
         box_markers_storage[bi].scale.x = 0.25f;
         box_markers_storage[bi].scale.y = 0.25f;
