@@ -497,6 +497,14 @@ void aruco_pose_start(void)
         {-s,  s, 0.0f}, { s,  s, 0.0f},
         { s, -s, 0.0f}, {-s, -s, 0.0f},
     };
+    /* Box markers are 25 cm × 25 cm */
+    constexpr float BOX_MARKER_HALF = 0.125f;
+    std::vector<cv::Point3f> box_obj = {
+        {-BOX_MARKER_HALF,  BOX_MARKER_HALF, 0.0f},
+        { BOX_MARKER_HALF,  BOX_MARKER_HALF, 0.0f},
+        { BOX_MARKER_HALF, -BOX_MARKER_HALF, 0.0f},
+        {-BOX_MARKER_HALF, -BOX_MARKER_HALF, 0.0f},
+    };
 
     /* ── ArUco detector ──────────────────────────────────────────────────── */
     auto dict = cv::aruco::getPredefinedDictionary(
@@ -928,7 +936,7 @@ void aruco_pose_start(void)
                     int bid = ids[i];
                     if ((bid >= 31 && bid <= 36) || (bid >= 41 && bid <= 46)) {
                         cv::Mat rvec_b, tvec_b;
-                        cv::solvePnP(single_obj, corners[i], K, D,
+                        cv::solvePnP(box_obj, corners[i], K, D,
                                      rvec_b, tvec_b, false, cv::SOLVEPNP_IPPE_SQUARE);
                         /* box_world = drone_world + R_world_cam * tvec_box */
                         cv::Mat p_box = (cv::Mat_<double>(3,1) <<
@@ -940,7 +948,7 @@ void aruco_pose_start(void)
                         e.id = (uint8_t)bid;
                         e.x  = (float)p_box.at<double>(0);
                         e.y  = (float)p_box.at<double>(1);
-                        e.z  = (float)p_box.at<double>(2);
+                        e.z  = 0.0f;   /* boxes are on the ground plane */
                     }
                 }
             }
