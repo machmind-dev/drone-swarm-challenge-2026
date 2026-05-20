@@ -91,7 +91,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          3
+#define DRONE_ID          1
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -1040,17 +1040,12 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_publisher_init_default(&publisher_battery, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int8), topic_battery));
 
-    /* Box publishers — TRANSIENT_LOCAL so late-joining subscribers get last pose */
-    {
-        rmw_qos_profile_t box_qos = rmw_qos_profile_default;
-        box_qos.durability  = RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL;
-        box_qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
-        box_qos.depth       = 1;
-        for (int bi = 0; bi < BOX_COUNT; bi++) {
-            RCCHECK(rclc_publisher_init(&box_publishers[bi], &node,
-                ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
-                box_topic_names[bi], &box_qos));
-        }
+    /* Box publishers — RELIABLE+VOLATILE (micro-XRCE-DDS does not support
+     * TRANSIENT_LOCAL; late joiners pick up state within the next 100ms tick) */
+    for (int bi = 0; bi < BOX_COUNT; bi++) {
+        RCCHECK(rclc_publisher_init_default(&box_publishers[bi], &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
+            box_topic_names[bi]));
     }
 
     /* ── Subscribers ─────────────────────────────────────────────────────── */
