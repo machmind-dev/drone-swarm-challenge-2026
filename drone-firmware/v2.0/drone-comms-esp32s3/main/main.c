@@ -1323,7 +1323,8 @@ void app_main(void)
 
 #ifdef TEST_ARUCO_APPROACH
         if (pose.valid && pose.trigger_id == TEST_TRIGGER_ID &&
-                drone_state == DRONE_MISSION && !s_test_aruco_triggered) {
+                (drone_state == DRONE_MISSION || drone_state == DRONE_ARMED) &&
+                !s_test_aruco_triggered) {
             s_test_aruco_triggered = true;
             xTaskCreate(aruco_approach_task_fn, "aruco_trig", 3072, NULL, 5, NULL);
             ESP_LOGI(TAG, "[TEST] M%d detected — approach triggered", TEST_TRIGGER_ID);
