@@ -83,6 +83,7 @@
 #include <std_msgs/msg/int8.h>
 #include <geometry_msgs/msg/pose_stamped.h>
 #include <visualization_msgs/msg/marker.h>
+#include <visualization_msgs/msg/marker_array.h>
 
 #include "uros_network_interfaces.h"
 #include "boards.h"
@@ -479,7 +480,7 @@ static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 static rcl_publisher_t    publisher_battery;
 
-/* ── Box marker publishers (IDs 31-36 = blue, 41-46 = red) ─────────────────── */
+/* ── Box marker publisher (single MarkerArray on /box_markers) ──────────────── */
 #define BOX_COUNT      12
 #define BOX_TIMEOUT_MS 3000
 
@@ -487,9 +488,9 @@ static const uint8_t BOX_IDS[BOX_COUNT] = {
     31, 32, 33, 34, 35, 36,   /* blue team */
     41, 42, 43, 44, 45, 46,   /* red team  */
 };
-static rcl_publisher_t                  box_publishers[BOX_COUNT];
-static visualization_msgs__msg__Marker  box_marker_msgs[BOX_COUNT];
-static char                             box_topic_names[BOX_COUNT][12];
+static rcl_publisher_t                       publisher_box_markers;
+static visualization_msgs__msg__MarkerArray  box_marker_array_msg;
+static visualization_msgs__msg__Marker       box_markers_storage[BOX_COUNT];
 
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
@@ -914,8 +915,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
     }
 
-    /* Box marker publishing — every tick (100 ms).
-     * ADD when detected; DELETE once after BOX_TIMEOUT_MS without detection. */
+    /* Box marker publishing — every tick (100 ms) as a single MarkerArray.
+     * ADD when detected within BOX_TIMEOUT_MS; DELETE once after timeout. */
     {
         static int64_t s_box_last_ms[BOX_COUNT];
         static float   s_box_x[BOX_COUNT];
@@ -927,7 +928,6 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         p4_link_get_boxes(&boxes);
         int64_t t = now_ms();
 
-        /* Update last-seen from current P4 frame */
         for (int j = 0; j < (int)boxes.count; j++) {
             uint8_t bid = boxes.entries[j].id;
             for (int bi = 0; bi < BOX_COUNT; bi++) {
@@ -941,22 +941,27 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
             }
         }
 
+        /* Build the full MarkerArray (all 12 entries, storage[bi] == bi).
+         * DELETE on an absent marker is a RViz no-op. */
+        box_marker_array_msg.markers.size = BOX_COUNT;
+        bool any_active = false;
         for (int bi = 0; bi < BOX_COUNT; bi++) {
             bool seen = (s_box_last_ms[bi] > 0 &&
                          (t - s_box_last_ms[bi]) < BOX_TIMEOUT_MS);
             if (seen) {
-                box_marker_msgs[bi].action = visualization_msgs__msg__Marker__ADD;
-                box_marker_msgs[bi].pose.position.x = s_box_x[bi];
-                box_marker_msgs[bi].pose.position.y = s_box_y[bi];
-                box_marker_msgs[bi].pose.position.z = s_box_z[bi];
-                RCSOFTCHECK(rcl_publish(&box_publishers[bi], &box_marker_msgs[bi], NULL));
+                box_markers_storage[bi].action = visualization_msgs__msg__Marker__ADD;
+                box_markers_storage[bi].pose.position.x = s_box_x[bi];
+                box_markers_storage[bi].pose.position.y = s_box_y[bi];
+                box_markers_storage[bi].pose.position.z = s_box_z[bi];
                 s_box_add_sent[bi] = true;
-            } else if (s_box_add_sent[bi]) {
-                box_marker_msgs[bi].action = visualization_msgs__msg__Marker__DELETE;
-                RCSOFTCHECK(rcl_publish(&box_publishers[bi], &box_marker_msgs[bi], NULL));
-                s_box_add_sent[bi] = false;
+                any_active = true;
+            } else {
+                box_markers_storage[bi].action = visualization_msgs__msg__Marker__DELETE;
+                if (s_box_add_sent[bi]) { s_box_add_sent[bi] = false; any_active = true; }
             }
         }
+        if (any_active)
+            RCSOFTCHECK(rcl_publish(&publisher_box_markers, &box_marker_array_msg, NULL));
     }
 }
 
@@ -1040,13 +1045,11 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_publisher_init_default(&publisher_battery, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int8), topic_battery));
 
-    /* Box publishers — RELIABLE+VOLATILE (micro-XRCE-DDS does not support
-     * TRANSIENT_LOCAL; late joiners pick up state within the next 100ms tick) */
-    for (int bi = 0; bi < BOX_COUNT; bi++) {
-        RCCHECK(rclc_publisher_init_default(&box_publishers[bi], &node,
-            ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
-            box_topic_names[bi]));
-    }
+    /* Single MarkerArray publisher for all box detections — stays within
+     * the RMW_UXRCE_MAX_PUBLISHERS=5 limit compiled into libmicroros.a */
+    RCCHECK(rclc_publisher_init_default(&publisher_box_markers, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, MarkerArray),
+        "/box_markers"));
 
     /* ── Subscribers ─────────────────────────────────────────────────────── */
     RCCHECK(rclc_subscription_init_best_effort(&command_sub, &node,
@@ -1125,8 +1128,7 @@ static void micro_ros_task(void *arg)
     RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
     RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
     RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
-    for (int bi = 0; bi < BOX_COUNT; bi++)
-        RCCHECK(rcl_publisher_fini(&box_publishers[bi], &node));
+    RCCHECK(rcl_publisher_fini(&publisher_box_markers, &node));
     RCCHECK(rcl_subscription_fini(&command_sub, &node));
     RCCHECK(rcl_subscription_fini(&config_sub,  &node));
     RCCHECK(rcl_subscription_fini(&control_sub, &node));
@@ -1253,34 +1255,33 @@ void app_main(void)
     map_home_z = iz;
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
 
-    /* ── Box marker messages — one per capture-zone box ID ──────────────────── */
+    /* ── Box MarkerArray — static storage, bi index == storage index ───────── */
+    memset(&box_marker_array_msg, 0, sizeof(box_marker_array_msg));
+    box_marker_array_msg.markers.data     = box_markers_storage;
+    box_marker_array_msg.markers.capacity = BOX_COUNT;
+    box_marker_array_msg.markers.size     = BOX_COUNT;
     for (int bi = 0; bi < BOX_COUNT; bi++) {
-        snprintf(box_topic_names[bi], sizeof(box_topic_names[bi]),
-                 "/box_%u", BOX_IDS[bi]);
-        visualization_msgs__msg__Marker__init(&box_marker_msgs[bi]);
-        rosidl_runtime_c__String__assign(&box_marker_msgs[bi].header.frame_id, "map");
-        /* ns encodes team colour for Python swarming scripts */
+        visualization_msgs__msg__Marker__init(&box_markers_storage[bi]);
+        rosidl_runtime_c__String__assign(&box_markers_storage[bi].header.frame_id, "map");
         const char *ns = (BOX_IDS[bi] <= 36) ? "blue" : "red";
-        rosidl_runtime_c__String__assign(&box_marker_msgs[bi].ns, ns);
-        box_marker_msgs[bi].id     = BOX_IDS[bi];
-        box_marker_msgs[bi].type   = visualization_msgs__msg__Marker__CUBE;
-        box_marker_msgs[bi].action = visualization_msgs__msg__Marker__ADD;
-        box_marker_msgs[bi].pose.orientation.w = 1.0f;
-        box_marker_msgs[bi].scale.x = 0.25f;
-        box_marker_msgs[bi].scale.y = 0.25f;
-        box_marker_msgs[bi].scale.z = 0.25f;
+        rosidl_runtime_c__String__assign(&box_markers_storage[bi].ns, ns);
+        box_markers_storage[bi].id     = BOX_IDS[bi];
+        box_markers_storage[bi].type   = visualization_msgs__msg__Marker__CUBE;
+        box_markers_storage[bi].action = visualization_msgs__msg__Marker__DELETE;
+        box_markers_storage[bi].pose.orientation.w = 1.0f;
+        box_markers_storage[bi].scale.x = 0.25f;
+        box_markers_storage[bi].scale.y = 0.25f;
+        box_markers_storage[bi].scale.z = 0.25f;
         if (BOX_IDS[bi] <= 36) {
-            /* blue team */
-            box_marker_msgs[bi].color.r = 0.1f;
-            box_marker_msgs[bi].color.g = 0.3f;
-            box_marker_msgs[bi].color.b = 0.9f;
+            box_markers_storage[bi].color.r = 0.1f;
+            box_markers_storage[bi].color.g = 0.3f;
+            box_markers_storage[bi].color.b = 0.9f;
         } else {
-            /* red team */
-            box_marker_msgs[bi].color.r = 0.9f;
-            box_marker_msgs[bi].color.g = 0.1f;
-            box_marker_msgs[bi].color.b = 0.1f;
+            box_markers_storage[bi].color.r = 0.9f;
+            box_markers_storage[bi].color.g = 0.1f;
+            box_markers_storage[bi].color.b = 0.1f;
         }
-        box_marker_msgs[bi].color.a = 0.75f;
+        box_markers_storage[bi].color.a = 0.75f;
     }
 
     uart_mavlink_init();
