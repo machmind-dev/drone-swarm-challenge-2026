@@ -943,7 +943,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         }
 
         /* Publish each active box as an individual Marker on /visualization_marker.
-         * Reuses publisher_marker — box IDs 31-46 don't conflict with disc(100)/text(101). */
+         * Boxes are fixed arena objects — once ADD is sent, never DELETE.
+         * Re-publish ADD while actively seen to refine world position. */
         for (int bi = 0; bi < BOX_COUNT; bi++) {
             bool seen = (s_box_last_ms[bi] > 0 &&
                          (t - s_box_last_ms[bi]) < BOX_TIMEOUT_MS);
@@ -954,11 +955,8 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                 box_markers_storage[bi].pose.position.z = s_box_z[bi];
                 RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
                 s_box_add_sent[bi] = true;
-            } else if (s_box_add_sent[bi]) {
-                box_markers_storage[bi].action = visualization_msgs__msg__Marker__DELETE;
-                RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
-                s_box_add_sent[bi] = false;
             }
+            /* No DELETE — fixed boxes persist in RViz once detected */
         }
     }
 }
