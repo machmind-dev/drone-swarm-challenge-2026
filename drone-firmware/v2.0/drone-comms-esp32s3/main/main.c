@@ -956,7 +956,7 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                 box_markers_storage[bi].action = visualization_msgs__msg__Marker__ADD;
                 box_markers_storage[bi].pose.position.x = s_box_x[bi];
                 box_markers_storage[bi].pose.position.y = s_box_y[bi];
-                box_markers_storage[bi].pose.position.z = s_box_z[bi];
+                box_markers_storage[bi].pose.position.z = s_box_z[bi] + 0.5f; /* centre at half-height */
                 RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
                 s_box_add_sent[bi] = true;
             } else if (do_refresh && s_box_add_sent[bi]) {
@@ -1262,9 +1262,9 @@ void app_main(void)
         box_markers_storage[bi].type   = visualization_msgs__msg__Marker__CUBE;
         box_markers_storage[bi].action = visualization_msgs__msg__Marker__ADD;
         box_markers_storage[bi].pose.orientation.w = 1.0f;
-        box_markers_storage[bi].scale.x = 0.25f;
-        box_markers_storage[bi].scale.y = 0.25f;
-        box_markers_storage[bi].scale.z = 0.25f;
+        box_markers_storage[bi].scale.x = 1.0f;
+        box_markers_storage[bi].scale.y = 1.0f;
+        box_markers_storage[bi].scale.z = 1.0f;
         if (BOX_IDS[bi] <= 36) {
             box_markers_storage[bi].color.r = 0.1f;
             box_markers_storage[bi].color.g = 0.3f;
