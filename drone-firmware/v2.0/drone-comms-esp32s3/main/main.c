@@ -40,8 +40,8 @@
  *   Slot 1 L-front  bins 60,61,62,63,64,65
  *
  * Takeoff altitude options:
- *   A: 1.0 m  — tight formations only
- *   B: 1.5 m  — recommended  ← default
+ *   A: 1.0 m  — tight formations only  ← default
+ *   B: 1.5 m  — recommended
  *   C: 2.0 m  — close proximity swarm
  */
 
@@ -91,7 +91,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          1
+#define DRONE_ID          3
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -125,7 +125,7 @@ static const char *TAG = "drone";
                                     * TODO: lower to 1 (2 s) before official finals flight. */
 
 /* ── Mission parameters ────────────────────────────────────────────────── */
-#define MISSION_TAKEOFF_ALT_M      1.5f
+#define MISSION_TAKEOFF_ALT_M      1.0f
 #define MISSION_TAKEOFF_WAIT_MS    5000
 #define MISSION_MAX_HOVER_MS       (15UL * 60UL * 1000UL)
 #define MISSION_LAND_DESCEND_MS    5000
