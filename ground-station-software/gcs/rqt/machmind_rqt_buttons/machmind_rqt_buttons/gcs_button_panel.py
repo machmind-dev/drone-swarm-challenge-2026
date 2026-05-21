@@ -326,7 +326,6 @@ class GcsButtonPanel(Plugin):
 
         rc_radio = QRadioButton("RC")
         gcs_radio = QRadioButton("GCS")
-        gcs_radio.setChecked(True)
         rc_radio.setStyleSheet("font-size:9px;")
         gcs_radio.setStyleSheet("font-size:9px;")
         group = QButtonGroup(container)
@@ -334,6 +333,7 @@ class GcsButtonPanel(Plugin):
         group.addButton(gcs_radio)
         rc_radio.toggled.connect(partial(self._send_config_source, drone_id, "CONFIG_SOURCE_RC"))
         gcs_radio.toggled.connect(partial(self._send_config_source, drone_id, "CONFIG_SOURCE_GCS"))
+        gcs_radio.setChecked(True)   # after connect so toggled fires and CONFIG_SOURCE_GCS is published on startup
 
         radio_layout = QHBoxLayout()
         radio_layout.setSpacing(2)

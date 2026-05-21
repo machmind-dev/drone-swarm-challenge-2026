@@ -105,7 +105,7 @@ export QT_QPA_PLATFORMTHEME=qt5ct
 echo "[INFO] Waiting for ROS graph..."
 sleep 3
 echo "[INFO] Launching rqt..."
-rqt
+rqt --force-discover
 exec bash
 EOF
 
