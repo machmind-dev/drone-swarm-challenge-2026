@@ -160,6 +160,13 @@ managed through software register writes and reacted slowly to lighting changes.
 > (wall-to-wall detection range) before each flight, and the ISP warmup was allowed to
 > stabilise before arming. This is not possible with a fixed-focus sensor.
 
+> **Mechanical note — lens protrusion:** The OV5647 M12 lens barrel extends **9.5 mm** in
+> front of the PCB mounting surface. This offset must be accounted for in any extrinsic
+> calibration: the optical centre is 9.5 mm forward of the board along the camera boresight
+> axis. When computing the camera-to-body transform for world-frame pose correction, apply a
+> −9.5 mm translation along the camera Z axis (forward). Current firmware does not apply
+> this correction — it is noted here for future ChArUco extrinsic calibration.
+
 ---
 
 ## PX4 Flight Controller Settings
