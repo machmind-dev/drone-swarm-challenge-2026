@@ -480,7 +480,9 @@ void aruco_pose_start(void)
      * Center-crop 800x800->800x600, then uniform resize ->POSE_REQ (320x240).
      * Scale = POSE_REQ_W / cap_w = 320/800 = 0.4 -> fx=fy approx 357 px.  */
     const double scale = (double)POSE_REQ_W / (double)cap_w;
-    const double fx = 892.0 * scale;
+    /* Focal length corrected from ground-truth measurement:
+     * marker 50x50cm placed at 1.500m reported 1.220m → scale = 1.500/1.220 */
+    const double fx = 892.0 * scale * (1.500 / 1.220);
     const double fy = fx;
     const double cx = (double)POSE_REQ_W / 2.0;
     const double cy_c = (double)POSE_REQ_H / 2.0;
