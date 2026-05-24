@@ -91,13 +91,16 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          3
+#define DRONE_ID          5
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
 #define DRONE_DISC_THICKNESS_M 0.02f
 #define DRONE_DEFAULT_Z_M      0.5f
 #define VISION_TIMEOUT_MS      1500
+#define VISION_FADE_MS         3000   /* send last pose with rising covariance after ArUco loss */
+#define MAX_POSE_JUMP_M        1.0f   /* reject single-frame pose jumps larger than this (m) */
+#define COLLISION_HALT_MM      500    /* hold position if any horizontal ToF sensor reads < this */
 
 #define MARKER_ID_DISC(id)  ((id)*100)
 #define MARKER_ID_TEXT(id)  ((id)*100+1)
@@ -140,8 +143,6 @@ static const char *TAG = "drone";
 #define TEST_TRIGGER_ID       22
 #define TEST_APPROACH_DIST_M  1.0f
 #define TEST_HOLD_MS          5000
-#define TEST_M22_WORLD_X      10.0f
-#define TEST_M22_WORLD_Y       5.0f
 
 /* ── OBSTACLE_DISTANCE — VL53L1X 30° FOV → 6 bins per sensor ───────────
  * Bins filled: centre ± 3 bins (±15°).  Slots 0–4 (horizontal only).
@@ -205,6 +206,9 @@ volatile float vp_x = 0.0f, vp_y = 0.0f, vp_z = 0.0f;
 volatile float vp_qx = 0.0f, vp_qy = 0.0f, vp_qz = 0.0f, vp_qw = 1.0f;
 volatile bool    vision_pose_valid   = false;
 volatile int64_t last_vision_pose_ms = 0;
+
+/* Last accepted vision pose — used for fade-out and jump-filter baseline */
+static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
 
 static volatile bool  gcs_control_active = false;
 
@@ -323,24 +327,24 @@ static void mav_set_mode(uint32_t custom_mode)
     ESP_LOGI(TAG, "MAV: SET_MODE 0x%08lX", (unsigned long)custom_mode);
 }
 
-void mav_send_vision_estimate(float x, float y, float z)
+void mav_send_vision_estimate(float x, float y, float z, float pos_variance)
 {
     /* Upper triangle of 6×6 pose covariance (position then attitude).
      * Diagonal indices: [0]=xx [6]=yy [11]=zz [15]=rr [18]=pp [20]=yy_att
-     * Position: 0.1 m noise → variance 0.01.
+     * pos_variance: 0.01 = good fix; rises toward 0.50 during fade-out after ArUco loss.
      * Attitude: NaN → EKF2 skips attitude fusion entirely. */
     static float cov[21];
     static bool cov_init = false;
     if (!cov_init) {
         cov_init = true;
         for (int i = 0; i < 21; i++) cov[i] = 0.0f;
-        cov[0]  = 0.01f;   /* x variance */
-        cov[6]  = 0.01f;   /* y variance */
-        cov[11] = 0.01f;   /* z variance */
         cov[15] = __builtin_nanf("");  /* roll  — no attitude fusion */
         cov[18] = __builtin_nanf("");  /* pitch — no attitude fusion */
         cov[20] = __builtin_nanf("");  /* yaw   — no attitude fusion */
     }
+    cov[0]  = pos_variance;
+    cov[6]  = pos_variance;
+    cov[11] = pos_variance;
 
     mavlink_message_t msg;
     mavlink_msg_vision_position_estimate_pack(
@@ -547,6 +551,24 @@ static void prearm_stream_task_fn(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ── Software collision avoidance — all 5 horizontal ToF sensors ──────────
+ * Returns true if any horizontal sensor reports a valid reading below the
+ * halt threshold.  status==0 is the VL53L1X "range valid" flag; dist==0
+ * with status!=0 means no target (too far) or phase fail (too close but
+ * already crashed) — both are excluded to avoid false positives. */
+static bool obstacle_detected(void)
+{
+    p4_tof_data_t tof_now;
+    if (!p4_link_get_tof(&tof_now)) return false;
+    for (int s = 0; s < 5; s++) {   /* slots 0–4: Left, L-front, Front, R-front, Right */
+        if (tof_now.status[s] == 0 &&
+            tof_now.dist_mm[s] > 0 &&
+            tof_now.dist_mm[s] < COLLISION_HALT_MM)
+            return true;
+    }
+    return false;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * Mission FreeRTOS task
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -585,11 +607,19 @@ static void mission_task_fn(void *arg)
     t0 = xTaskGetTickCount();
     do {
         if (drone_state != DRONE_MISSION) goto mission_abort;
-        float sp_x   = setpoint_received ? setpoint_x   : home_x;
-        float sp_y   = setpoint_received ? setpoint_y   : home_y;
-        float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
-        float sp_yaw = setpoint_received ? setpoint_yaw : 0.0f;
-        mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
+        if (obstacle_detected()) {
+            /* Hold current PX4 position until all sensors clear */
+            if (px4_pos_valid)
+                mav_set_position_ned(px4_pos_x, px4_pos_y, -px4_pos_z);
+            else
+                mav_set_position_ned(home_x, home_y, -MISSION_TAKEOFF_ALT_M);
+        } else {
+            float sp_x   = setpoint_received ? setpoint_x   : home_x;
+            float sp_y   = setpoint_received ? setpoint_y   : home_y;
+            float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
+            float sp_yaw = setpoint_received ? setpoint_yaw : 0.0f;
+            mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
+        }
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
         elapsed = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
     } while (elapsed < MISSION_MAX_HOVER_MS);
@@ -659,32 +689,50 @@ static void aruco_approach_task_fn(void *arg)
         mission_task_handle = NULL;
     }
 
-    /* Capture current world position; approach 1 m toward marker 22 */
-    float from_x = vp_x, from_y = vp_y;
-    float dx = TEST_M22_WORLD_X - from_x;
-    float dy = TEST_M22_WORLD_Y - from_y;
-    float d  = sqrtf(dx * dx + dy * dy);
-    if (d < 0.01f) d = 0.01f;
-    float tgt_x = from_x + (dx / d) * TEST_APPROACH_DIST_M;
-    float tgt_y = from_y + (dy / d) * TEST_APPROACH_DIST_M;
+    /* Capture current position: vision if valid, else PX4 inertial */
+    float from_x = vision_pose_valid ? vp_x : (px4_pos_valid ? px4_pos_x : 0.0f);
+    float from_y = vision_pose_valid ? vp_y : (px4_pos_valid ? px4_pos_y : 0.0f);
 
-    ESP_LOGI(TAG, "[TEST] M22 approach: (%.2f,%.2f) -> tgt(%.2f,%.2f) hold=%ds",
-             from_x, from_y, tgt_x, tgt_y, TEST_HOLD_MS / 1000);
+    /* Target: 1 m ahead in the drone's current yaw direction.
+     * Yaw extracted from ArUco quaternion — valid at trigger time since
+     * M22 detection only fires when pose.valid is true. */
+    float yaw   = atan2f(2.0f * (vp_qw * vp_qz + vp_qx * vp_qy),
+                         1.0f - 2.0f * (vp_qy * vp_qy + vp_qz * vp_qz));
+    float tgt_x = from_x + TEST_APPROACH_DIST_M * cosf(yaw);
+    float tgt_y = from_y + TEST_APPROACH_DIST_M * sinf(yaw);
 
+    ESP_LOGI(TAG, "[TEST] M22 approach: cur(%.2f,%.2f) yaw=%.1f° -> tgt(%.2f,%.2f) hold=%ds",
+             from_x, from_y, (double)(yaw * 180.0f / 3.14159265f),
+             tgt_x, tgt_y, TEST_HOLD_MS / 1000);
+
+    /* Approach hold */
     int64_t t0 = now_ms();
     while (now_ms() - t0 < TEST_HOLD_MS) {
-        mav_set_position_yaw_ned(tgt_x, tgt_y, -MISSION_TAKEOFF_ALT_M, 0.0f);
+        if (obstacle_detected()) {
+            if (px4_pos_valid)
+                mav_set_position_ned(px4_pos_x, px4_pos_y, -px4_pos_z);
+            else
+                mav_set_position_ned(from_x, from_y, -MISSION_TAKEOFF_ALT_M);
+        } else {
+            mav_set_position_yaw_ned(tgt_x, tgt_y, -MISSION_TAKEOFF_ALT_M, yaw);
+        }
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
     }
 
-    ESP_LOGI(TAG, "[TEST] M22 approach done — returning home");
-    if (drone_state == DRONE_MISSION) {
-        drone_state = DRONE_RETURNING_HOME;
-        state_dirty = true;
-        mav_set_mode(PX4_MODE_OFFBOARD);
-        if (!return_home_task_handle)
-            xTaskCreate(return_home_task_fn, "return_home", 4096, NULL, 5,
-                        &return_home_task_handle);
+    /* Return to pre-approach position and hover there until operator sends
+     * next GCS command.  Do NOT trigger RETURNING_HOME — the drone may be
+     * far from the arm point; let the operator decide what to do next. */
+    ESP_LOGI(TAG, "[TEST] M22 done — hovering at pre-approach (%.2f,%.2f)", from_x, from_y);
+    while (drone_state == DRONE_MISSION) {
+        if (obstacle_detected()) {
+            if (px4_pos_valid)
+                mav_set_position_ned(px4_pos_x, px4_pos_y, -px4_pos_z);
+            else
+                mav_set_position_ned(from_x, from_y, -MISSION_TAKEOFF_ALT_M);
+        } else {
+            mav_set_position_ned(from_x, from_y, -MISSION_TAKEOFF_ALT_M);
+        }
+        vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
     }
     vTaskDelete(NULL);
 }
@@ -956,7 +1004,7 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                 box_markers_storage[bi].action = visualization_msgs__msg__Marker__ADD;
                 box_markers_storage[bi].pose.position.x = s_box_x[bi];
                 box_markers_storage[bi].pose.position.y = s_box_y[bi];
-                box_markers_storage[bi].pose.position.z = s_box_z[bi] + 0.5f; /* centre at half-height */
+                box_markers_storage[bi].pose.position.z = s_box_z[bi] + 0.25f; /* centre at half-height */
                 RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
                 s_box_add_sent[bi] = true;
             } else if (do_refresh && s_box_add_sent[bi]) {
@@ -1262,9 +1310,9 @@ void app_main(void)
         box_markers_storage[bi].type   = visualization_msgs__msg__Marker__CUBE;
         box_markers_storage[bi].action = visualization_msgs__msg__Marker__ADD;
         box_markers_storage[bi].pose.orientation.w = 1.0f;
-        box_markers_storage[bi].scale.x = 1.0f;
-        box_markers_storage[bi].scale.y = 1.0f;
-        box_markers_storage[bi].scale.z = 1.0f;
+        box_markers_storage[bi].scale.x = 0.5f;
+        box_markers_storage[bi].scale.y = 0.5f;
+        box_markers_storage[bi].scale.z = 0.5f;
         if (BOX_IDS[bi] <= 36) {
             box_markers_storage[bi].color.r = 0.1f;
             box_markers_storage[bi].color.g = 0.3f;
@@ -1311,22 +1359,38 @@ void app_main(void)
 
         /* Update vision pose globals from UART data */
         if (pose.valid) {
-            vp_x = pose.x; vp_y = pose.y; vp_z = pose.z;
-            vp_qx = pose.qx; vp_qy = pose.qy; vp_qz = pose.qz; vp_qw = pose.qw;
-            vision_pose_valid   = true;
-            last_vision_pose_ms = now_ms();
+            /* Issue 3: reject implausibly large single-frame jumps (ArUco flip at
+             * steep angles produces position discontinuities > 1 m in one 50 ms frame). */
+            float dxv  = pose.x - vp_x, dyv = pose.y - vp_y, dzv = pose.z - vp_z;
+            float jump = sqrtf(dxv * dxv + dyv * dyv + dzv * dzv);
+            if (vision_pose_valid && jump > MAX_POSE_JUMP_M) {
+                ESP_LOGW(TAG, "Vision jump %.2fm rejected (ArUco flip?)", (double)jump);
+            } else {
+                vp_x = pose.x; vp_y = pose.y; vp_z = pose.z;
+                vp_qx = pose.qx; vp_qy = pose.qy; vp_qz = pose.qz; vp_qw = pose.qw;
+                vp_last_x = vp_x; vp_last_y = vp_y; vp_last_z = vp_z;
+                vision_pose_valid   = true;
+                last_vision_pose_ms = now_ms();
 
-            /* Keep inertial anchor in sync with current vision position so the
-             * RViz disc doesn't teleport when vision times out: the fallback
-             * formula (map_home + (px4_pos - px4_home)) then starts from the
-             * last known vision location rather than (0,0,0). */
-            if (px4_pos_valid) {
-                map_home_x = pose.x; map_home_y = pose.y; map_home_z = pose.z;
-                px4_home_x = px4_pos_x; px4_home_y = px4_pos_y; px4_home_z = px4_pos_z;
+                /* Keep inertial anchor in sync with current vision position so the
+                 * RViz disc doesn't teleport when vision times out. */
+                if (px4_pos_valid) {
+                    map_home_x = pose.x; map_home_y = pose.y; map_home_z = pose.z;
+                    px4_home_x = px4_pos_x; px4_home_y = px4_pos_y; px4_home_z = px4_pos_z;
+                }
+
+                if (vision_enabled)
+                    mav_send_vision_estimate(vp_x, vp_y, vp_z, 0.01f);
             }
-
-            if (vision_enabled) {
-                mav_send_vision_estimate(pose.x, pose.y, pose.z);
+        } else if (vision_enabled && last_vision_pose_ms > 0) {
+            /* Issue 2: vision fade-out — after ArUco is lost keep sending the last
+             * known pose with rising covariance for VISION_FADE_MS.  PX4 EKF2
+             * gradually down-weights the source instead of hard-resetting to NED
+             * origin (which caused the "teleport to start" crash). */
+            int64_t age = now_ms() - last_vision_pose_ms;
+            if (age < (int64_t)VISION_FADE_MS) {
+                float cov = 0.01f + (float)age / (float)VISION_FADE_MS * 0.49f;
+                mav_send_vision_estimate(vp_last_x, vp_last_y, vp_last_z, cov);
             }
         }
 
