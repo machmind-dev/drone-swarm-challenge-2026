@@ -89,3 +89,13 @@ See the platform-specific launcher README for setup and launch instructions:
 ## License
 
 Private — All rights reserved. Team Mach Mind, 2026.
+
+---
+
+## Changelog
+
+| Date | Commit | Component | Change |
+|------|--------|-----------|--------|
+| 2026-05-24 | `d6e8e5a` | S3 comms firmware | Box markers scaled to 50×50×50 cm; vision fade-out 3 s with rising covariance on ArUco loss (prevents PX4 EKF hard-reset); pose jump filter 1.0 m (discards ArUco angle-flip frames); M22 approach yaw-aware (1 m in drone heading, returns to pre-approach position and hovers); software collision avoidance using all 5 horizontal ToF slots |
+| 2026-05-24 | `c5bc6be` | PX4 params | EKF2_BARO_CTRL=0 (baro disabled — prop-wash 6 m error at 1 m on open frame); EKF2_RNG_CTRL=2 (MT01 downward rangefinder always active as primary altitude); fresh accelerometer and gyroscope calibration |
+| 2026-05-24 | `3944223` | P4 vision firmware | OV5647 focal length corrected 357 px → 439 px from ground-truth measurement (50×50 cm marker at 1.500 m reported 1.220 m); verified 2.20 m→2.18 m (1% error), 4.50 m→4.50 m (0% error) |
