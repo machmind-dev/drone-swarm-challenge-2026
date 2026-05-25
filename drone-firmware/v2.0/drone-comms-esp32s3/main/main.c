@@ -216,6 +216,15 @@ static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
  * because PX4 NED starts at 0 before ArUco is first acquired. */
 static volatile bool inertial_anchor_valid = false;
 
+/* Arena → NED offset: drone's known starting position in arena frame.
+ * Subtracted from ArUco positions before sending to PX4 so the EKF
+ * always sees positions relative to the drone's physical start (NED 0,0).
+ * Set by team_color_callback when LH/RH Scene is pressed on GCS. */
+static float ned_offset_x = 0.0f, ned_offset_y = 0.0f;
+
+/* Last values sent to PX4 via VISION_POSITION_ESTIMATE — for debug log */
+static float last_vis_sent_x = 0.0f, last_vis_sent_y = 0.0f;
+
 
 static volatile bool  gcs_control_active = false;
 
@@ -895,8 +904,8 @@ static void control_callback(const void *msg_in)
         (const geometry_msgs__msg__PoseStamped *)msg_in;
     if (!msg) return;
 
-    setpoint_x = (float)msg->pose.position.x;
-    setpoint_y = (float)msg->pose.position.y;
+    setpoint_x = (float)msg->pose.position.x - ned_offset_x;
+    setpoint_y = (float)msg->pose.position.y - ned_offset_y;
     setpoint_z = (float)msg->pose.position.z;
     float qx = (float)msg->pose.orientation.x;
     float qy = (float)msg->pose.orientation.y;
@@ -905,7 +914,9 @@ static void control_callback(const void *msg_in)
     setpoint_yaw = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
     setpoint_received = true;
 
-    ESP_LOGI(TAG, "Setpoint: (%.2f, %.2f, %.2f up)", setpoint_x, setpoint_y, setpoint_z);
+    ESP_LOGI(TAG, "Setpoint arena=(%.2f,%.2f) NED=(%.2f,%.2f) z=%.2f",
+             (double)((float)msg->pose.position.x), (double)((float)msg->pose.position.y),
+             (double)setpoint_x, (double)setpoint_y, (double)setpoint_z);
 
     if (gcs_control_active && drone_state == DRONE_ARMED)
         mav_set_position_ned(setpoint_x, setpoint_y, -setpoint_z);
@@ -940,14 +951,18 @@ static void team_color_callback(const void *msg_in)
         return;
     }
 
+    /* Store arena→NED offset for coordinate translation */
+    ned_offset_x = sx;
+    ned_offset_y = sy;
+
     /* Move RViz disc to correct starting position immediately */
     map_home_x = sx;
     map_home_y = sy;
     map_home_z = 0.0f;
     apply_pose_to_drone_markers(sx, sy, DRONE_DEFAULT_Z_M, 0.0f, 0.0f, 0.0f, 1.0f);
 
-    ESP_LOGI(TAG, "Team: %s → start (%.0f,%.0f) — EKF seed armed",
-             buf, (double)sx, (double)sy);
+    ESP_LOGI(TAG, "Team: %s → start (%.0f,%.0f) NED offset=(%.0f,%.0f)",
+             buf, (double)sx, (double)sy, (double)ned_offset_x, (double)ned_offset_y);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1432,8 +1447,13 @@ void app_main(void)
                     inertial_anchor_valid = true;
                 }
 
-                if (vision_enabled)
-                    mav_send_vision_estimate(vp_x, vp_y, vp_z, 0.01f);
+                if (vision_enabled) {
+                    float tx = vp_x - ned_offset_x;
+                    float ty = vp_y - ned_offset_y;
+                    last_vis_sent_x = tx;
+                    last_vis_sent_y = ty;
+                    mav_send_vision_estimate(tx, ty, vp_z, 0.01f);
+                }
             }
         } else if (vision_enabled && last_vision_pose_ms > 0) {
             /* Issue 2: vision fade-out — after ArUco is lost keep sending the last
@@ -1443,7 +1463,11 @@ void app_main(void)
             int64_t age = now_ms() - last_vision_pose_ms;
             if (age < (int64_t)VISION_FADE_MS) {
                 float cov = 0.01f + (float)age / (float)VISION_FADE_MS * 0.49f;
-                mav_send_vision_estimate(vp_last_x, vp_last_y, vp_last_z, cov);
+                float tx = vp_last_x - ned_offset_x;
+                float ty = vp_last_y - ned_offset_y;
+                last_vis_sent_x = tx;
+                last_vis_sent_y = ty;
+                mav_send_vision_estimate(tx, ty, vp_last_z, cov);
             }
         }
 
@@ -1464,6 +1488,19 @@ void app_main(void)
 
         /* Console — overwrite line at 20 Hz */
         tof_console_print(&tof);
+
+        /* Position debug log — every 2 s (40 ticks × 50 ms) */
+        static uint32_t pos_log_tick = 0;
+        if (++pos_log_tick >= 40) {
+            pos_log_tick = 0;
+            printf("\n");
+            fflush(stdout);
+            ESP_LOGI(TAG, "[POS] P4_aruco=(%.2f,%.2f)  sent_px4=(%.2f,%.2f)  px4_ned=(%.2f,%.2f)  offset=(%.0f,%.0f)",
+                     (double)vp_x,            (double)vp_y,
+                     (double)last_vis_sent_x, (double)last_vis_sent_y,
+                     (double)px4_pos_x,       (double)px4_pos_y,
+                     (double)ned_offset_x,    (double)ned_offset_y);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
