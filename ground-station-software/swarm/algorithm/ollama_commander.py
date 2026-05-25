@@ -48,7 +48,7 @@ ARENA_Y_MAX    = 10.0
 ARENA_Z_MAX    = 5.0
 ARENA_Z_MIN    = 0.1
 
-OLLAMA_TIMEOUT = 30   # seconds
+OLLAMA_TIMEOUT = 120  # seconds (Pi5 CPU cold-start needs ~60-90s)
 
 SYSTEM_PROMPT = (
     "You control a drone swarm. Arena: x=0-20m, y=0-10m, z=0-5m. "
