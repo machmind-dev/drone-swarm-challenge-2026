@@ -25,7 +25,7 @@
  *   /gcs/drone_{ID}/command    std_msgs/String  — flight commands
  *   /gcs/drone_{ID}/config     std_msgs/String  — CONFIG_VISION_ENABLE/DISABLE
  *   /gcs/drone_{ID}/control    PoseStamped      — position setpoints
- *   /gcs/system/team_color     std_msgs/String  — "red" (LH) or "blue" (RH) — seeds EKF start pos
+ *   /gcs/system/team_color     std_msgs/String  — "red" (LH) or "blue" (RH) — positions RViz disc
  *
  * ROS topics (published, via micro-ROS):
  *   /drone_{ID}/state          std_msgs/String  — state machine
@@ -92,7 +92,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          5
+#define DRONE_ID          3
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -216,13 +216,6 @@ static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
  * because PX4 NED starts at 0 before ArUco is first acquired. */
 static volatile bool inertial_anchor_valid = false;
 
-/* Starting-position EKF seed — sent at 1 Hz after team colour is set,
- * until the first real ArUco fix is received.  Prevents EKF innovation
- * rejection when the drone starts far from the NED origin. */
-static volatile bool  seed_pos_active = false;
-static volatile bool  seed_pos_done   = false;
-static volatile float seed_pos_x = 0.0f, seed_pos_y = 0.0f;
-static int64_t        last_seed_ms    = 0;
 
 static volatile bool  gcs_control_active = false;
 
@@ -947,11 +940,6 @@ static void team_color_callback(const void *msg_in)
         return;
     }
 
-    seed_pos_x      = sx;
-    seed_pos_y      = sy;
-    seed_pos_active = true;
-    seed_pos_done   = false;   /* re-arm if scene toggled after a prior ArUco fix */
-
     /* Move RViz disc to correct starting position immediately */
     map_home_x = sx;
     map_home_y = sy;
@@ -1436,12 +1424,6 @@ void app_main(void)
                 vision_pose_valid   = true;
                 last_vision_pose_ms = now_ms();
 
-                /* First real ArUco fix — stop EKF seeding */
-                if (!seed_pos_done) {
-                    seed_pos_done = true;
-                    ESP_LOGI(TAG, "First ArUco fix — EKF seed complete");
-                }
-
                 /* Keep inertial anchor in sync with current vision position so the
                  * RViz disc doesn't teleport when vision times out. */
                 if (px4_pos_valid) {
@@ -1462,17 +1444,6 @@ void app_main(void)
             if (age < (int64_t)VISION_FADE_MS) {
                 float cov = 0.01f + (float)age / (float)VISION_FADE_MS * 0.49f;
                 mav_send_vision_estimate(vp_last_x, vp_last_y, vp_last_z, cov);
-            }
-        }
-
-        /* EKF starting-position seed: 1 Hz until first real ArUco fix.
-         * Keeps PX4 EKF2 within the innovation gate when the drone starts
-         * far from the NED origin (would otherwise cause a 19 m jump rejection). */
-        if (seed_pos_active && !seed_pos_done && !vision_pose_valid) {
-            int64_t t_now = now_ms();
-            if (t_now - last_seed_ms >= 1000) {
-                last_seed_ms = t_now;
-                mav_send_vision_estimate(seed_pos_x, seed_pos_y, 0.0f, 1.0f);
             }
         }
 
