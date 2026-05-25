@@ -1,12 +1,14 @@
 # gcs_button_panel.py
 import os
 import time
+from collections import deque
 from functools import partial
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PoseStamped
+from nav_msgs.msg import Path
 from std_msgs.msg import String, Int8
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -24,7 +26,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.4"
+    VERSION = "1.3.5"
 
     def __init__(self, context):
         super().__init__(context)
@@ -56,6 +58,20 @@ class GcsButtonPanel(Plugin):
         self.marker_pub = self.node.create_publisher(Marker, "/visualization_marker", 10)
         self.marker_array_pub = self.node.create_publisher(MarkerArray, "/visualization_marker_array", 10)
         self.team_area_pub = self.node.create_publisher(String, "/gcs/system/team_area", 10)
+        self.team_color_pub = self.node.create_publisher(String, "/gcs/system/team_color", 10)
+
+        # Drone trails — nav_msgs/Path, max 300 poses per drone (~60-90 s at ~3-5 Hz)
+        _TRAIL_MAX = 300
+        self._trail_deques = {}
+        self._trail_pubs   = {}
+        self._trail_subs   = {}
+        for i in range(1, self.DRONE_COUNT + 1):
+            self._trail_deques[i] = deque(maxlen=_TRAIL_MAX)
+            self._trail_pubs[i]   = self.node.create_publisher(
+                Path, f"/drone_{i}/trail", 10)
+            self._trail_subs[i]   = self.node.create_subscription(
+                PoseStamped, f"/drone_{i}/vision_pose",
+                lambda msg, did=i: self._trail_cb(msg, did), 10)
 
         for i in range(1, self.DRONE_COUNT + 1):
             self.command_publishers[i] = self.node.create_publisher(
@@ -137,6 +153,7 @@ class GcsButtonPanel(Plugin):
         self._online_timer.setInterval(1000)
         self._online_timer.timeout.connect(self._check_drone_staleness)
         self._online_timer.start()
+
 
     # ================= Global Controls =================
     def _build_global_controls(self):
@@ -357,6 +374,15 @@ class GcsButtonPanel(Plugin):
         container.setLayout(layout)
         return container
 
+    # ================= Drone Trail =================
+    def _trail_cb(self, msg: PoseStamped, drone_id: int):
+        self._trail_deques[drone_id].append(msg)
+        path = Path()
+        path.header.frame_id = "map"
+        path.header.stamp = msg.header.stamp
+        path.poses = list(self._trail_deques[drone_id])
+        self._trail_pubs[drone_id].publish(path)
+
     # ================= Scene Management =================
     def _build_scene_management(self):
         box = QGroupBox("Scene Management")
@@ -467,6 +493,30 @@ class GcsButtonPanel(Plugin):
             text.text = label
             arr.markers.append(text)
 
+        # Arena corner coordinate labels
+        corners = [
+            (400, 0.0,  0.0,  "0,0"),
+            (401, 20.0, 0.0,  "20,0"),
+            (402, 0.0,  10.0, "0,10"),
+            (403, 20.0, 10.0, "20,10"),
+        ]
+        for cid, cx, cy, label in corners:
+            ct = Marker()
+            ct.header.frame_id = "map"
+            ct.ns = "corner_labels"
+            ct.id = cid
+            ct.type = Marker.TEXT_VIEW_FACING
+            ct.action = Marker.ADD
+            ct.pose.position.x = cx
+            ct.pose.position.y = cy
+            ct.pose.position.z = 0.3
+            ct.pose.orientation.w = 1.0
+            ct.scale.z = 0.4
+            ct.color.r = ct.color.g = ct.color.b = 1.0
+            ct.color.a = 0.85
+            ct.text = label
+            arr.markers.append(ct)
+
         self.marker_array_pub.publish(arr)
         self.node.get_logger().info("SCENE: Axis markers published → /visualization_marker_array")
 
@@ -522,6 +572,29 @@ class GcsButtonPanel(Plugin):
         m.color.a = 1.0
         m.text = text
         return m
+
+    def _launch_marker(self, mid, x, y):
+        m = Marker()
+        m.header.frame_id = "map"
+        m.ns = "launch_points"
+        m.id = mid
+        m.type = Marker.LINE_LIST
+        m.action = Marker.ADD
+        m.pose.orientation.w = 1.0
+        m.scale.x = 0.05          # line width 5 cm
+        m.color.r, m.color.g, m.color.b, m.color.a = 1.0, 0.85, 0.0, 1.0  # neutral yellow
+        fx, fy = float(x), float(y)
+        h = 0.35                   # half-arm length 35 cm
+        # Two crossing diagonals at floor level
+        m.points.append(Point(x=fx - h, y=fy - h, z=0.01))
+        m.points.append(Point(x=fx + h, y=fy + h, z=0.01))
+        m.points.append(Point(x=fx + h, y=fy - h, z=0.01))
+        m.points.append(Point(x=fx - h, y=fy + h, z=0.01))
+        return m
+
+    def _publish_launch_points(self, coords, arr):
+        for idx, (x, y) in enumerate(coords):
+            arr.markers.append(self._launch_marker(300 + idx, x, y))
 
     def _monument_mesh(self, mid, x, y, qz, qw):
         m = Marker()
@@ -639,14 +712,18 @@ class GcsButtonPanel(Plugin):
         self._publish_monuments()
         msg = String(); msg.data = "LH"
         self.team_area_pub.publish(msg)
-        self.node.get_logger().info("SCENE: LH loaded → /gcs/system/team_area = LH")
+        color_msg = String(); color_msg.data = "red"
+        self.team_color_pub.publish(color_msg)
+        self.node.get_logger().info("SCENE: LH loaded → team_area=LH  team_color=red")
         arr = MarkerArray()
-        arr.markers.append(self._zone_marker(3.3333, (0.2, 0.4, 0.8, 0.30), 101))
+        arr.markers.append(self._zone_marker(3.3333, (0.8, 0.3, 0.3, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
-        arr.markers.append(self._zone_marker(16.6667, (0.8, 0.3, 0.3, 0.30), 103))
+        arr.markers.append(self._zone_marker(16.6667, (0.2, 0.4, 0.8, 0.30), 103))
         arr.markers.append(self._zone_label(3.3333, "TEAM-ZONE", 201))
         arr.markers.append(self._zone_label(10.0, "NO-MAN'S-LAND", 202))
         arr.markers.append(self._zone_label(16.6667, "OPPONENT-ZONE", 203))
+        self._publish_launch_points(
+            [(1,1),(1,2),(1,3),(1,4),(1,5)], arr)
         self.marker_array_pub.publish(arr)
 
     def _publish_rh_scene(self):
@@ -654,7 +731,9 @@ class GcsButtonPanel(Plugin):
         self._publish_monuments()
         msg = String(); msg.data = "RH"
         self.team_area_pub.publish(msg)
-        self.node.get_logger().info("SCENE: RH loaded → /gcs/system/team_area = RH")
+        color_msg = String(); color_msg.data = "blue"
+        self.team_color_pub.publish(color_msg)
+        self.node.get_logger().info("SCENE: RH loaded → team_area=RH  team_color=blue")
         arr = MarkerArray()
         arr.markers.append(self._zone_marker(3.3333, (0.8, 0.3, 0.3, 0.30), 101))
         arr.markers.append(self._zone_marker(10.0, (0.5, 0.5, 0.5, 0.25), 102))
@@ -662,6 +741,8 @@ class GcsButtonPanel(Plugin):
         arr.markers.append(self._zone_label(3.3333, "OPPONENT-ZONE", 201))
         arr.markers.append(self._zone_label(10.0, "NO-MAN'S-LAND", 202))
         arr.markers.append(self._zone_label(16.6667, "TEAM-ZONE", 203))
+        self._publish_launch_points(
+            [(19,9),(19,8),(19,7),(19,6),(19,5)], arr)
         self.marker_array_pub.publish(arr)
 
     # ================= Commands =================

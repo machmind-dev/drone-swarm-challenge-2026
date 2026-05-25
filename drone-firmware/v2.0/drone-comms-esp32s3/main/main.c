@@ -25,6 +25,7 @@
  *   /gcs/drone_{ID}/command    std_msgs/String  — flight commands
  *   /gcs/drone_{ID}/config     std_msgs/String  — CONFIG_VISION_ENABLE/DISABLE
  *   /gcs/drone_{ID}/control    PoseStamped      — position setpoints
+ *   /gcs/system/team_color     std_msgs/String  — "red" (LH) or "blue" (RH) — seeds EKF start pos
  *
  * ROS topics (published, via micro-ROS):
  *   /drone_{ID}/state          std_msgs/String  — state machine
@@ -135,14 +136,14 @@ static const char *TAG = "drone";
 #define OFFBOARD_STREAM_PERIOD_MS  50
 
 /* ════════════════════════════════════════════════════════════════════════════
- * TEST — ArUco approach on marker 22.  Remove this block after test flight.
+ * TEST — Yaw spin on marker 22.
  * Place physical marker 22 at arena position (10.0, 5.0) z=2 m.
- * When detected during MISSION: fly 1 m toward marker, hold 5 s, RTH.
+ * When detected during MISSION: hold position and spin 360° in place,
+ * then hover until next GCS command.
  * ════════════════════════════════════════════════════════════════════════════ */
 #define TEST_ARUCO_APPROACH
 #define TEST_TRIGGER_ID       22
-#define TEST_APPROACH_DIST_M  1.0f
-#define TEST_HOLD_MS          5000
+#define TEST_YAW_RATE_DEG_S   45.0f   /* degrees per second — 360° in 8 s */
 
 /* ── OBSTACLE_DISTANCE — VL53L1X 30° FOV → 6 bins per sensor ───────────
  * Bins filled: centre ± 3 bins (±15°).  Slots 0–4 (horizontal only).
@@ -209,6 +210,19 @@ volatile int64_t last_vision_pose_ms = 0;
 
 /* Last accepted vision pose — used for fade-out and jump-filter baseline */
 static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
+
+/* True once map_home has been set from a real vision pose.  Guards the
+ * inertial fallback so the GCS disc is never placed at arena (0,0) just
+ * because PX4 NED starts at 0 before ArUco is first acquired. */
+static volatile bool inertial_anchor_valid = false;
+
+/* Starting-position EKF seed — sent at 1 Hz after team colour is set,
+ * until the first real ArUco fix is received.  Prevents EKF innovation
+ * rejection when the drone starts far from the NED origin. */
+static volatile bool  seed_pos_active = false;
+static volatile bool  seed_pos_done   = false;
+static volatile float seed_pos_x = 0.0f, seed_pos_y = 0.0f;
+static int64_t        last_seed_ms    = 0;
 
 static volatile bool  gcs_control_active = false;
 
@@ -497,12 +511,14 @@ static visualization_msgs__msg__Marker box_markers_storage[BOX_COUNT];
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
 static rcl_subscription_t control_sub;
+static rcl_subscription_t team_color_sub;
 
 static visualization_msgs__msg__Marker   drone_disc_msg;
 static visualization_msgs__msg__Marker   text_msg;
 static std_msgs__msg__String             command_msg;
 static std_msgs__msg__String             config_msg;
 static geometry_msgs__msg__PoseStamped   control_msg;
+static std_msgs__msg__String             team_color_msg;
 static std_msgs__msg__String             state_pub_msg;
 static std_msgs__msg__String             role_pub_msg;
 static std_msgs__msg__Int8               battery_pub_msg;
@@ -683,55 +699,46 @@ static void eland_task_fn(void *arg)
 static void aruco_approach_task_fn(void *arg)
 {
     (void)arg;
-    /* Kill mission task — no setpoint conflict during approach */
+    /* Kill mission task — no setpoint conflict during spin */
     if (mission_task_handle) {
         vTaskDelete(mission_task_handle);
         mission_task_handle = NULL;
     }
 
-    /* Capture current position: vision if valid, else PX4 inertial */
-    float from_x = vision_pose_valid ? vp_x : (px4_pos_valid ? px4_pos_x : 0.0f);
-    float from_y = vision_pose_valid ? vp_y : (px4_pos_valid ? px4_pos_y : 0.0f);
+    /* Capture hold position: vision if valid, else PX4 inertial */
+    float hold_x = vision_pose_valid ? vp_x : (px4_pos_valid ? px4_pos_x : 0.0f);
+    float hold_y = vision_pose_valid ? vp_y : (px4_pos_valid ? px4_pos_y : 0.0f);
+    float hold_z = -MISSION_TAKEOFF_ALT_M;  /* NED: negative = above ground */
 
-    /* Target: 1 m ahead in the drone's current yaw direction.
-     * Yaw extracted from ArUco quaternion — valid at trigger time since
-     * M22 detection only fires when pose.valid is true. */
-    float yaw   = atan2f(2.0f * (vp_qw * vp_qz + vp_qx * vp_qy),
-                         1.0f - 2.0f * (vp_qy * vp_qy + vp_qz * vp_qz));
-    float tgt_x = from_x + TEST_APPROACH_DIST_M * cosf(yaw);
-    float tgt_y = from_y + TEST_APPROACH_DIST_M * sinf(yaw);
+    /* Initial yaw from ArUco pose quaternion */
+    float yaw = atan2f(2.0f * (vp_qw * vp_qz + vp_qx * vp_qy),
+                       1.0f - 2.0f * (vp_qy * vp_qy + vp_qz * vp_qz));
 
-    ESP_LOGI(TAG, "[TEST] M22 approach: cur(%.2f,%.2f) yaw=%.1f° -> tgt(%.2f,%.2f) hold=%ds",
-             from_x, from_y, (double)(yaw * 180.0f / 3.14159265f),
-             tgt_x, tgt_y, TEST_HOLD_MS / 1000);
+    /* Yaw increment per control tick */
+    const float yaw_step = TEST_YAW_RATE_DEG_S * ((float)M_PI / 180.0f)
+                           * (OFFBOARD_STREAM_PERIOD_MS / 1000.0f);
+    float rotated = 0.0f;
 
-    /* Approach hold */
-    int64_t t0 = now_ms();
-    while (now_ms() - t0 < TEST_HOLD_MS) {
-        if (obstacle_detected()) {
-            if (px4_pos_valid)
-                mav_set_position_ned(px4_pos_x, px4_pos_y, -px4_pos_z);
-            else
-                mav_set_position_ned(from_x, from_y, -MISSION_TAKEOFF_ALT_M);
-        } else {
-            mav_set_position_yaw_ned(tgt_x, tgt_y, -MISSION_TAKEOFF_ALT_M, yaw);
-        }
+    ESP_LOGI(TAG, "[TEST] M22 spin: hold(%.2f,%.2f) yaw0=%.1f° rate=%.0f°/s",
+             (double)hold_x, (double)hold_y,
+             (double)(yaw * 180.0f / (float)M_PI),
+             (double)TEST_YAW_RATE_DEG_S);
+
+    /* Spin one full 360° in place */
+    while (rotated < 2.0f * (float)M_PI && drone_state == DRONE_MISSION) {
+        yaw += yaw_step;
+        rotated += fabsf(yaw_step);
+        /* Wrap yaw to [-π, π] */
+        while (yaw >  (float)M_PI) yaw -= 2.0f * (float)M_PI;
+        while (yaw < -(float)M_PI) yaw += 2.0f * (float)M_PI;
+        mav_set_position_yaw_ned(hold_x, hold_y, hold_z, yaw);
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
     }
 
-    /* Return to pre-approach position and hover there until operator sends
-     * next GCS command.  Do NOT trigger RETURNING_HOME — the drone may be
-     * far from the arm point; let the operator decide what to do next. */
-    ESP_LOGI(TAG, "[TEST] M22 done — hovering at pre-approach (%.2f,%.2f)", from_x, from_y);
+    /* Hold position after spin until next GCS command */
+    ESP_LOGI(TAG, "[TEST] M22 spin done — hovering at (%.2f,%.2f)", (double)hold_x, (double)hold_y);
     while (drone_state == DRONE_MISSION) {
-        if (obstacle_detected()) {
-            if (px4_pos_valid)
-                mav_set_position_ned(px4_pos_x, px4_pos_y, -px4_pos_z);
-            else
-                mav_set_position_ned(from_x, from_y, -MISSION_TAKEOFF_ALT_M);
-        } else {
-            mav_set_position_ned(from_x, from_y, -MISSION_TAKEOFF_ALT_M);
-        }
+        mav_set_position_yaw_ned(hold_x, hold_y, hold_z, yaw);
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
     }
     vTaskDelete(NULL);
@@ -912,6 +919,50 @@ static void control_callback(const void *msg_in)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * Team colour callback — seeds EKF with known starting position
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void team_color_callback(const void *msg_in)
+{
+    const std_msgs__msg__String *m = (const std_msgs__msg__String *)msg_in;
+    if (!m || !m->data.data || m->data.size == 0) return;
+
+    char buf[16] = {0};
+    size_t n = m->data.size < 15 ? m->data.size : 15;
+    memcpy(buf, m->data.data, n);
+    for (int i = (int)n - 1; i >= 0; i--) {
+        if (buf[i]==' '||buf[i]=='\n'||buf[i]=='\r'||buf[i]=='\t') buf[i]='\0'; else break;
+    }
+
+    float sx, sy;
+    if (strcmp(buf, "red") == 0) {
+        /* LH side — D1→(1,5)  D2→(1,4)  D3→(1,3)  D4→(1,2)  D5→(1,1) */
+        sx = 1.0f;
+        sy = 6.0f - (float)DRONE_ID;
+    } else if (strcmp(buf, "blue") == 0) {
+        /* RH side — D1→(19,5) D2→(19,6) D3→(19,7) D4→(19,8) D5→(19,9) */
+        sx = 19.0f;
+        sy = (float)DRONE_ID + 4.0f;
+    } else {
+        ESP_LOGW(TAG, "team_color: unknown '%s'", buf);
+        return;
+    }
+
+    seed_pos_x      = sx;
+    seed_pos_y      = sy;
+    seed_pos_active = true;
+    seed_pos_done   = false;   /* re-arm if scene toggled after a prior ArUco fix */
+
+    /* Move RViz disc to correct starting position immediately */
+    map_home_x = sx;
+    map_home_y = sy;
+    map_home_z = 0.0f;
+    apply_pose_to_drone_markers(sx, sy, DRONE_DEFAULT_Z_M, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    ESP_LOGI(TAG, "Team: %s → start (%.0f,%.0f) — EKF seed armed",
+             buf, (double)sx, (double)sy);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
  * Timer callback — 100 ms (state publish, vision timeout, RViz markers)
  * ══════════════════════════════════════════════════════════════════════════ */
 static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
@@ -943,10 +994,13 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         RCSOFTCHECK(rcl_publish(&publisher_battery, &battery_pub_msg, NULL));
     }
 
-    /* Update RViz disc from P4 vision pose; fall back to PX4 inertial when no vision */
+    /* Update RViz disc from P4 vision pose; fall back to PX4 inertial only once
+     * the arena↔NED anchor has been established by at least one valid vision pose.
+     * Without this guard, PX4 NED starts at 0 on arm and maps to arena (0,0),
+     * causing the GCS disc to appear at the wrong corner before ArUco is acquired. */
     if (vision_pose_valid) {
         apply_pose_to_drone_markers(vp_x, vp_y, vp_z, vp_qx, vp_qy, vp_qz, vp_qw);
-    } else if (px4_pos_valid) {
+    } else if (px4_pos_valid && inertial_anchor_valid) {
         float disp_x = map_home_x + (px4_pos_x - px4_home_x);
         float disp_y = map_home_y + (px4_pos_y - px4_home_y);
         float disp_z = map_home_z + (px4_pos_z - px4_home_z);
@@ -1108,6 +1162,10 @@ static void micro_ros_task(void *arg)
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
         topic_gcs_control));
 
+    RCCHECK(rclc_subscription_init_best_effort(&team_color_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+        "/gcs/system/team_color"));
+
     /* ── Message buffers ─────────────────────────────────────────────────── */
     command_msg.data.data = (char *)malloc(64);
     command_msg.data.size = 0; command_msg.data.capacity = 64;
@@ -1116,6 +1174,9 @@ static void micro_ros_task(void *arg)
     config_msg.data.size = 0; config_msg.data.capacity = 64;
 
     geometry_msgs__msg__PoseStamped__init(&control_msg);
+
+    team_color_msg.data.data = (char *)malloc(16);
+    team_color_msg.data.size = 0; team_color_msg.data.capacity = 16;
 
     state_pub_msg.data.data = (char *)malloc(32);
     state_pub_msg.data.size = 0; state_pub_msg.data.capacity = 32;
@@ -1126,12 +1187,12 @@ static void micro_ros_task(void *arg)
     rosidl_runtime_c__String__assign(&role_pub_msg.data, "idle");
     RCSOFTCHECK(rcl_publish(&publisher_role, &role_pub_msg, NULL));
 
-    /* ── Timer + executor (1 timer + 3 subscriptions = 4 handles) ───────── */
+    /* ── Timer + executor (1 timer + 4 subscriptions = 5 handles) ───────── */
     rcl_timer_t timer;
     RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(100), timer_callback));
 
     rclc_executor_t executor;
-    RCCHECK(rclc_executor_init(&executor, &support.context, 4, &allocator));
+    RCCHECK(rclc_executor_init(&executor, &support.context, 5, &allocator));
     RCCHECK(rclc_executor_add_timer(&executor, &timer));
     RCCHECK(rclc_executor_add_subscription(&executor, &command_sub,
                 &command_msg, &command_callback, ON_NEW_DATA));
@@ -1139,6 +1200,8 @@ static void micro_ros_task(void *arg)
                 &config_msg, &config_callback, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_subscription(&executor, &control_sub,
                 &control_msg, &control_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &team_color_sub,
+                &team_color_msg, &team_color_callback, ON_NEW_DATA));
 
     int64_t last_c2_check_ms = now_ms();
     int     c2_failures       = 0;
@@ -1174,9 +1237,10 @@ static void micro_ros_task(void *arg)
     RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
     RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
     RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
-    RCCHECK(rcl_subscription_fini(&command_sub, &node));
-    RCCHECK(rcl_subscription_fini(&config_sub,  &node));
-    RCCHECK(rcl_subscription_fini(&control_sub, &node));
+    RCCHECK(rcl_subscription_fini(&command_sub,    &node));
+    RCCHECK(rcl_subscription_fini(&config_sub,     &node));
+    RCCHECK(rcl_subscription_fini(&control_sub,    &node));
+    RCCHECK(rcl_subscription_fini(&team_color_sub, &node));
     RCCHECK(rcl_node_fini(&node));
     vTaskDelete(NULL);
 }
@@ -1372,11 +1436,18 @@ void app_main(void)
                 vision_pose_valid   = true;
                 last_vision_pose_ms = now_ms();
 
+                /* First real ArUco fix — stop EKF seeding */
+                if (!seed_pos_done) {
+                    seed_pos_done = true;
+                    ESP_LOGI(TAG, "First ArUco fix — EKF seed complete");
+                }
+
                 /* Keep inertial anchor in sync with current vision position so the
                  * RViz disc doesn't teleport when vision times out. */
                 if (px4_pos_valid) {
                     map_home_x = pose.x; map_home_y = pose.y; map_home_z = pose.z;
                     px4_home_x = px4_pos_x; px4_home_y = px4_pos_y; px4_home_z = px4_pos_z;
+                    inertial_anchor_valid = true;
                 }
 
                 if (vision_enabled)
@@ -1391,6 +1462,17 @@ void app_main(void)
             if (age < (int64_t)VISION_FADE_MS) {
                 float cov = 0.01f + (float)age / (float)VISION_FADE_MS * 0.49f;
                 mav_send_vision_estimate(vp_last_x, vp_last_y, vp_last_z, cov);
+            }
+        }
+
+        /* EKF starting-position seed: 1 Hz until first real ArUco fix.
+         * Keeps PX4 EKF2 within the innovation gate when the drone starts
+         * far from the NED origin (would otherwise cause a 19 m jump rejection). */
+        if (seed_pos_active && !seed_pos_done && !vision_pose_valid) {
+            int64_t t_now = now_ms();
+            if (t_now - last_seed_ms >= 1000) {
+                last_seed_ms = t_now;
+                mav_send_vision_estimate(seed_pos_x, seed_pos_y, 0.0f, 1.0f);
             }
         }
 
