@@ -31,6 +31,11 @@ EOF
 }
 
 print_logo
+echo "[INFO] Rebuilding ROS packages ..."
+source /opt/ros/jazzy/setup.bash
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release 2>&1
+source install/setup.bash
+echo ""
 echo "[INFO] Activate common environment ..."
 sleep 1
 

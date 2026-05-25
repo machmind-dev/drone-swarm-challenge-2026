@@ -32,7 +32,7 @@ cat << "EOF"
 EOF
 
 echo -e "${WHITE}"
-echo -e "                   [GCS — Swarm Ollama — Gemma3 4B LLM Control]"
+echo -e "                   [GCS — Swarm Ollama — Gemma3 1B LLM Control]"
 echo -e "${RESET}"
 echo ""
 
@@ -55,7 +55,7 @@ source "$ROS_SETUP"
 echo "[INFO] ROS 2 sourced: $ROS_DISTRO"
 echo ""
 echo -e "${YELLOW}[INFO] Ollama must be running: ollama serve${RESET}"
-echo "[INFO] Model: gemma3:4b  |  Arena: x=0-20m  y=0-10m  z=0-5m"
+echo "[INFO] Model: gemma3:1b  |  Arena: x=0-20m  y=0-10m  z=0-5m"
 echo "[INFO] Type natural-language commands, e.g. 'Send drone 1 to position 10, 5'"
 echo ""
 

@@ -6,7 +6,7 @@ Usage:
     python3 ollama_commander.py [--model MODEL] [--ollama URL]
 
 Defaults:
-    model  : gemma3:4b
+    model  : gemma3:1b
     ollama : http://localhost:11434
 
 Type a plain-English command at the prompt.  The LLM translates it to JSON,
@@ -230,8 +230,8 @@ def run_repl(node: OllamaCommanderNode, model: str, ollama_url: str):
 # ── Entry point ────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Ollama LLM swarm commander")
-    parser.add_argument("--model",  default="gemma3:4b",
-                        help="Ollama model name (default: gemma3:4b)")
+    parser.add_argument("--model",  default="gemma3:1b",
+                        help="Ollama model name (default: gemma3:1b)")
     parser.add_argument("--ollama", default="http://localhost:11434",
                         help="Ollama base URL (default: http://localhost:11434)")
     args = parser.parse_args()
