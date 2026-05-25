@@ -74,6 +74,13 @@
 
 static const char *TAG = "aruco_pose";
 
+/* OV5647 AEC brightness target passed to V4L2_CID_EXPOSURE_ABSOLUTE.
+ * Range 0-47: sensor_target = value × 4.92; 47 ≈ 91% of full scale (maximum).
+ * 47: dark indoor venue.  15-20: daylit venue with windows. */
+#ifndef CONFIG_VISION_AEC_TARGET
+#define CONFIG_VISION_AEC_TARGET 15
+#endif
+
 /* ── Shared pose state — written by aruco task (CPU0), read by tof task (CPU1) */
 static portMUX_TYPE s_pose_mux  = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool    s_pose_valid = false;
@@ -519,9 +526,8 @@ void aruco_pose_start(void)
     params.adaptiveThreshWinSizeMin    = 7;
     params.adaptiveThreshWinSizeMax    = 7;
     params.adaptiveThreshWinSizeStep   = 1;
-    /* adaptiveThreshConstant left at default 7. Contrast normalisation is done
-     * in the RGB565->grey loop (norm_max approach), so the image always arrives
-     * with proper dynamic range regardless of ambient brightness. */
+    /* adaptiveThreshConstant left at default 7. The 98th-percentile norm_max
+     * stretch ensures proper dynamic range before this threshold runs. */
     params.cornerRefinementMethod      = cv::aruco::CORNER_REFINE_NONE;
     params.errorCorrectionRate         = 0.6f;
     cv::aruco::ArucoDetector detector(dict, params);
@@ -649,11 +655,17 @@ void aruco_pose_start(void)
         ectrls.count      = 1;
         ectrls.controls   = &ectrl;
 
-        /* Push OV5647 AEC target to maximum brightness */
+        /* Set OV5647 AEC brightness target.  Override CONFIG_VISION_AEC_TARGET
+         * in CMakeLists (add_compile_definitions) to tune per venue:
+         *   47 = dark indoor arena (~91% full scale — original value)
+         *   20 = daylit venue with windows (~38% full scale — default now)
+         *    0 = minimum (fully automatic, no floor) */
         ectrl.id    = V4L2_CID_EXPOSURE_ABSOLUTE;
-        ectrl.value = 47;   /* => sensor AEC target 231/255; reduce if over-exposed */
+        ectrl.value = CONFIG_VISION_AEC_TARGET;
         if (ioctl(video_fd, VIDIOC_S_EXT_CTRLS, &ectrls) == 0)
-            ESP_LOGI(TAG, "OV5647 AEC target set bright (EXT EXPOSURE_ABSOLUTE=47)");
+            ESP_LOGI(TAG, "OV5647 AEC target=%d (~%.0f%% full scale)",
+                     CONFIG_VISION_AEC_TARGET,
+                     (float)CONFIG_VISION_AEC_TARGET * 4.92f / 255.0f * 100.0f);
         else
             ESP_LOGW(TAG, "VIDIOC_S_EXT_CTRLS EXPOSURE_ABSOLUTE failed (errno=%d)", errno);
     }

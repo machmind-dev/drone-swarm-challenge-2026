@@ -30,6 +30,29 @@ M1:4.94m POSE:1:15.538:6.171:4.056:0.059:0.736:-0.046:0.673
 
 Detection pipeline: 800×800 capture → center-crop to 800×600 → resize to 320×240 (QVGA) for ArUco.
 
+## Camera Exposure Tuning
+
+The OV5647 AEC (auto-exposure) brightness target is set via `CONFIG_VISION_AEC_TARGET`
+in `main/aruco_pose.cpp`. Range is 0–47; the sensor target is `value × 4.92` out of 255.
+
+```cpp
+#define CONFIG_VISION_AEC_TARGET 15   // ← tune per venue
+```
+
+| Value | Sensor target | Use when |
+|-------|--------------|----------|
+| 47 | ~91% (max) | Dark indoor arena, no windows |
+| 20 | ~38% | Indoor with some ambient light |
+| 15 | ~29% | Daylit venue, windows visible — **current default** |
+| 10 | ~19% | Strong window glare / direct sunlight |
+
+To override without editing source, add to `main/CMakeLists.txt`:
+```cmake
+target_compile_options(${COMPONENT_LIB} PRIVATE ... "-DCONFIG_VISION_AEC_TARGET=10")
+```
+
+Confirmed at value 15: ArUco markers detected correctly in daylit conditions (2026-05-25).
+
 ## Detection Resolution
 
 Two modes are selectable at the top of `main/aruco_pose.cpp`:
