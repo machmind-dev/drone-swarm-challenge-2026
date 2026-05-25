@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=true
+Exec=/home/machmind/drone-swarm-challenge-2026/launchers/ubuntu-xfce-pi5/launch-swarm-ollama.sh
+Path=/home/machmind/drone-swarm-challenge-2026/launchers/ubuntu-xfce-pi5/
+Name=GCS — Swarm Ollama
+Comment=Natural-language swarm control via Gemma3 4B LLM (Ollama)
+Icon=/home/machmind/drone-swarm-challenge-2026/launchers/swarm_ico.png
