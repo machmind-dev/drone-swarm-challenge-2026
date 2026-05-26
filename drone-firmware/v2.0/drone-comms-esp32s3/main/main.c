@@ -101,7 +101,7 @@ static const char *TAG = "drone";
 #define VISION_TIMEOUT_MS      1500
 #define VISION_FADE_MS         3000   /* send last pose with rising covariance after ArUco loss */
 #define MAX_POSE_JUMP_M        1.0f   /* reject single-frame pose jumps larger than this (m) */
-#define COLLISION_HALT_MM      500    /* hold position if any horizontal ToF sensor reads < this */
+#define VISION_YAW_COV         0.05f  /* vision yaw covariance fed to EKF2 (rad²) */
 
 #define MARKER_ID_DISC(id)  ((id)*100)
 #define MARKER_ID_TEXT(id)  ((id)*100+1)
@@ -210,6 +210,8 @@ volatile int64_t last_vision_pose_ms = 0;
 
 /* Last accepted vision pose — used for fade-out and jump-filter baseline */
 static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
+/* Yaw derived from ArUco quaternion; camera +Z = body forward, so yaw ≠ standard formula */
+static volatile float vision_yaw = 0.0f;
 
 /* True once map_home has been set from a real vision pose.  Guards the
  * inertial fallback so the GCS disc is never placed at arena (0,0) just
@@ -343,12 +345,12 @@ static void mav_set_mode(uint32_t custom_mode)
     ESP_LOGI(TAG, "MAV: SET_MODE 0x%08lX", (unsigned long)custom_mode);
 }
 
-void mav_send_vision_estimate(float x, float y, float z, float pos_variance)
+void mav_send_vision_estimate(float x, float y, float z, float yaw_rad, float pos_variance)
 {
     /* Upper triangle of 6×6 pose covariance (position then attitude).
      * Diagonal indices: [0]=xx [6]=yy [11]=zz [15]=rr [18]=pp [20]=yy_att
      * pos_variance: 0.01 = good fix; rises toward 0.50 during fade-out after ArUco loss.
-     * Attitude: NaN → EKF2 skips attitude fusion entirely. */
+     * Roll/pitch: NaN → EKF2 skips; yaw: VISION_YAW_COV → EKF2 fuses ArUco heading. */
     static float cov[21];
     static bool cov_init = false;
     if (!cov_init) {
@@ -356,7 +358,7 @@ void mav_send_vision_estimate(float x, float y, float z, float pos_variance)
         for (int i = 0; i < 21; i++) cov[i] = 0.0f;
         cov[15] = __builtin_nanf("");  /* roll  — no attitude fusion */
         cov[18] = __builtin_nanf("");  /* pitch — no attitude fusion */
-        cov[20] = __builtin_nanf("");  /* yaw   — no attitude fusion */
+        cov[20] = VISION_YAW_COV;     /* yaw   — fuse ArUco heading */
     }
     cov[0]  = pos_variance;
     cov[6]  = pos_variance;
@@ -367,7 +369,7 @@ void mav_send_vision_estimate(float x, float y, float z, float pos_variance)
         GCS_SYSID, GCS_COMPID, &msg,
         (uint64_t)esp_timer_get_time(),
         x, y, z,
-        0.0f, 0.0f, 0.0f,   /* roll/pitch/yaw: zeros, attitude not fused */
+        0.0f, 0.0f, yaw_rad,
         cov, 0);
     mav_send(&msg);
 }
@@ -569,24 +571,6 @@ static void prearm_stream_task_fn(void *arg)
     vTaskDelete(NULL);
 }
 
-/* ── Software collision avoidance — all 5 horizontal ToF sensors ──────────
- * Returns true if any horizontal sensor reports a valid reading below the
- * halt threshold.  status==0 is the VL53L1X "range valid" flag; dist==0
- * with status!=0 means no target (too far) or phase fail (too close but
- * already crashed) — both are excluded to avoid false positives. */
-static bool obstacle_detected(void)
-{
-    p4_tof_data_t tof_now;
-    if (!p4_link_get_tof(&tof_now)) return false;
-    for (int s = 0; s < 5; s++) {   /* slots 0–4: Left, L-front, Front, R-front, Right */
-        if (tof_now.status[s] == 0 &&
-            tof_now.dist_mm[s] > 0 &&
-            tof_now.dist_mm[s] < COLLISION_HALT_MM)
-            return true;
-    }
-    return false;
-}
-
 /* ══════════════════════════════════════════════════════════════════════════
  * Mission FreeRTOS task
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -625,17 +609,11 @@ static void mission_task_fn(void *arg)
     t0 = xTaskGetTickCount();
     do {
         if (drone_state != DRONE_MISSION) goto mission_abort;
-        if (obstacle_detected()) {
-            /* Hold current PX4 position until all sensors clear */
-            if (px4_pos_valid)
-                mav_set_position_ned(px4_pos_x, px4_pos_y, -px4_pos_z);
-            else
-                mav_set_position_ned(home_x, home_y, -MISSION_TAKEOFF_ALT_M);
-        } else {
+        {
             float sp_x   = setpoint_received ? setpoint_x   : home_x;
             float sp_y   = setpoint_received ? setpoint_y   : home_y;
             float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
-            float sp_yaw = setpoint_received ? setpoint_yaw : 0.0f;
+            float sp_yaw = setpoint_received ? setpoint_yaw : (vision_pose_valid ? vision_yaw : 0.0f);
             mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
         }
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
@@ -1003,11 +981,9 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
      * causing the GCS disc to appear at the wrong corner before ArUco is acquired. */
     if (vision_pose_valid) {
         apply_pose_to_drone_markers(vp_x, vp_y, vp_z, vp_qx, vp_qy, vp_qz, vp_qw);
-    } else if (px4_pos_valid && inertial_anchor_valid) {
-        float disp_x = map_home_x + (px4_pos_x - px4_home_x);
-        float disp_y = map_home_y + (px4_pos_y - px4_home_y);
-        float disp_z = map_home_z + (px4_pos_z - px4_home_z);
-        apply_pose_to_drone_markers(disp_x, disp_y, disp_z, 0.0f, 0.0f, 0.0f, 1.0f);
+    } else if (inertial_anchor_valid) {
+        /* Freeze disc at last confirmed vision position — avoids teleport to (0,0) */
+        apply_pose_to_drone_markers(vp_last_x, vp_last_y, vp_last_z, 0.0f, 0.0f, 0.0f, 1.0f);
     }
 
     /* RViz markers at 2 Hz (every 5th tick) — was 10 Hz; reduces micro-ROS UDP load 5x */
@@ -1447,12 +1423,17 @@ void app_main(void)
                     inertial_anchor_valid = true;
                 }
 
+                /* Camera +Z = body forward; project onto world XY to get heading */
+                float fwd_x = 2.0f * (vp_qx * vp_qz + vp_qy * vp_qw);
+                float fwd_y = 2.0f * (vp_qy * vp_qz - vp_qx * vp_qw);
+                vision_yaw  = atan2f(fwd_y, fwd_x);
+
                 if (vision_enabled) {
                     float tx = vp_x - ned_offset_x;
                     float ty = vp_y - ned_offset_y;
                     last_vis_sent_x = tx;
                     last_vis_sent_y = ty;
-                    mav_send_vision_estimate(tx, ty, vp_z, 0.01f);
+                    mav_send_vision_estimate(tx, ty, vp_z, vision_yaw, 0.01f);
                 }
             }
         } else if (vision_enabled && last_vision_pose_ms > 0) {
@@ -1467,7 +1448,7 @@ void app_main(void)
                 float ty = vp_last_y - ned_offset_y;
                 last_vis_sent_x = tx;
                 last_vis_sent_y = ty;
-                mav_send_vision_estimate(tx, ty, vp_last_z, cov);
+                mav_send_vision_estimate(tx, ty, vp_last_z, vision_yaw, cov);
             }
         }
 
