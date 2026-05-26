@@ -110,6 +110,7 @@ static void rx_task(void *arg)
                     s_pose.x  = c->pose.x;  s_pose.y  = c->pose.y;  s_pose.z  = c->pose.z;
                     s_pose.qx = c->pose.qx; s_pose.qy = c->pose.qy;
                     s_pose.qz = c->pose.qz; s_pose.qw = c->pose.qw;
+                    s_pose.reproj_err = c->pose.reproj_err;
                     s_boxes      = c->boxes;
                     s_received   = true;
                     s_last_rx_us = esp_timer_get_time();

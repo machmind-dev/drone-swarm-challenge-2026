@@ -14,7 +14,7 @@ void aruco_pose_start(void);
  * was computed this frame; trigger_id is 0xFF if no trigger marker visible. */
 bool aruco_pose_get_latest(float *x, float *y, float *z,
                             float *qx, float *qy, float *qz, float *qw,
-                            uint8_t *trigger_id);
+                            uint8_t *trigger_id, float *reproj_err);
 
 /* Copy the most recent box marker world positions (IDs 31-46, count >= 0). */
 void aruco_boxes_get_latest(p4_boxes_t *out);

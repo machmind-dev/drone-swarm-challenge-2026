@@ -86,18 +86,20 @@ static portMUX_TYPE s_pose_mux  = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool    s_pose_valid = false;
 static volatile float   s_px, s_py, s_pz;
 static volatile float   s_pqx, s_pqy, s_pqz, s_pqw;
+static volatile float   s_reproj_err = 0.0f; /* mean corner reprojection error (pixels) */
 static volatile uint8_t s_trigger_id = 0xFF; /* TEST: 0xFF=none, else first detected marker ID */
 static p4_boxes_t       s_boxes = {};  /* protected by s_pose_mux */
 
 extern "C" bool aruco_pose_get_latest(float *x, float *y, float *z,
                                        float *qx, float *qy, float *qz, float *qw,
-                                       uint8_t *trigger_id)
+                                       uint8_t *trigger_id, float *reproj_err)
 {
     taskENTER_CRITICAL(&s_pose_mux);
     bool v = s_pose_valid;
     *x = s_px; *y = s_py; *z = s_pz;
     *qx = s_pqx; *qy = s_pqy; *qz = s_pqz; *qw = s_pqw;
     *trigger_id = s_trigger_id;
+    *reproj_err = s_reproj_err;
     taskEXIT_CRITICAL(&s_pose_mux);
     return v;
 }
@@ -888,6 +890,7 @@ void aruco_pose_start(void)
             float  qx_out = 0, qy_out = 0, qz_out = 0, qw_out = 1;
             int    pose_n = 0;
             float  best_dist = 1e9f;
+            float  best_reproj = 0.0f;
             /* Static: persist last valid world-camera transform across frames so
              * box positions can be computed even when no arena map marker is
              * currently visible (uses most-recent known pose). */
@@ -922,8 +925,20 @@ void aruco_pose_start(void)
                     px_sum += p_world.at<double>(0);
                     py_sum += p_world.at<double>(1);
                     pz_sum += p_world.at<double>(2);
+                    /* Reprojection error: mean pixel distance between detected and projected corners */
+                    std::vector<cv::Point2f> proj_pts;
+                    cv::projectPoints(single_obj, rvec_s, tvec_s, K, D, proj_pts);
+                    float reproj_sum = 0.0f;
+                    for (int j = 0; j < 4; j++) {
+                        float ex = proj_pts[j].x - c[j].x;
+                        float ey = proj_pts[j].y - c[j].y;
+                        reproj_sum += sqrtf(ex*ex + ey*ey);
+                    }
+                    float reproj = reproj_sum / 4.0f;
+
                     if (dist < best_dist) {
-                        best_dist = dist;
+                        best_dist  = dist;
+                        best_reproj = reproj;
                         best_R_wc  = R_lw * R_l2c.t();
                         best_pw_x  = (float)p_world.at<double>(0);
                         best_pw_y  = (float)p_world.at<double>(1);
@@ -981,6 +996,7 @@ void aruco_pose_start(void)
                 s_py = (float)(py_sum / pose_n);
                 s_pz = (float)(pz_sum / pose_n);
                 s_pqx = qx_out; s_pqy = qy_out; s_pqz = qz_out; s_pqw = qw_out;
+                s_reproj_err = best_reproj;
                 s_trigger_id = new_tid;
                 s_boxes = new_boxes;
                 taskEXIT_CRITICAL(&s_pose_mux);

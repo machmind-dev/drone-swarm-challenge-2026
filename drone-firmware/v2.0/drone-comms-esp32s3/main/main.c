@@ -102,6 +102,8 @@ static const char *TAG = "drone";
 #define VISION_FADE_MS         3000   /* send last pose with rising covariance after ArUco loss */
 #define MAX_POSE_JUMP_M        1.0f   /* reject single-frame pose jumps larger than this (m) */
 #define VISION_YAW_COV         0.05f  /* vision yaw covariance fed to EKF2 (rad²) */
+#define COLLISION_MARGIN_M     0.3f   /* keep this distance from any detected obstacle */
+#define REPROJ_REJECT_PX       10.0f  /* reject ArUco frame if reprojection error > this */
 
 #define MARKER_ID_DISC(id)  ((id)*100)
 #define MARKER_ID_TEXT(id)  ((id)*100+1)
@@ -571,6 +573,61 @@ static void prearm_stream_task_fn(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ── Obstacle clearance — returns ToF reading (mm) for the sensor nearest
+ * to bearing_body_rad (body-frame angle, 0=forward, +ve=right, radians).
+ * Sensor slots: 0=Left(−90°) 1=L-front(−45°) 2=Front(0°) 3=R-front(+45°) 4=Right(+90°)
+ * Returns UINT16_MAX when bearing is rearward (>±112.5°) or data unavailable. */
+static uint16_t tof_clearance_for_bearing(float bearing_body_rad)
+{
+    float deg = bearing_body_rad * 180.0f / (float)M_PI;
+    /* Normalise to (−180, 180] */
+    while (deg >  180.0f) deg -= 360.0f;
+    while (deg < -180.0f) deg += 360.0f;
+
+    int slot;
+    if      (fabsf(deg)        <= 22.5f) slot = 2;  /* Front    0° */
+    else if (fabsf(deg - 45.f) <= 22.5f) slot = 3;  /* R-front +45° */
+    else if (fabsf(deg + 45.f) <= 22.5f) slot = 1;  /* L-front −45° */
+    else if (fabsf(deg - 90.f) <= 22.5f) slot = 4;  /* Right   +90° */
+    else if (fabsf(deg + 90.f) <= 22.5f) slot = 0;  /* Left    −90° */
+    else return UINT16_MAX;  /* rearward — no sensor covers this bearing */
+
+    p4_tof_data_t tof;
+    if (!p4_link_get_tof(&tof)) return UINT16_MAX;
+    if (tof.status[slot] != 0 || tof.dist_mm[slot] == 0) return UINT16_MAX;
+    return tof.dist_mm[slot];
+}
+
+/* ── Clamp setpoint so the drone stops COLLISION_MARGIN_M short of any obstacle
+ * in the direction of travel.  Modifies *sp_x / *sp_y in place. */
+static void clamp_setpoint_for_obstacles(float cur_x, float cur_y,
+                                          float *sp_x,  float *sp_y)
+{
+    float dx = *sp_x - cur_x;
+    float dy = *sp_y - cur_y;
+    float dist = sqrtf(dx * dx + dy * dy);
+    if (dist < 0.05f) return;  /* already at target, nothing to clamp */
+
+    /* World-frame bearing → body-frame bearing using latest vision yaw */
+    float bearing_world = atan2f(dy, dx);
+    float bearing_body  = bearing_world - vision_yaw;
+
+    uint16_t clearance_mm = tof_clearance_for_bearing(bearing_body);
+    if (clearance_mm == UINT16_MAX) return;  /* no sensor / rearward */
+
+    float safe_m = (clearance_mm / 1000.0f) - COLLISION_MARGIN_M;
+    if (safe_m < 0.0f) safe_m = 0.0f;
+
+    if (dist > safe_m) {
+        /* Clamp along the approach vector */
+        *sp_x = cur_x + (dx / dist) * safe_m;
+        *sp_y = cur_y + (dy / dist) * safe_m;
+        ESP_LOGD(TAG, "Obstacle clamp: clearance=%.2fm safe=%.2fm → sp(%.2f,%.2f)",
+                 (double)(clearance_mm / 1000.0f), (double)safe_m,
+                 (double)*sp_x, (double)*sp_y);
+    }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * Mission FreeRTOS task
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -614,6 +671,8 @@ static void mission_task_fn(void *arg)
             float sp_y   = setpoint_received ? setpoint_y   : home_y;
             float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
             float sp_yaw = setpoint_received ? setpoint_yaw : (vision_pose_valid ? vision_yaw : 0.0f);
+            if (px4_pos_valid)
+                clamp_setpoint_for_obstacles(px4_pos_x, px4_pos_y, &sp_x, &sp_y);
             mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
         }
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
@@ -1404,6 +1463,11 @@ void app_main(void)
         if (pose.valid) {
             /* Issue 3: reject implausibly large single-frame jumps (ArUco flip at
              * steep angles produces position discontinuities > 1 m in one 50 ms frame). */
+            if (pose.reproj_err > REPROJ_REJECT_PX) {
+                ESP_LOGW(TAG, "Vision rejected: reproj=%.1fpx > %.0fpx",
+                         (double)pose.reproj_err, (double)REPROJ_REJECT_PX);
+            } else {
+
             float dxv  = pose.x - vp_x, dyv = pose.y - vp_y, dzv = pose.z - vp_z;
             float jump = sqrtf(dxv * dxv + dyv * dyv + dzv * dzv);
             if (vision_pose_valid && jump > MAX_POSE_JUMP_M) {
@@ -1433,9 +1497,14 @@ void app_main(void)
                     float ty = vp_y - ned_offset_y;
                     last_vis_sent_x = tx;
                     last_vis_sent_y = ty;
-                    mav_send_vision_estimate(tx, ty, vp_z, vision_yaw, 0.01f);
+                    /* Dynamic covariance: var = 0.01 + (reproj/10)² × 0.49
+                     * <2px→~0.01 (excellent), 5px→~0.13, 8px→~0.32, 10px=rejected */
+                    float r = pose.reproj_err / REPROJ_REJECT_PX;
+                    float pos_var = 0.01f + r * r * 0.49f;
+                    mav_send_vision_estimate(tx, ty, vp_z, vision_yaw, pos_var);
                 }
             }
+            } /* end reproj_err gate */
         } else if (vision_enabled && last_vision_pose_ms > 0) {
             /* Issue 2: vision fade-out — after ArUco is lost keep sending the last
              * known pose with rising covariance for VISION_FADE_MS.  PX4 EKF2

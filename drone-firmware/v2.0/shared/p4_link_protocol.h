@@ -29,7 +29,8 @@ typedef struct __attribute__((packed)) {
     uint8_t  trigger_id;    /* TEST: first detected marker ID, 0xFF = none */
     float    x, y, z;      /* position metres, arena frame           */
     float    qx, qy, qz, qw; /* orientation quaternion               */
-} p4_pose_t;   /* 30 bytes */
+    float    reproj_err;    /* mean corner reprojection error (pixels) for best marker */
+} p4_pose_t;   /* 34 bytes */
 
 /* ── Box marker entries (detected capture-zone boxes) */
 #define P4_LINK_BOX_MAX  6   /* max box markers per frame (blue 31-36, red 41-46) */
@@ -46,13 +47,13 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
     p4_tof_t   tof;    /* 18 B */
-    p4_pose_t  pose;   /* 30 B */
+    p4_pose_t  pose;   /* 34 B */
     p4_boxes_t boxes;  /* 79 B */
-} p4_combined_t;   /* 127 bytes */
+} p4_combined_t;   /* 131 bytes */
 
 /* ── Frame sizes ──────────────────────────────────────────────────────── */
-#define P4_LINK_PAYLOAD_LEN  ((uint8_t)sizeof(p4_combined_t))  /* 127 */
-#define P4_LINK_FRAME_LEN    (1 + 1 + 1 + P4_LINK_PAYLOAD_LEN + 1)  /* 131 */
+#define P4_LINK_PAYLOAD_LEN  ((uint8_t)sizeof(p4_combined_t))  /* 131 */
+#define P4_LINK_FRAME_LEN    (1 + 1 + 1 + P4_LINK_PAYLOAD_LEN + 1)  /* 135 */
 
 /* ── CRC-8 (poly 0x07) — computed over [TYPE, PAYLOAD...] ────────────── */
 static inline uint8_t p4_link_crc8(const uint8_t *data, uint8_t len)

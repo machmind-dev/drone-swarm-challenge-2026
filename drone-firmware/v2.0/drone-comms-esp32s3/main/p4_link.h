@@ -14,6 +14,7 @@ typedef struct {
     uint8_t trigger_id;   /* TEST: detected marker ID, 0xFF = none */
     float   x, y, z;
     float   qx, qy, qz, qw;
+    float   reproj_err;   /* mean corner reprojection error (pixels); 0 if pose invalid */
 } p4_pose_data_t;
 
 /* Start the UART2 receiver task.  Must be called once before app_main spins. */

@@ -16,5 +16,5 @@ void p4_link_send_combined(const uint16_t *dist_mm, const uint8_t *status,
                             bool pose_valid,
                             float x, float y, float z,
                             float qx, float qy, float qz, float qw,
-                            uint8_t trigger_id,
+                            uint8_t trigger_id, float reproj_err,
                             const p4_boxes_t *boxes);
