@@ -198,7 +198,7 @@ for ax, title in zip(axes, titles):
     ax.axis('off')
     ax.set_title(title, color='white', pad=6, fontsize=10)
     im = ax.imshow(np.zeros((H, W, 3), dtype=np.uint8),
-                   interpolation='nearest', aspect='equal', vmin=0, vmax=255)
+                   interpolation='nearest', aspect='auto', vmin=0, vmax=255)
     ims.append(im)
 
 stats_txt = axes[0].text(0.01, 0.02, "waiting…",
@@ -221,6 +221,23 @@ tof_txt = axes[2].text(0.01, 0.98, "",
 plt.tight_layout()
 plt.ion()
 plt.show()
+
+# ── center crosshair + click-to-measure ───────────────────────────────────────
+# Draw a vertical red line at x = W/2 on panel 1 to mark the image centre.
+# Click anywhere on panel 1 to print the image pixel coordinate.
+# Optical centre empirically measured at cam_cx=687 in 800-wide (two cameras).
+# Stream is 10× downscale of sensor output: optical_stream_x = 687/10 = 68.7
+_OPT_CX = 687.0 * W / 800.0   # scales with whatever W the stream reports
+_cx_line = axes[0].axvline(x=_OPT_CX, color='red', linewidth=1.0,
+                            linestyle='--', alpha=0.7)
+
+def _on_click(event):
+    if event.inaxes is axes[0] and event.xdata is not None:
+        px = event.xdata
+        print(f"[CLICK] image x={px:.1f}  (optical_cx={_OPT_CX:.1f}, offset_from_opt={px - _OPT_CX:+.1f} px)",
+              flush=True)
+
+fig.canvas.mpl_connect('button_press_event', _on_click)
 
 frame_n = 0
 _frame_ts = deque(maxlen=21)   # last 20 frame timestamps for rolling FPS

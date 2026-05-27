@@ -493,7 +493,12 @@ void aruco_pose_start(void)
      * marker 50x50cm placed at 1.500m reported 1.220m → scale = 1.500/1.220 */
     const double fx = 892.0 * scale * (1.500 / 1.220);
     const double fy = fx;
-    const double cx = (double)POSE_REQ_W / 2.0;
+    /* Optical centre: confirmed on three measurements (two cameras, two X_ADDR
+     * configs: 978 and 500) → always x≈68.7/80 stream = 687 in 800-wide output.
+     * ISP crop is anchored at X_ADDR_START=500; X_ADDR changes do not shift the
+     * output position of the principal point. Lens is physically offset right. */
+    const double cam_cx = 687.0;
+    const double cx = cam_cx * scale;
     const double cy_c = (double)POSE_REQ_H / 2.0;
     cv::Mat K = (cv::Mat_<double>(3, 3)
                  << fx,  0, cx,
