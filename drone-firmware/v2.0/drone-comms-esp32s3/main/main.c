@@ -500,6 +500,7 @@ static void drone_id_led_update(void)
  * ══════════════════════════════════════════════════════════════════════════ */
 
 static rcl_publisher_t    publisher_marker;
+static rcl_publisher_t    publisher_pose;
 static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 static rcl_publisher_t    publisher_battery;
@@ -522,6 +523,7 @@ static rcl_subscription_t team_color_sub;
 
 static visualization_msgs__msg__Marker   drone_disc_msg;
 static visualization_msgs__msg__Marker   text_msg;
+static geometry_msgs__msg__PoseStamped   vision_pose_msg;
 static std_msgs__msg__String             command_msg;
 static std_msgs__msg__String             config_msg;
 static geometry_msgs__msg__PoseStamped   control_msg;
@@ -536,6 +538,7 @@ static char topic_gcs_control[64];
 static char topic_state[64];
 static char topic_role[64];
 static char topic_battery[64];
+static char topic_pose[64];
 static char drone_ns[16];
 
 /* ── Apply pose to RViz drone disc ───────────────────────────────────────── */
@@ -1050,8 +1053,22 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     static uint32_t marker_tick = 0;
     if (++marker_tick >= 5) {
         marker_tick = 0;
-        RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
+        if (!vision_pose_valid)
+            RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
         RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
+        if (vision_pose_valid) {
+            int64_t ts = esp_timer_get_time();
+            vision_pose_msg.header.stamp.sec     = (int32_t)(ts / 1000000LL);
+            vision_pose_msg.header.stamp.nanosec = (uint32_t)((ts % 1000000LL) * 1000UL);
+            vision_pose_msg.pose.position.x    = vp_x;
+            vision_pose_msg.pose.position.y    = vp_y;
+            vision_pose_msg.pose.position.z    = vp_z;
+            vision_pose_msg.pose.orientation.x = vp_qx;
+            vision_pose_msg.pose.orientation.y = vp_qy;
+            vision_pose_msg.pose.orientation.z = vp_qz;
+            vision_pose_msg.pose.orientation.w = vp_qw;
+            RCSOFTCHECK(rcl_publish(&publisher_pose, &vision_pose_msg, NULL));
+        }
     }
 
     /* Box marker publishing — every tick (100 ms).
@@ -1183,6 +1200,10 @@ static void micro_ros_task(void *arg)
         ROSIDL_GET_MSG_TYPE_SUPPORT(visualization_msgs, msg, Marker),
         "/visualization_marker"));
 
+    RCCHECK(rclc_publisher_init_default(&publisher_pose, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
+        topic_pose));
+
     RCCHECK(rclc_publisher_init_default(&publisher_state, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_state));
 
@@ -1277,6 +1298,7 @@ static void micro_ros_task(void *arg)
     }
 
     RCCHECK(rcl_publisher_fini(&publisher_marker,  &node));
+    RCCHECK(rcl_publisher_fini(&publisher_pose,    &node));
     RCCHECK(rcl_publisher_fini(&publisher_state,   &node));
     RCCHECK(rcl_publisher_fini(&publisher_role,    &node));
     RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
@@ -1347,6 +1369,7 @@ void app_main(void)
     snprintf(topic_state,        sizeof(topic_state),          "/drone_%d/state",            DRONE_ID);
     snprintf(topic_role,         sizeof(topic_role),           "/drone_%d/role",             DRONE_ID);
     snprintf(topic_battery,      sizeof(topic_battery),        "/drone_%d/battery",          DRONE_ID);
+    snprintf(topic_pose,         sizeof(topic_pose),           "/drone_%d/vision_pose",      DRONE_ID);
 
     ESP_LOGI(TAG, "==============================");
     ESP_LOGI(TAG, "DRONE ID   : %d",     DRONE_ID);
@@ -1385,6 +1408,8 @@ void app_main(void)
     drone_disc_msg.color.g = 0.6f;
     drone_disc_msg.color.b = 1.0f;
     drone_disc_msg.color.a = 0.95f;
+    drone_disc_msg.lifetime.sec     = 1;
+    drone_disc_msg.lifetime.nanosec = 500000000;  /* 1.5 s — fades when we stop publishing */
 
     visualization_msgs__msg__Marker__init(&text_msg);
     rosidl_runtime_c__String__assign(&text_msg.header.frame_id, "map");
@@ -1406,6 +1431,9 @@ void app_main(void)
     map_home_y = iy;
     map_home_z = iz;
     apply_pose_to_drone_markers(ix, iy, iz, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    geometry_msgs__msg__PoseStamped__init(&vision_pose_msg);
+    rosidl_runtime_c__String__assign(&vision_pose_msg.header.frame_id, "map");
 
     /* ── Box marker messages ────────────────────────────────────────────────── */
     for (int bi = 0; bi < BOX_COUNT; bi++) {

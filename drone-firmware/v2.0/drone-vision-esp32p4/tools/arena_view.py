@@ -99,11 +99,12 @@ p4_visible = []
 p4_trail = deque(maxlen=TRAIL_LEN)
 
 # S3 [POS] line — three positions
-s3_aruco_x = s3_aruco_y = 0.0    # P4_aruco as received by S3
-s3_sent_x  = s3_sent_y  = 0.0    # what S3 sent to PX4
+s3_aruco_x = s3_aruco_y = 0.0    # P4_aruco as received by S3 (arena coords)
+s3_sent_x  = s3_sent_y  = 0.0    # what S3 sent to PX4 (NED-relative coords)
 s3_sent_yaw = 0.0                 # yaw sent to PX4 (vision_yaw, degrees)
-s3_ned_x   = s3_ned_y   = 0.0    # PX4 LOCAL_POSITION_NED feedback
+s3_ned_x   = s3_ned_y   = 0.0    # PX4 LOCAL_POSITION_NED feedback (NED-relative)
 s3_ned_yaw  = 0.0                 # PX4's own yaw from ATTITUDE msg (degrees)
+s3_offset_x = s3_offset_y = 0.0  # NED origin in arena coords (= arming position)
 s3_time = 0.0
 
 # ── Parsers ───────────────────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ _POS_RE = re.compile(
     r'\[POS\].*P4_aruco=\(([-\d.]+),([-\d.]+)\)'
     r'.*sent_px4=\(([-\d.]+),([-\d.]+),yaw=([-\d.]+)\)'
     r'.*px4_ned=\(([-\d.]+),([-\d.]+),yaw=([-\d.]+)\)'
+    r'.*offset=\(([-\d.]+),([-\d.]+)\)'
 )
 
 
@@ -145,7 +147,7 @@ def _parse_p4(line):
 
 def _parse_s3(line):
     global s3_aruco_x, s3_aruco_y, s3_sent_x, s3_sent_y, s3_sent_yaw
-    global s3_ned_x, s3_ned_y, s3_ned_yaw, s3_time
+    global s3_ned_x, s3_ned_y, s3_ned_yaw, s3_offset_x, s3_offset_y, s3_time
     m = _POS_RE.search(line)
     if not m:
         return
@@ -154,6 +156,7 @@ def _parse_s3(line):
     s3_sent_yaw = float(m.group(5))
     s3_ned_x    = float(m.group(6));  s3_ned_y    = float(m.group(7))
     s3_ned_yaw  = float(m.group(8))
+    s3_offset_x = float(m.group(9));  s3_offset_y = float(m.group(10))
     s3_time = time.monotonic()
 
 
@@ -262,7 +265,7 @@ DRONE_W = 0.5
 
 
 def _update_drone(x, y, yaw_deg):
-    r = math.radians(yaw_deg + 90.0)   # firmware 0°=+Y wall; trig 0°=+X
+    r = math.radians(yaw_deg + 90.0)   # _quat_to_yaw = camera-right angle; +90° converts to camera-forward
     cr, sr = math.cos(r), math.sin(r)
 
     def _rot(px, py):
@@ -283,6 +286,13 @@ def _update_drone(x, y, yaw_deg):
     hy = y + 1.5 * sr
     _heading_line.set_data([x, hx], [y, hy])
 
+
+# ── NED origin cross (arming position in arena coords) ───────────────────
+ned_origin_plot, = ax.plot([], [], '+', markersize=18, color='#ff8800',
+                           markeredgewidth=2.5, zorder=8)
+ned_origin_label = ax.text(0, 0, '', color='#ff8800', fontsize=7.5,
+                           ha='center', va='bottom', family='monospace', zorder=10,
+                           bbox=dict(facecolor='#00000099', edgecolor='none', pad=1))
 
 # ── S3 sent_px4 marker (yellow diamond) ──────────────────────────────────────
 sent_dot, = ax.plot([], [], 'D', markersize=12, color='#ffee00',
@@ -329,9 +339,11 @@ legend_items = [
     mpatches.Patch(facecolor='none', edgecolor='#cc8800',
                    linewidth=2, label='ArUco marker (z<3m)'),
     mpatches.Patch(facecolor='#00ffee', label='P4 vision (triangle=heading)'),
-    mpatches.Patch(facecolor='#ffee00', label='S3 → PX4 sent estimate'),
+    mpatches.Patch(facecolor='#ffee00', label='S3 → PX4 sent (arena coords)'),
     mpatches.Patch(facecolor='none', edgecolor='#ff8800',
-                   linewidth=2, label='PX4 LOCAL_NED feedback'),
+                   linewidth=2, label='PX4 LOCAL_NED (arena coords)'),
+    mpatches.Patch(facecolor='none', edgecolor='#ff8800',
+                   linewidth=0, label='+ = NED origin (arming pos)'),
 ]
 ax.legend(handles=legend_items, loc='lower right',
           facecolor='#111122', edgecolor='#333', labelcolor='white',
@@ -394,30 +406,44 @@ try:
         s3_localized = s3_fix and (s3_aruco_x != 0.0 or s3_aruco_y != 0.0)
 
         def _s3_heading(x, y, yaw_deg, length=1.2):
-            r = math.radians(yaw_deg + 90.0)   # same convention as P4 triangle
+            # S3 vision_yaw = atan2(camera_fwd_y, camera_fwd_x) — already forward;
+            # no +90° correction needed (unlike P4 quat-yaw which is camera-right).
+            r = math.radians(yaw_deg)
             return [x, x + length * math.cos(r)], [y, y + length * math.sin(r)]
 
         if s3_localized:
-            # sent_px4 — yellow diamond + heading
-            sent_dot.set_data([s3_sent_x], [s3_sent_y])
-            hx, hy = _s3_heading(s3_sent_x, s3_sent_y, s3_sent_yaw)
-            sent_heading.set_data(hx, hy)
-            sent_label.set_position((s3_sent_x, s3_sent_y - 0.6))
-            sent_label.set_text(f"sent {s3_sent_yaw:.0f}°\n({s3_sent_x:.2f},{s3_sent_y:.2f})")
+            # Convert NED-relative coords to arena coords by adding NED origin offset
+            sent_ax = s3_sent_x + s3_offset_x
+            sent_ay = s3_sent_y + s3_offset_y
+            ned_ax  = s3_ned_x  + s3_offset_x
+            ned_ay  = s3_ned_y  + s3_offset_y
 
-            # px4_ned — orange circle + heading
-            ned_dot.set_data([s3_ned_x], [s3_ned_y])
-            hx, hy = _s3_heading(s3_ned_x, s3_ned_y, s3_ned_yaw)
+            # sent_px4 — yellow diamond + heading (arena coords)
+            sent_dot.set_data([sent_ax], [sent_ay])
+            hx, hy = _s3_heading(sent_ax, sent_ay, s3_sent_yaw)
+            sent_heading.set_data(hx, hy)
+            sent_label.set_position((sent_ax, sent_ay - 0.6))
+            sent_label.set_text(f"sent {s3_sent_yaw:.0f}°\n({sent_ax:.2f},{sent_ay:.2f})")
+
+            # px4_ned — orange circle + heading (arena coords)
+            ned_dot.set_data([ned_ax], [ned_ay])
+            hx, hy = _s3_heading(ned_ax, ned_ay, s3_ned_yaw)
             ned_heading.set_data(hx, hy)
-            ned_label.set_position((s3_ned_x, s3_ned_y - 0.6))
-            ned_label.set_text(f"NED {s3_ned_yaw:.0f}°\n({s3_ned_x:.2f},{s3_ned_y:.2f})")
+            ned_label.set_position((ned_ax, ned_ay - 0.6))
+            ned_label.set_text(f"NED {s3_ned_yaw:.0f}°\n({ned_ax:.2f},{ned_ay:.2f})")
+
+            # NED origin cross at arming position
+            ned_origin_plot.set_data([s3_offset_x], [s3_offset_y])
+            ned_origin_label.set_position((s3_offset_x, s3_offset_y + 0.5))
+            ned_origin_label.set_text(f"NED(0,0)\n({s3_offset_x:.1f},{s3_offset_y:.1f})")
 
             s3_txt.set_color('#ffee00')
             s3_txt.set_text(
                 f"S3 [POS]  (age {s3_age:.0f}s)\n"
-                f"  P4→S3  aruco  ({s3_aruco_x:.2f}, {s3_aruco_y:.2f})\n"
-                f"  S3→PX4 sent   ({s3_sent_x:.2f}, {s3_sent_y:.2f})  yaw={s3_sent_yaw:.1f}°\n"
-                f"  PX4    NED    ({s3_ned_x:.2f}, {s3_ned_y:.2f})  yaw={s3_ned_yaw:.1f}°"
+                f"  NED origin / arming  ({s3_offset_x:.1f}, {s3_offset_y:.1f})\n"
+                f"  P4→S3  aruco        ({s3_aruco_x:.2f}, {s3_aruco_y:.2f})\n"
+                f"  S3→PX4 sent (arena) ({sent_ax:.2f}, {sent_ay:.2f})  yaw={s3_sent_yaw:.1f}°\n"
+                f"  PX4    NED  (arena) ({ned_ax:.2f}, {ned_ay:.2f})  yaw={s3_ned_yaw:.1f}°"
             )
         else:
             sent_dot.set_data([], [])
@@ -426,6 +452,8 @@ try:
             ned_dot.set_data([], [])
             ned_heading.set_data([], [])
             ned_label.set_text('')
+            ned_origin_plot.set_data([], [])
+            ned_origin_label.set_text('')
             s3_txt.set_color('#888888')
             s3_txt.set_text('S3: no [POS] data' if ser_s3 else 'S3: not connected')
 

@@ -1,4 +1,5 @@
 # gcs_button_panel.py
+import math
 import os
 import time
 from collections import deque
@@ -26,7 +27,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.6"
+    VERSION = "1.3.7"
 
     def __init__(self, context):
         super().__init__(context)
@@ -390,24 +391,29 @@ class GcsButtonPanel(Plugin):
         path.poses = list(self._trail_deques[drone_id])
         self._trail_pubs[drone_id].publish(path)
 
-        # Heading triangle — flat ARROW marker, reuses vision_pose orientation
+        # Heading triangle — flat TRIANGLE_LIST, apex (widest angle) faces heading.
+        # Camera +Z = optical axis = forward; extract yaw, compute world-frame vertices.
+        q = msg.pose.orientation
+        fwd_x = 2.0 * (q.x * q.z + q.y * q.w)
+        fwd_y = 2.0 * (q.y * q.z - q.x * q.w)
+        yaw_rad = math.atan2(fwd_y, fwd_x)
+        fx = math.cos(yaw_rad);  fy =  math.sin(yaw_rad)   # forward unit vector
+        lx = -math.sin(yaw_rad); ly =  math.cos(yaw_rad)   # left unit vector
+        x = msg.pose.position.x;  y = msg.pose.position.y;  z = 0.02
+        front_d = 0.18;  back_d = 0.06;  side_d = 0.12
         m = Marker()
-        m.header = msg.header
         m.header.frame_id = "map"
         m.ns = "drone_heading"
         m.id = drone_id
-        m.type = Marker.ARROW
+        m.type = Marker.TRIANGLE_LIST
         m.action = Marker.ADD
-        m.pose = msg.pose
-        m.pose.position.z = 0.05   # just above arena floor
-        m.scale.x = 0.9            # shaft + head total length (m)
-        m.scale.y = 0.5            # arrowhead width (m)
-        m.scale.z = 0.15           # flat profile
-        m.color.r = 0.0
-        m.color.g = 0.5
-        m.color.b = 1.0
-        m.color.a = 0.92
-        m.lifetime.sec = 2         # auto-hide if pose stops arriving
+        m.pose.orientation.w = 1.0
+        m.scale.x = m.scale.y = m.scale.z = 1.0
+        m.color.r = 0.2;  m.color.g = 0.6;  m.color.b = 1.0;  m.color.a = 0.95
+        m.lifetime.sec = 2
+        m.points.append(Point(x=x + front_d*fx,            y=y + front_d*fy,            z=z))
+        m.points.append(Point(x=x - back_d*fx + side_d*lx, y=y - back_d*fy + side_d*ly, z=z))
+        m.points.append(Point(x=x - back_d*fx - side_d*lx, y=y - back_d*fy - side_d*ly, z=z))
         self._drone_marker_pubs[drone_id].publish(m)
 
     # ================= Scene Management =================
