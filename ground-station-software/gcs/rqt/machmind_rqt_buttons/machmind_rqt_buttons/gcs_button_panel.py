@@ -65,15 +65,6 @@ class GcsButtonPanel(Plugin):
         self._trail_deques = {}
         self._trail_pubs   = {}
         self._trail_subs   = {}
-        # Distinct colours per drone (R, G, B) for heading triangle markers
-        self._drone_colours = {
-            1: (0.0, 0.8, 1.0),   # cyan
-            2: (0.0, 1.0, 0.4),   # green
-            3: (1.0, 0.6, 0.0),   # orange
-            4: (0.9, 0.0, 0.9),   # magenta
-            5: (1.0, 1.0, 0.0),   # yellow
-        }
-
         for i in range(1, self.DRONE_COUNT + 1):
             self._trail_deques[i] = deque(maxlen=_TRAIL_MAX)
             self._trail_pubs[i]   = self.node.create_publisher(
@@ -400,7 +391,6 @@ class GcsButtonPanel(Plugin):
         self._trail_pubs[drone_id].publish(path)
 
         # Heading triangle — flat ARROW marker, reuses vision_pose orientation
-        r, g, b = self._drone_colours.get(drone_id, (1.0, 1.0, 1.0))
         m = Marker()
         m.header = msg.header
         m.header.frame_id = "map"
@@ -413,7 +403,8 @@ class GcsButtonPanel(Plugin):
         m.scale.x = 0.9            # shaft + head total length (m)
         m.scale.y = 0.5            # arrowhead width (m)
         m.scale.z = 0.15           # flat profile
-        m.color.r, m.color.g, m.color.b, m.color.a = r, g, b, 0.92
+        m.color.r = m.color.g = m.color.b = 1.0
+        m.color.a = 0.92
         m.lifetime.sec = 2         # auto-hide if pose stops arriving
         self._drone_marker_pubs[drone_id].publish(m)
 
