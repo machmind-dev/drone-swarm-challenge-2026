@@ -55,6 +55,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
+from visualization_msgs.msg import Marker
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 DRONE_ID        = int(sys.argv[1]) if len(sys.argv) > 1 else 1
@@ -85,6 +86,8 @@ class MissionNode(Node):
             PoseStamped, f'/gcs/drone_{DRONE_ID}/control', 10)
         self._command_pub = self.create_publisher(
             String, f'/gcs/drone_{DRONE_ID}/command', 10)
+        self._waypoint_pub = self.create_publisher(
+            Marker, f'/drone_{DRONE_ID}/waypoint_marker', 10)
         self.create_subscription(
             String, f'/drone_{DRONE_ID}/state', self._state_cb, 10)
 
@@ -104,6 +107,23 @@ class MissionNode(Node):
         msg.pose.orientation.z = math.sin(yaw_rad / 2.0)
         msg.pose.orientation.w = math.cos(yaw_rad / 2.0)
         self._control_pub.publish(msg)
+
+    def send_waypoint_marker(self, x: float, y: float, z: float):
+        m = Marker()
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = 'map'
+        m.ns = 'waypoint'
+        m.id = DRONE_ID
+        m.type = Marker.SPHERE
+        m.action = Marker.ADD
+        m.pose.position.x = float(x)
+        m.pose.position.y = float(y)
+        m.pose.position.z = float(z)
+        m.pose.orientation.w = 1.0
+        m.scale.x = m.scale.y = m.scale.z = 0.2
+        m.color.r = 1.0; m.color.g = 1.0; m.color.b = 1.0; m.color.a = 0.85
+        m.lifetime.sec = 2
+        self._waypoint_pub.publish(m)
 
     def send_command(self, cmd: str):
         msg = String()
@@ -270,33 +290,44 @@ def run_fly(node: MissionNode):
                 key_queue.clear()
 
             done = False
+            moved = False
             for token in tokens:
                 yaw_rad = math.radians(yaw)
                 if token == K_FORWARD:
                     pos[0] += FLY_STEP_M * math.cos(yaw_rad)
                     pos[1] += FLY_STEP_M * math.sin(yaw_rad)
+                    moved = True
                 elif token == K_BACKWARD:
                     pos[0] -= FLY_STEP_M * math.cos(yaw_rad)
                     pos[1] -= FLY_STEP_M * math.sin(yaw_rad)
+                    moved = True
                 elif token == K_LEFT:
                     # strafe left = 90° CCW from heading
                     pos[0] += FLY_STEP_M * math.cos(yaw_rad - math.pi / 2)
                     pos[1] += FLY_STEP_M * math.sin(yaw_rad - math.pi / 2)
+                    moved = True
                 elif token == K_RIGHT:
                     pos[0] += FLY_STEP_M * math.cos(yaw_rad + math.pi / 2)
                     pos[1] += FLY_STEP_M * math.sin(yaw_rad + math.pi / 2)
+                    moved = True
                 elif token == K_ROT_L:
                     yaw = (yaw - FLY_ROT_DEG) % 360
+                    moved = True
                 elif token == K_ROT_R:
                     yaw = (yaw + FLY_ROT_DEG) % 360
+                    moved = True
                 elif token == K_CLIMB:
                     pos[2] = min(pos[2] + FLY_ALT_STEP_M, FLY_ALT_MAX_M)
+                    moved = True
                 elif token == K_DESCEND:
                     pos[2] = max(pos[2] - FLY_ALT_STEP_M, FLY_ALT_MIN_M)
+                    moved = True
                 elif token in (K_HOME, K_ABORT):
                     done = True
                     break
 
+            if moved:
+                node.send_waypoint_marker(pos[0], pos[1], pos[2])
             status()
             node.send_setpoint(pos[0], pos[1], pos[2], yaw)
             rclpy.spin_once(node, timeout_sec=0.05)
