@@ -26,7 +26,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.5"
+    VERSION = "1.3.6"
 
     def __init__(self, context):
         super().__init__(context)
@@ -403,7 +403,9 @@ class GcsButtonPanel(Plugin):
         m.scale.x = 0.9            # shaft + head total length (m)
         m.scale.y = 0.5            # arrowhead width (m)
         m.scale.z = 0.15           # flat profile
-        m.color.r = m.color.g = m.color.b = 1.0
+        m.color.r = 0.0
+        m.color.g = 0.5
+        m.color.b = 1.0
         m.color.a = 0.92
         m.lifetime.sec = 2         # auto-hide if pose stops arriving
         self._drone_marker_pubs[drone_id].publish(m)
