@@ -27,7 +27,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.7"
+    VERSION = "1.3.8"
 
     def __init__(self, context):
         super().__init__(context)
@@ -59,7 +59,12 @@ class GcsButtonPanel(Plugin):
         self.marker_pub = self.node.create_publisher(Marker, "/visualization_marker", 10)
         self.marker_array_pub = self.node.create_publisher(MarkerArray, "/visualization_marker_array", 10)
         self.team_area_pub = self.node.create_publisher(String, "/gcs/system/team_area", 10)
-        self.team_color_pub = self.node.create_publisher(String, "/gcs/system/team_color", 10)
+        tc_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.team_color_pub = self.node.create_publisher(String, "/gcs/system/team_color", tc_qos)
 
         # Drone trails — nav_msgs/Path, max 300 poses per drone (~60-90 s at ~3-5 Hz)
         _TRAIL_MAX = 300

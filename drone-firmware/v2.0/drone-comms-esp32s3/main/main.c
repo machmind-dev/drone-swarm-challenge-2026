@@ -1234,9 +1234,15 @@ static void micro_ros_task(void *arg)
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
         topic_gcs_control));
 
-    RCCHECK(rclc_subscription_init_best_effort(&team_color_sub, &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
-        "/gcs/system/team_color"));
+    {
+        rmw_qos_profile_t tc_qos = rmw_qos_profile_default;
+        tc_qos.durability = RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL;
+        rcl_subscription_options_t tc_opts = rcl_subscription_get_default_options();
+        tc_opts.qos = tc_qos;
+        RCCHECK(rcl_subscription_init(&team_color_sub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+            "/gcs/system/team_color", &tc_opts));
+    }
 
     /* ── Message buffers ─────────────────────────────────────────────────── */
     command_msg.data.data = (char *)malloc(64);
