@@ -6,9 +6,9 @@ if [ -z "$MACHMIND_SWARM_TERMINAL" ]; then
     export MACHMIND_SWARM_TERMINAL=1
     export NO_AT_BRIDGE=1
     if command -v gnome-terminal >/dev/null 2>&1; then
-        exec gnome-terminal --title="Mach Mind - Swarm Mission" -- bash "$0" "$@"
+        exec gnome-terminal --title="Mach Mind - Manual Flight" -- bash "$0" "$@"
     elif command -v xfce4-terminal >/dev/null 2>&1; then
-        exec xfce4-terminal --title="Mach Mind - Swarm Mission" --hold --command="env MACHMIND_SWARM_TERMINAL=1 bash '$0' $*"
+        exec xfce4-terminal --title="Mach Mind - Manual Flight" --hold --command="env MACHMIND_SWARM_TERMINAL=1 bash '$0' $*"
     fi
 fi
 
@@ -18,6 +18,7 @@ export NO_AT_BRIDGE=1
 TEAL=$'\033[38;2;51;117;110m'
 WHITE=$'\033[38;2;220;220;220m'
 YELLOW=$'\033[38;2;255;200;60m'
+CYAN=$'\033[38;2;0;220;200m'
 RESET=$'\033[0m'
 
 echo -e "${TEAL}"
@@ -32,7 +33,7 @@ cat << "EOF"
 EOF
 
 echo -e "${WHITE}"
-echo -e "                   [Swarm Mission — L-Loop Flight Path]"
+echo -e "                   [Manual Flight — Keyboard Control]"
 echo -e "${RESET}"
 echo ""
 
@@ -50,23 +51,35 @@ if [ ! -f "$ROS_SETUP" ]; then
     exit 1
 fi
 
+# ── Drone selection menu ──────────────────────────────────────────────────────
+echo -e "${CYAN}  Select drone to control:${RESET}"
+echo ""
+echo "  1)  Drone 1"
+echo "  2)  Drone 2"
+echo "  3)  Drone 3"
+echo "  4)  Drone 4"
+echo "  5)  Drone 5"
+echo ""
+read -rp "  Choice [1-5]: " CHOICE
+
+case "$CHOICE" in
+    1|2|3|4|5) DRONE_ID="$CHOICE" ;;
+    *)
+        echo -e "${YELLOW}[WARN] Invalid choice — defaulting to Drone 1${RESET}"
+        DRONE_ID=1
+        ;;
+esac
+
+echo ""
+
 # shellcheck disable=SC1090
 source "$ROS_SETUP"
 echo "[INFO] ROS 2 sourced: $ROS_DISTRO"
-echo ""
-echo -e "${YELLOW}[INFO] Drones: 1 and 2 (running in parallel)${RESET}"
-echo "[INFO] Mission: L-loop — fwd 1m → left 90° → fwd 2m → climb 3m → left 90° → fwd 1m → left 90° → fwd 2m → descend 0.5m"
-echo "[INFO] ARM both drones and press MISSION in rqt to start the flight path."
+echo "[INFO] Drone: $DRONE_ID"
+echo "[INFO] ARM the drone and press MISSION in rqt to start keyboard control."
 echo ""
 
-# Launch both drone missions in parallel; prefix each line so output is readable
-python3 "$MISSION_SCRIPT" 1 2>&1 | sed -u 's/^/[D1] /' &
-PID1=$!
-python3 "$MISSION_SCRIPT" 2 2>&1 | sed -u 's/^/[D2] /' &
-PID2=$!
-
-wait $PID1
-wait $PID2
+python3 "$MISSION_SCRIPT" "$DRONE_ID" fly
 
 echo ""
-read -rp "Mission finished. Press Enter to close..."
+read -rp "Manual flight ended. Press Enter to close..."

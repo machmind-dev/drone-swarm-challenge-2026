@@ -3,7 +3,8 @@
 mission_forward_back.py — L-loop flight path with interactive showcase modes.
 
 Usage:
-    python3 mission_forward_back.py [DRONE_ID]   (default: 1)
+    python3 mission_forward_back.py [DRONE_ID [MODE]]   (DRONE_ID default: 1)
+    MODE: fly | auto | loop  — skips the interactive menu if given
 
 After the drone enters MISSION state the script pauses for an Enter press,
 then offers three execution modes:
@@ -57,6 +58,7 @@ from std_msgs.msg import String
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 DRONE_ID        = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+_MODE_ARG       = sys.argv[2].lower() if len(sys.argv) > 2 else None  # fly|auto|loop
 CRUISE_ALT_M    = 1.5   # must match MISSION_TAKEOFF_ALT_M in firmware
 HIGH_ALT_M      = 3.0
 LOW_ALT_M       = 0.5
@@ -352,21 +354,27 @@ def main():
     input('  Press ENTER to begin... ')
     print()
 
-    print('  Select flight mode:')
-    print('    1 — Auto      (L-loop, each step 5 s)')
-    print('    2 — Fly       (real-time keyboard control)')
-    print('    3 — Loop      (repeat auto sequence until Ctrl-C)')
-    print()
+    _mode_map = {'auto': run_auto, 'fly': run_fly, 'loop': run_loop,
+                 '1': run_auto, '2': run_fly, '3': run_loop}
+    if _MODE_ARG and _MODE_ARG in _mode_map:
+        print(f'  Mode: {_MODE_ARG} (from argument)')
+        print()
+        _mode_map[_MODE_ARG](node)
+    else:
+        print('  Select flight mode:')
+        print('    1 — Auto      (L-loop, each step 5 s)')
+        print('    2 — Fly       (real-time keyboard control)')
+        print('    3 — Loop      (repeat auto sequence until Ctrl-C)')
+        print()
 
-    while True:
-        choice = input('  Enter choice [1/2/3]: ').strip()
-        if choice in ('1', '2', '3'):
-            break
-        print('  Please enter 1, 2, or 3.')
+        while True:
+            choice = input('  Enter choice [1/2/3]: ').strip()
+            if choice in ('1', '2', '3'):
+                break
+            print('  Please enter 1, 2, or 3.')
 
-    print()
-
-    {'1': run_auto, '2': run_fly, '3': run_loop}[choice](node)
+        print()
+        _mode_map[choice](node)
 
     node.destroy_node()
     rclpy.shutdown()
