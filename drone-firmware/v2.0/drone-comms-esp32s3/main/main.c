@@ -92,7 +92,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          2
+#define DRONE_ID          4
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -194,6 +194,7 @@ static const char * const state_names[] = {
 static volatile float home_x = 0.0f, home_y = 0.0f, home_z = 0.0f;
 static volatile int8_t battery_remaining_pct = -1;
 static volatile float px4_pos_x = 0.0f, px4_pos_y = 0.0f, px4_pos_z = 0.0f;
+static volatile float px4_yaw   = 0.0f;   /* radians, from ATTITUDE msg */
 static volatile bool  px4_pos_valid = false;
 static volatile float px4_home_x = 0.0f, px4_home_y = 0.0f, px4_home_z = 0.0f;
 static float map_home_x = 0.0f, map_home_y = 0.0f, map_home_z = 0.0f;
@@ -1133,6 +1134,10 @@ static void mavlink_rx_task_fn(void *arg)
                 px4_pos_y = lpos.y;
                 px4_pos_z = -lpos.z;   /* NED z negated to up-positive */
                 px4_pos_valid = true;
+            } else if (rx_msg.msgid == MAVLINK_MSG_ID_ATTITUDE) {
+                mavlink_attitude_t att;
+                mavlink_msg_attitude_decode(&rx_msg, &att);
+                px4_yaw = att.yaw;     /* radians, NED convention */
             }
         }
     }
@@ -1545,11 +1550,13 @@ void app_main(void)
             pos_log_tick = 0;
             printf("\n");
             fflush(stdout);
-            ESP_LOGI(TAG, "[POS] P4_aruco=(%.2f,%.2f)  sent_px4=(%.2f,%.2f)  px4_ned=(%.2f,%.2f)  offset=(%.0f,%.0f)",
-                     (double)vp_x,            (double)vp_y,
-                     (double)last_vis_sent_x, (double)last_vis_sent_y,
-                     (double)px4_pos_x,       (double)px4_pos_y,
-                     (double)ned_offset_x,    (double)ned_offset_y);
+            ESP_LOGI(TAG, "[POS] P4_aruco=(%.2f,%.2f)  sent_px4=(%.2f,%.2f,yaw=%.1f)  px4_ned=(%.2f,%.2f,yaw=%.1f)  offset=(%.0f,%.0f)",
+                     (double)vp_x,                          (double)vp_y,
+                     (double)last_vis_sent_x,               (double)last_vis_sent_y,
+                     (double)(vision_yaw * 180.0f / M_PI),
+                     (double)px4_pos_x,                     (double)px4_pos_y,
+                     (double)(px4_yaw    * 180.0f / M_PI),
+                     (double)ned_offset_x,                  (double)ned_offset_y);
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
