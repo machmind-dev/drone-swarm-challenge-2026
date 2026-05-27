@@ -399,7 +399,7 @@ class GcsButtonPanel(Plugin):
         yaw_rad = math.atan2(fwd_y, fwd_x)
         fx = math.cos(yaw_rad);  fy =  math.sin(yaw_rad)   # forward unit vector
         lx = -math.sin(yaw_rad); ly =  math.cos(yaw_rad)   # left unit vector
-        x = msg.pose.position.x;  y = msg.pose.position.y;  z = 0.02
+        x = msg.pose.position.x;  y = msg.pose.position.y;  z = msg.pose.position.z
         front_d = 0.18;  back_d = 0.06;  side_d = 0.12
         m = Marker()
         m.header.frame_id = "map"

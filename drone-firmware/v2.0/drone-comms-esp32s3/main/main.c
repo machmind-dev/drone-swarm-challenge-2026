@@ -1053,8 +1053,16 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     static uint32_t marker_tick = 0;
     if (++marker_tick >= 5) {
         marker_tick = 0;
-        if (!vision_pose_valid)
+        static bool s_disc_visible = false;
+        if (!vision_pose_valid) {
             RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
+            s_disc_visible = true;
+        } else if (s_disc_visible) {
+            drone_disc_msg.action = visualization_msgs__msg__Marker__DELETE;
+            RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
+            drone_disc_msg.action = visualization_msgs__msg__Marker__ADD;
+            s_disc_visible = false;
+        }
         RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
         if (vision_pose_valid) {
             int64_t ts = esp_timer_get_time();
