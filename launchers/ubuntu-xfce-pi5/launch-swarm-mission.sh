@@ -72,14 +72,29 @@ esac
 
 echo ""
 
+# ── Team selection menu ───────────────────────────────────────────────────────
+echo -e "${CYAN}  Select team / starting side:${RESET}"
+echo ""
+echo "  1)  Red  (LH — facing +X)"
+echo "  2)  Blue (RH — facing -X)"
+echo ""
+read -rp "  Choice [1/2]: " TEAM_CHOICE
+
+case "$TEAM_CHOICE" in
+    2) TEAM="blue" ;;
+    *) TEAM="red"  ;;
+esac
+
+echo ""
+
 # shellcheck disable=SC1090
 source "$ROS_SETUP"
 echo "[INFO] ROS 2 sourced: $ROS_DISTRO"
-echo "[INFO] Drone: $DRONE_ID"
+echo "[INFO] Drone: $DRONE_ID  Team: $TEAM"
 echo "[INFO] ARM the drone and press MISSION in rqt to start keyboard control."
 echo ""
 
-python3 "$MISSION_SCRIPT" "$DRONE_ID" fly
+python3 "$MISSION_SCRIPT" "$DRONE_ID" fly "$TEAM"
 
 echo ""
 read -rp "Manual flight ended. Press Enter to close..."

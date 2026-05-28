@@ -60,6 +60,19 @@ from visualization_msgs.msg import Marker
 # ── Parameters ────────────────────────────────────────────────────────────────
 DRONE_ID        = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 _MODE_ARG       = sys.argv[2].lower() if len(sys.argv) > 2 else None  # fly|auto|loop
+_TEAM           = sys.argv[3].lower() if len(sys.argv) > 3 else 'red'  # red (LH) | blue (RH)
+
+# Arena starting position for this drone and team.
+# Must match team_color_callback in firmware main.c:
+#   red  (LH): D1→(1,5)  D2→(1,4)  D3→(1,3)  D4→(1,2)  D5→(1,1)
+#   blue (RH): D1→(19,5) D2→(19,6) D3→(19,7) D4→(19,8) D5→(19,9)
+if _TEAM == 'blue':
+    HOME_ARENA_X = 19.0
+    HOME_ARENA_Y = float(DRONE_ID) + 4.0
+else:
+    HOME_ARENA_X = 1.0
+    HOME_ARENA_Y = 6.0 - float(DRONE_ID)
+
 CRUISE_ALT_M    = 1.5   # must match MISSION_TAKEOFF_ALT_M in firmware
 HIGH_ALT_M      = 3.0
 LOW_ALT_M       = 0.5
@@ -248,14 +261,14 @@ def run_fly(node: MissionNode):
     log = node.get_logger()
     log.info('Mode: FLY — keyboard control')
 
-    # Wait for climb
+    # Wait for climb — hold at arena home so the first setpoint is NED (0,0)
     print(f'\n  Waiting for climb ({CLIMB_WAIT_S:.0f} s) ...')
-    if not step_auto(node, 0.0, 0.0, CRUISE_ALT_M, 0.0,
+    if not step_auto(node, HOME_ARENA_X, HOME_ARENA_Y, CRUISE_ALT_M, 0.0,
                      'Climb wait', dwell=CLIMB_WAIT_S):
         return
 
-    # Position state (NED, yaw in degrees)
-    pos = [0.0, 0.0, CRUISE_ALT_M]   # x, y, z
+    # Position state in arena coordinates (firmware subtracts ned_offset → NED)
+    pos = [HOME_ARENA_X, HOME_ARENA_Y, CRUISE_ALT_M]
     yaw = 0.0
 
     key_queue: list = []

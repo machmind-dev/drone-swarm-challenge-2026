@@ -826,8 +826,14 @@ static void command_callback(const void *msg_in)
 
     if (strcmp(buf, "COMMAND_ARM") == 0) {
         if (vision_pose_valid) {
-            home_x = vp_x; home_y = vp_y; home_z = vp_z;
-            ESP_LOGI(TAG, "Home captured from vision: (%.2f, %.2f, %.2f)", home_x, home_y, home_z);
+            /* vp_x/vp_y are arena coords; home_x/y must be NED (drone start = NED 0,0).
+             * Subtracting ned_offset converts arena → NED so all mav_set_position_ned
+             * calls using home_x/y hold the drone at its physical start position. */
+            home_x = vp_x - ned_offset_x;
+            home_y = vp_y - ned_offset_y;
+            home_z = vp_z;
+            ESP_LOGI(TAG, "Home captured from vision: arena(%.2f,%.2f) → NED(%.2f,%.2f)",
+                     (double)vp_x, (double)vp_y, (double)home_x, (double)home_y);
         } else if (px4_pos_valid) {
             /* No ArUco fix — use PX4 inertial position so prearm setpoints match reality */
             home_x = px4_pos_x; home_y = px4_pos_y; home_z = px4_pos_z;
