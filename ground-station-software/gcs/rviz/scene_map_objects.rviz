@@ -57,6 +57,7 @@ Visualization Manager:
         arena_labels: true
         axes: true
         axes_labels: true
+        blue: true
         corner_labels: true
         drone_3: true
         drone_5: true
@@ -64,6 +65,7 @@ Visualization Manager:
         labels_top: true
         launch_points: true
         monuments: true
+        red: true
       Topic:
         Depth: 5
         Durability Policy: Volatile

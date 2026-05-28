@@ -27,7 +27,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.8"
+    VERSION = "1.3.9"
 
     def __init__(self, context):
         super().__init__(context)
@@ -55,9 +55,14 @@ class GcsButtonPanel(Plugin):
 
         self._sw_emerg_active = False   # True after ELAND fired; shows button as active
 
+        # Box label tracking — subscribe to /visualization_marker to detect firmware CUBEs
+        self._box_positions: dict[int, tuple] = {}  # box_id -> (x, y, z, ns)
+
         # Scene publishers
         self.marker_pub = self.node.create_publisher(Marker, "/visualization_marker", 10)
         self.marker_array_pub = self.node.create_publisher(MarkerArray, "/visualization_marker_array", 10)
+        self.node.create_subscription(
+            Marker, "/visualization_marker", self._marker_cb, 10)
         self.team_area_pub = self.node.create_publisher(String, "/gcs/system/team_area", 10)
         tc_qos = QoSProfile(
             depth=1,
@@ -1065,6 +1070,40 @@ class GcsButtonPanel(Plugin):
         else:
             self._set_emerg_btn_style("eland")
             self.emergency_all_btn.setText("EMERGENCY LAND (HW)")
+
+    # ================= Box Label Tracking =================
+    def _marker_cb(self, msg: Marker):
+        if msg.ns not in ("blue", "red") or msg.type != Marker.CUBE:
+            return
+        if msg.action == Marker.ADD:
+            self._box_positions[msg.id] = (
+                msg.pose.position.x, msg.pose.position.y,
+                msg.pose.position.z, msg.ns)
+            self._publish_box_label(msg.id)
+
+    def _publish_box_label(self, box_id: int):
+        entry = self._box_positions.get(box_id)
+        if entry is None:
+            return
+        x, y, z, ns = entry
+        m = Marker()
+        m.header.frame_id = "map"
+        m.ns = ns
+        m.id = box_id + 1000
+        m.type = Marker.TEXT_VIEW_FACING
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = y
+        m.pose.position.z = z + 0.35   # 0.1 m above box top (cube centre + 0.25 half-height)
+        m.pose.orientation.w = 1.0
+        m.scale.z = 0.35
+        if ns == "blue":
+            m.color.r, m.color.g, m.color.b = 0.5, 0.8, 1.0
+        else:
+            m.color.r, m.color.g, m.color.b = 1.0, 0.5, 0.5
+        m.color.a = 1.0
+        m.text = str(box_id)
+        self.marker_pub.publish(m)
 
     def shutdown_plugin(self):
         self.timer.stop()
