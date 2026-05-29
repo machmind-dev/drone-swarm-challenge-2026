@@ -501,6 +501,7 @@ static void drone_id_led_update(void)
 
 static rcl_publisher_t    publisher_marker;
 static rcl_publisher_t    publisher_pose;
+static rcl_publisher_t    publisher_position;   /* always-on best-available position for GCS trail */
 static rcl_publisher_t    publisher_state;
 static rcl_publisher_t    publisher_role;
 static rcl_publisher_t    publisher_battery;
@@ -524,6 +525,7 @@ static rcl_subscription_t team_color_sub;
 static visualization_msgs__msg__Marker   drone_disc_msg;
 static visualization_msgs__msg__Marker   text_msg;
 static geometry_msgs__msg__PoseStamped   vision_pose_msg;
+static geometry_msgs__msg__PoseStamped   position_msg;     /* always-on best-available position */
 static std_msgs__msg__String             command_msg;
 static std_msgs__msg__String             config_msg;
 static geometry_msgs__msg__PoseStamped   control_msg;
@@ -539,6 +541,7 @@ static char topic_state[64];
 static char topic_role[64];
 static char topic_battery[64];
 static char topic_pose[64];
+static char topic_position[64];
 static char drone_ns[16];
 
 /* ── Apply pose to RViz drone disc ───────────────────────────────────────── */
@@ -1059,6 +1062,18 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     static uint32_t marker_tick = 0;
     if (++marker_tick >= 5) {
         marker_tick = 0;
+
+        /* Always-on position — drone_disc_msg.pose already holds best available
+         * position (ArUco when valid, last vision anchor otherwise).
+         * Published unconditionally so the GCS trail draws without ArUco. */
+        {
+            int64_t ts = esp_timer_get_time();
+            position_msg.header.stamp.sec     = (int32_t)(ts / 1000000LL);
+            position_msg.header.stamp.nanosec = (uint32_t)((ts % 1000000LL) * 1000UL);
+            position_msg.pose                 = drone_disc_msg.pose;
+            RCSOFTCHECK(rcl_publish(&publisher_position, &position_msg, NULL));
+        }
+
         static bool s_disc_visible = false;
         if (!vision_pose_valid) {
             RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
@@ -1217,6 +1232,10 @@ static void micro_ros_task(void *arg)
     RCCHECK(rclc_publisher_init_default(&publisher_pose, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
         topic_pose));
+
+    RCCHECK(rclc_publisher_init_default(&publisher_position, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, PoseStamped),
+        topic_position));
 
     RCCHECK(rclc_publisher_init_default(&publisher_state, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), topic_state));
@@ -1390,6 +1409,7 @@ void app_main(void)
     snprintf(topic_role,         sizeof(topic_role),           "/drone_%d/role",             DRONE_ID);
     snprintf(topic_battery,      sizeof(topic_battery),        "/drone_%d/battery",          DRONE_ID);
     snprintf(topic_pose,         sizeof(topic_pose),           "/drone_%d/vision_pose",      DRONE_ID);
+    snprintf(topic_position,     sizeof(topic_position),       "/drone_%d/position",          DRONE_ID);
 
     ESP_LOGI(TAG, "==============================");
     ESP_LOGI(TAG, "DRONE ID   : %d",     DRONE_ID);
@@ -1454,6 +1474,9 @@ void app_main(void)
 
     geometry_msgs__msg__PoseStamped__init(&vision_pose_msg);
     rosidl_runtime_c__String__assign(&vision_pose_msg.header.frame_id, "map");
+
+    geometry_msgs__msg__PoseStamped__init(&position_msg);
+    rosidl_runtime_c__String__assign(&position_msg.header.frame_id, "map");
 
     /* ── Box marker messages ────────────────────────────────────────────────── */
     for (int bi = 0; bi < BOX_COUNT; bi++) {
