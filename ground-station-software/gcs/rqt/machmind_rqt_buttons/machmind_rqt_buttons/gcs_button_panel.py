@@ -81,7 +81,7 @@ class GcsButtonPanel(Plugin):
             self._trail_pubs[i]   = self.node.create_publisher(
                 Path, f"/drone_{i}/trail", 10)
             self._trail_subs[i]   = self.node.create_subscription(
-                PoseStamped, f"/drone_{i}/position",
+                PoseStamped, f"/drone_{i}/vision_pose",
                 lambda msg, did=i: self._trail_cb(msg, did), 10)
 
         # Per-drone flat arrow markers published on /drone_N/heading_marker
