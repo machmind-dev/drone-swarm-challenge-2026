@@ -269,7 +269,7 @@ def run_fly(node: MissionNode):
 
     # Position state in arena coordinates (firmware subtracts ned_offset → NED)
     pos = [HOME_ARENA_X, HOME_ARENA_Y, CRUISE_ALT_M]
-    yaw = 0.0
+    yaw = 180.0 if _TEAM == 'blue' else 0.0   # blue starts facing -X, red facing +X
 
     key_queue: list = []
     lock = threading.Lock()
