@@ -72,6 +72,11 @@
 #define VISION_RES_QVGA
 /* #define VISION_RES_HVGA */
 
+/* Pose-range gate — markers detected farther than this contribute neither
+ * to the averaged drone pose nor to best_R_wc. Picked to match the
+ * resolution's documented reliable range; raise to ~12 if switching to HVGA. */
+#define POSE_MAX_RANGE_M  8.0f
+
 static const char *TAG = "aruco_pose";
 
 /* OV5647 AEC brightness target passed to V4L2_CID_EXPOSURE_ABSOLUTE.
@@ -916,6 +921,7 @@ void aruco_pose_start(void)
 
                 const world_marker_t *m = find_marker(ids[i]);
                 if (m) {
+                    if (dist > POSE_MAX_RANGE_M) continue;   // skip out-of-range markers
                     float yr = m->yaw_deg * (float)M_PI / 180.0f;
                     cv::Mat R_lw = (cv::Mat_<double>(3,3) <<
                          cos(yr),  0,  sin(yr),
@@ -923,6 +929,16 @@ void aruco_pose_start(void)
                          0,        1,  0      );
                     cv::Mat R_l2c;
                     cv::Rodrigues(rvec_s, R_l2c);
+                    /* PnP planar-ambiguity guard: cv::aruco / IPPE_SQUARE can flip
+                     * the rotation 90°/180°/270° around the marker face normal on
+                     * small or noisy detections. Wall markers are mounted "+Y up";
+                     * the correct solution puts marker +Y near camera-up (R[1][1]≈-1).
+                     * Wrong solutions land at R[1][1]≈0 (90°) or ≈+1 (180°). Reject
+                     * anything not clearly "right-side up". Assumes drone roughly
+                     * level — at -0.8 we accept up to ~37° of camera tilt; tighter
+                     * than -0.5 because borderline wrong solutions were slipping
+                     * through during bench testing. */
+                    if (R_l2c.at<double>(1, 1) > -0.8) continue;
                     cv::Mat p_local = -R_l2c.t() * tvec_s;
                     cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
                         (double)m->x, (double)m->y, (double)m->z);
