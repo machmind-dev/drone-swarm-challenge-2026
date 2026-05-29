@@ -11,6 +11,7 @@ drone-firmware/**/*.d
 drone-firmware/**/*.elf
 drone-firmware/**/*.bin
 drone-firmware/**/*.map
+drone-firmware/log/
 # v1.0 micro-ros component is large — keep only colcon.meta
 drone-firmware/v1.0/components/micro_ros_espidf_component/
 !drone-firmware/v1.0/components/micro_ros_espidf_component/colcon.meta
