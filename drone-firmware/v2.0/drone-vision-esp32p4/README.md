@@ -169,52 +169,35 @@ The S3 decodes the frames and forwards obstacle data as `OBSTACLE_DISTANCE` and
 `DISTANCE_SENSOR` MAVLink messages to PX4, and relays ArUco pose as
 `VISION_POSITION_ESTIMATE` when vision is enabled from the GCS.
 
-## Known Issues / TODO
+## Fixed Issues
 
-### 1. Yaw oscillation on wall markers — IPPE planar ambiguity not fully gated
+### 1. Yaw oscillation on wall markers — IPPE planar ambiguity ✓ Fixed 2026-05-30
 
-**Symptom** (flight-tested 2026-05-29, Red scene, keyboard manual control):
-After applying the distance gate (`POSE_MAX_RANGE_M`) and the face-normal
-orientation guard (`R_l2c[1][1] < -0.8`), drone behaviour is **slower and
-more stable** but a deterministic rotation oscillation remains: when the
-drone is positioned to face ArUco 12 (y=0 wall) or ArUco 14 (y=10 wall) at
-short range, the moment the marker becomes visible the drone rotates 180°,
-sees the opposite-wall marker, rotates 180° back, repeats.
+**Symptom** (flight-tested 2026-05-29, LH scene, keyboard manual control):
+When facing ArUco 12 (y=0 wall) or ArUco 14 (y=10 wall) head-on, the drone
+rotated 180°, saw the opposite-wall marker, rotated back, and repeated.
 
-**Hypothesis.** The orientation guard was designed for the case where
-`SOLVEPNP_IPPE_SQUARE` flips its solution by 180° around the marker's *face
-normal*. The actual IPPE planar ambiguity rotates by 180° around an axis
-*in the marker plane* perpendicular to the line-of-sight. For a frontal
-view of a wall marker this leaves marker +Y mostly upright in the camera
-frame (so `R_l2c[1][1] ≈ -1` and the guard accepts), while still producing
-an `R_wc` that yields a vision_yaw 180° off the truth.
+**Root cause.** For near-frontal wall views the two IPPE solutions have
+identical positions but yaws 180° apart. The orientation guard
+(`R_l2c[1][1] < -0.8`) passes both solutions because the in-plane IPPE
+ambiguity leaves `R_l2c[1][1] ≈ -1` for both — only the world-frame yaw
+differs.
 
-**Proposed fix (next iteration).** Switch from `cv::solvePnP(...
-SOLVEPNP_IPPE_SQUARE)` to `cv::solvePnPGeneric(... SOLVEPNP_IPPE)`, which
-returns *both* ambiguous solutions. Compute world pose for each, then pick
-the one whose drone position is closer to the previous frame's PX4
-inertial position (`px4_pos_x/y/z` on the S3 side, forwarded back to the
-P4 over UART, or alternatively keep a P4-local previous pose and use
-that). This is the standard remedy for IPPE ambiguity in production
-systems and addresses the actual ambiguity axis rather than only the
-face-normal subset.
+**Fix (commit `24eb720`).** Switched from `solvePnP(SOLVEPNP_IPPE_SQUARE)`
+to `solvePnPGeneric(SOLVEPNP_IPPE)` in `main/aruco_pose.cpp`. Both solutions
+are evaluated; the one whose world-frame yaw is closest to `s_prev_yaw`
+(last accepted frame) is selected. `s_prev_yaw` is updated each time the
+closest-marker solution is accepted. No FPS impact — IPPE computes both
+solutions internally regardless.
 
-**Alternative diagnostic step.** If we want to *confirm* the hypothesis
-before changing the PnP call, add a `printf` on each accepted marker
-dumping `id`, `R[0][0..2]`, `R[1][0..2]`, `R[2][2]` and the computed yaw.
-Capture the log around a 180° rotation event, then pick the row/column
-that distinguishes correct vs. wrong solutions.
+### 2. Emergency-landing rotates drone to yaw=0 before descending ✓ Fixed 2026-05-30
 
-### 2. Emergency-landing rotates drone to yaw=0 before descending
-
-**Symptom.** Pressing emergency land from rqt causes the drone to rotate
+**Symptom.** Pressing emergency land from rqt caused the drone to rotate
 (sometimes 180°) before descending.
 
-**Cause.** `s3-comms/main.c:303-312`, `mav_eland()` sends
-`MAV_CMD_NAV_LAND` with **param4 = 0** instead of `NaN`. Param4 of NAV_LAND
-is the target yaw for the landing approach — `0` means "yaw to 0° (North)
-before descending"; `NaN` means "hold current heading."
+**Cause.** `mav_eland()` in `s3-comms/main.c` sent `MAV_CMD_NAV_LAND` with
+`param4 = 0` — commanding a yaw-to-North before landing.
 
-**Fix.** Change param4 from `0` to `NAN` in the `mavlink_msg_command_long_pack`
-call. Single-character edit, no behavioural side effects other than the
-drone landing in whichever direction it was already pointing.
+**Fix (commit `cc81f6d`).** Changed `param4` from `0` to `NAN` in the
+`mavlink_msg_command_long_pack` call. Drone now holds its current heading
+throughout the landing.
