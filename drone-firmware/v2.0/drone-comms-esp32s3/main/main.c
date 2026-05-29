@@ -1554,7 +1554,7 @@ void app_main(void)
                      * <2px→~0.01 (excellent), 5px→~0.13, 8px→~0.32, 10px=rejected */
                     float r = pose.reproj_err / REPROJ_REJECT_PX;
                     float pos_var = 0.01f + r * r * 0.49f;
-                    mav_send_vision_estimate(tx, ty, vp_z, vision_yaw, pos_var);
+                    mav_send_vision_estimate(tx, ty, -vp_z, vision_yaw, pos_var); /* arena Z up→NED Z down */
                 }
             }
             } /* end reproj_err gate */
@@ -1570,7 +1570,7 @@ void app_main(void)
                 float ty = vp_last_y - ned_offset_y;
                 last_vis_sent_x = tx;
                 last_vis_sent_y = ty;
-                mav_send_vision_estimate(tx, ty, vp_last_z, vision_yaw, cov);
+                mav_send_vision_estimate(tx, ty, -vp_last_z, vision_yaw, cov); /* arena Z up→NED Z down */
             }
         }
 
