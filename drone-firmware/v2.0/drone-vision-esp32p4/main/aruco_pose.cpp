@@ -907,67 +907,98 @@ void aruco_pose_start(void)
             static cv::Mat best_R_wc;
             static float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
 
+            /* solvePnPGeneric(IPPE) returns both ambiguous solutions. For
+             * near-frontal wall views the two solutions have identical positions
+             * but yaws 180° apart — the orientation guard alone cannot tell them
+             * apart. Pick the solution whose world-frame yaw is closest to the
+             * last accepted yaw (temporal continuity). On the first frame
+             * (s_prev_yaw = NaN) prefer sol=0 (IPPE's lower-reproj solution). */
+            static float s_prev_yaw = NAN;
+
             for (int i = 0; i < (int)ids.size(); i++) {
                 std::vector<cv::Point2f> &c = corners[i];
-                cv::Mat rvec_s, tvec_s;
-                cv::solvePnP(single_obj, c, K, D,
-                             rvec_s, tvec_s, false, cv::SOLVEPNP_IPPE_SQUARE);
-                float tx = (float)tvec_s.at<double>(0);
-                float ty = (float)tvec_s.at<double>(1);
-                float tz = (float)tvec_s.at<double>(2);
+
+                std::vector<cv::Mat> rvecs_s, tvecs_s;
+                cv::solvePnPGeneric(single_obj, c, K, D,
+                                    rvecs_s, tvecs_s, false, cv::SOLVEPNP_IPPE);
+                float tx   = (float)tvecs_s[0].at<double>(0);
+                float ty   = (float)tvecs_s[0].at<double>(1);
+                float tz   = (float)tvecs_s[0].at<double>(2);
                 float dist = sqrtf(tx*tx + ty*ty + tz*tz);
                 mpos += snprintf(mbuf + mpos, sizeof(mbuf) - mpos,
                                  "M%d:%.2fm ", ids[i], dist);
 
                 const world_marker_t *m = find_marker(ids[i]);
-                if (m) {
-                    if (dist > POSE_MAX_RANGE_M) continue;   // skip out-of-range markers
-                    float yr = m->yaw_deg * (float)M_PI / 180.0f;
-                    cv::Mat R_lw = (cv::Mat_<double>(3,3) <<
-                         cos(yr),  0,  sin(yr),
-                         sin(yr),  0, -cos(yr),
-                         0,        1,  0      );
-                    cv::Mat R_l2c;
-                    cv::Rodrigues(rvec_s, R_l2c);
-                    /* PnP planar-ambiguity guard: cv::aruco / IPPE_SQUARE can flip
-                     * the rotation 90°/180°/270° around the marker face normal on
-                     * small or noisy detections. Wall markers are mounted "+Y up";
-                     * the correct solution puts marker +Y near camera-up (R[1][1]≈-1).
-                     * Wrong solutions land at R[1][1]≈0 (90°) or ≈+1 (180°). Reject
-                     * anything not clearly "right-side up". Assumes drone roughly
-                     * level — at -0.8 we accept up to ~37° of camera tilt; tighter
-                     * than -0.5 because borderline wrong solutions were slipping
-                     * through during bench testing. */
-                    if (R_l2c.at<double>(1, 1) > -0.8) continue;
-                    cv::Mat p_local = -R_l2c.t() * tvec_s;
-                    cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
-                        (double)m->x, (double)m->y, (double)m->z);
-                    cv::Mat p_world = R_lw * p_local + t_mw;
-                    px_sum += p_world.at<double>(0);
-                    py_sum += p_world.at<double>(1);
-                    pz_sum += p_world.at<double>(2);
-                    /* Reprojection error: mean pixel distance between detected and projected corners */
-                    std::vector<cv::Point2f> proj_pts;
-                    cv::projectPoints(single_obj, rvec_s, tvec_s, K, D, proj_pts);
-                    float reproj_sum = 0.0f;
-                    for (int j = 0; j < 4; j++) {
-                        float ex = proj_pts[j].x - c[j].x;
-                        float ey = proj_pts[j].y - c[j].y;
-                        reproj_sum += sqrtf(ex*ex + ey*ey);
-                    }
-                    float reproj = reproj_sum / 4.0f;
+                if (!m || dist > POSE_MAX_RANGE_M) continue;
 
-                    if (dist < best_dist) {
-                        best_dist  = dist;
-                        best_reproj = reproj;
-                        best_R_wc  = R_lw * R_l2c.t();
-                        best_pw_x  = (float)p_world.at<double>(0);
-                        best_pw_y  = (float)p_world.at<double>(1);
-                        best_pw_z  = (float)p_world.at<double>(2);
-                        rot_to_quat(best_R_wc, &qx_out, &qy_out, &qz_out, &qw_out);
+                float yr = m->yaw_deg * (float)M_PI / 180.0f;
+                cv::Mat R_lw = (cv::Mat_<double>(3,3) <<
+                     cos(yr),  0,  sin(yr),
+                     sin(yr),  0, -cos(yr),
+                     0,        1,  0      );
+                cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
+                    (double)m->x, (double)m->y, (double)m->z);
+
+                int     chosen       = -1;
+                float   min_dy       = 1e9f;
+                cv::Mat chosen_R_wc, chosen_p_world;
+
+                for (int sol = 0; sol < (int)rvecs_s.size(); sol++) {
+                    cv::Mat R_l2c;
+                    cv::Rodrigues(rvecs_s[sol], R_l2c);
+                    if (R_l2c.at<double>(1, 1) > -0.8) continue;
+
+                    cv::Mat R_wc = R_lw * R_l2c.t();
+                    float yaw = atan2f((float)R_wc.at<double>(1, 2),
+                                       (float)R_wc.at<double>(0, 2));
+                    float dy;
+                    if (!isnanf(s_prev_yaw)) {
+                        dy = yaw - s_prev_yaw;
+                        while (dy >  (float)M_PI) dy -= 2.0f * (float)M_PI;
+                        while (dy < -(float)M_PI) dy += 2.0f * (float)M_PI;
+                        dy = fabsf(dy);
+                    } else {
+                        dy = (float)sol * 1e-3f;   /* no prior: prefer sol 0 */
                     }
-                    pose_n++;
+
+                    if (dy < min_dy) {
+                        min_dy         = dy;
+                        chosen         = sol;
+                        chosen_R_wc    = R_wc;
+                        cv::Mat p_loc  = -R_l2c.t() * tvecs_s[sol];
+                        chosen_p_world = R_lw * p_loc + t_mw;
+                    }
                 }
+
+                if (chosen < 0) continue;
+
+                px_sum += chosen_p_world.at<double>(0);
+                py_sum += chosen_p_world.at<double>(1);
+                pz_sum += chosen_p_world.at<double>(2);
+
+                std::vector<cv::Point2f> proj_pts;
+                cv::projectPoints(single_obj, rvecs_s[chosen], tvecs_s[chosen],
+                                  K, D, proj_pts);
+                float reproj_sum = 0.0f;
+                for (int j = 0; j < 4; j++) {
+                    float ex = proj_pts[j].x - c[j].x;
+                    float ey = proj_pts[j].y - c[j].y;
+                    reproj_sum += sqrtf(ex*ex + ey*ey);
+                }
+                float reproj = reproj_sum / 4.0f;
+
+                if (dist < best_dist) {
+                    best_dist   = dist;
+                    best_reproj = reproj;
+                    best_R_wc   = chosen_R_wc;
+                    best_pw_x   = (float)chosen_p_world.at<double>(0);
+                    best_pw_y   = (float)chosen_p_world.at<double>(1);
+                    best_pw_z   = (float)chosen_p_world.at<double>(2);
+                    rot_to_quat(best_R_wc, &qx_out, &qy_out, &qz_out, &qw_out);
+                    s_prev_yaw  = atan2f((float)chosen_R_wc.at<double>(1, 2),
+                                          (float)chosen_R_wc.at<double>(0, 2));
+                }
+                pose_n++;
             }
             if (mpos > 0 && mbuf[mpos - 1] == ' ') mbuf[--mpos] = '\0';
 
