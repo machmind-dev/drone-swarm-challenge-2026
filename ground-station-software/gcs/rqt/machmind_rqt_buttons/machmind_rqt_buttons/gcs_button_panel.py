@@ -1073,6 +1073,22 @@ class GcsButtonPanel(Plugin):
 
     # ================= Box Label Tracking =================
     def _marker_cb(self, msg: Marker):
+        # Drone disc (CYLINDER, ns="drone_N", id=N*100) — published during inertial
+        # fallback when vision_pose is not active. Feeds the trail so it stays
+        # alive between ArUco detections without any S3 firmware change.
+        if (msg.type == Marker.CYLINDER and msg.action == Marker.ADD
+                and msg.ns.startswith("drone_")):
+            try:
+                drone_id = int(msg.ns.split("_")[1])
+                if drone_id in self._trail_deques and msg.id == drone_id * 100:
+                    ps = PoseStamped()
+                    ps.header.frame_id = "map"
+                    ps.header.stamp = msg.header.stamp
+                    ps.pose = msg.pose
+                    self._trail_cb(ps, drone_id)
+            except (ValueError, IndexError):
+                pass
+
         if msg.ns not in ("blue", "red") or msg.type != Marker.CUBE:
             return
         if msg.action == Marker.ADD:
