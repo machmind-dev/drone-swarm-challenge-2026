@@ -306,7 +306,7 @@ static void mav_eland(void)
     mavlink_msg_command_long_pack(GCS_SYSID, GCS_COMPID, &msg,
         PX4_SYSID, PX4_COMPID,
         MAV_CMD_NAV_LAND, 0,
-        0, 0, 0, 0, NAN, NAN, NAN);
+        0, 0, 0, NAN, NAN, NAN, NAN);
     mav_send(&msg);
     ESP_LOGI(TAG, "MAV: EMERGENCY LAND");
 }
