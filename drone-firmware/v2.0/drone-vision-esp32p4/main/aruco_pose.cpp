@@ -77,6 +77,13 @@
  * resolution's documented reliable range; raise to ~12 if switching to HVGA. */
 #define POSE_MAX_RANGE_M  8.0f
 
+/* Arena envelope (metres) — used to reject the wrong IPPE planar-ambiguity
+ * solution, which reflects the recovered drone position across the marker's
+ * wall and lands outside these bounds. Margin absorbs detection noise. */
+#define ARENA_X_M       20.0f
+#define ARENA_Y_M       10.0f
+#define ARENA_MARGIN_M   1.0f
+
 static const char *TAG = "aruco_pose";
 
 /* OV5647 AEC brightness target passed to V4L2_CID_EXPOSURE_ABSOLUTE.
@@ -907,13 +914,20 @@ void aruco_pose_start(void)
             static cv::Mat best_R_wc;
             static float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
 
-            /* solvePnPGeneric(IPPE) returns both ambiguous solutions. For
-             * near-frontal wall views the two solutions have identical positions
-             * but yaws 180° apart — the orientation guard alone cannot tell them
-             * apart. Pick the solution whose world-frame yaw is closest to the
-             * last accepted yaw (temporal continuity). On the first frame
-             * (s_prev_yaw = NaN) prefer sol=0 (IPPE's lower-reproj solution). */
-            static float s_prev_yaw = NAN;
+            /* solvePnPGeneric(IPPE) returns both ambiguous planar solutions.
+             * For a vertical wall marker the ambiguity is a ~180° rotation
+             * about the marker's vertical axis, which reflects the recovered
+             * camera position across the wall plane: the wrong solution lands
+             * *behind* the wall (outside the arena) with a 180°-flipped yaw —
+             * and once fused into EKF2 it sends the drone flying the wrong way.
+             *
+             * Disambiguate absolutely, with no temporal state, so it is correct
+             * on the very first frame (the earlier s_prev_yaw continuity
+             * heuristic was order-dependent and latched onto whatever frame 0
+             * guessed — see flight tests 2026-05-30). Keep only solutions whose
+             * recovered drone position is on the arena-facing side of the marker
+             * AND inside the arena envelope, then pick the lowest reprojection
+             * error among the survivors. */
 
             for (int i = 0; i < (int)ids.size(); i++) {
                 std::vector<cv::Point2f> &c = corners[i];
@@ -939,35 +953,67 @@ void aruco_pose_start(void)
                 cv::Mat t_mw = (cv::Mat_<double>(3,1) <<
                     (double)m->x, (double)m->y, (double)m->z);
 
-                int     chosen       = -1;
-                float   min_dy       = 1e9f;
+                /* Marker face normal in world = 3rd column of R_lw (points into
+                 * the arena). The true drone pose is on the +normal side. */
+                double nx = R_lw.at<double>(0, 2);
+                double ny = R_lw.at<double>(1, 2);
+
+                int     chosen        = -1;
+                float   chosen_reproj = 0.0f;
+                float   min_reproj    = 1e9f;
                 cv::Mat chosen_R_wc, chosen_p_world;
 
                 for (int sol = 0; sol < (int)rvecs_s.size(); sol++) {
                     cv::Mat R_l2c;
                     cv::Rodrigues(rvecs_s[sol], R_l2c);
+                    /* Marker-frame upright pre-filter: cheap reject of gross
+                     * 90°/180° face-normal flips. */
                     if (R_l2c.at<double>(1, 1) > -0.8) continue;
 
-                    cv::Mat R_wc = R_lw * R_l2c.t();
-                    float yaw = atan2f((float)R_wc.at<double>(1, 2),
-                                       (float)R_wc.at<double>(0, 2));
-                    float dy;
-                    if (!isnanf(s_prev_yaw)) {
-                        dy = yaw - s_prev_yaw;
-                        while (dy >  (float)M_PI) dy -= 2.0f * (float)M_PI;
-                        while (dy < -(float)M_PI) dy += 2.0f * (float)M_PI;
-                        dy = fabsf(dy);
-                    } else {
-                        dy = (float)sol * 1e-3f;   /* no prior: prefer sol 0 */
-                    }
+                    cv::Mat R_wc  = R_lw * R_l2c.t();
+                    cv::Mat p_loc = -R_l2c.t() * tvecs_s[sol];
+                    cv::Mat p_w   = R_lw * p_loc + t_mw;
+                    double pwx = p_w.at<double>(0);
+                    double pwy = p_w.at<double>(1);
 
-                    if (dy < min_dy) {
-                        min_dy         = dy;
-                        chosen         = sol;
-                        chosen_R_wc    = R_wc;
-                        cv::Mat p_loc  = -R_l2c.t() * tvecs_s[sol];
-                        chosen_p_world = R_lw * p_loc + t_mw;
+                    /* Wall-side gate: drone must be in front of the marker face. */
+                    if ((pwx - (double)m->x) * nx +
+                        (pwy - (double)m->y) * ny <= 0.0) continue;
+
+                    /* Arena-envelope gate (margin absorbs detection noise). */
+                    if (pwx < -ARENA_MARGIN_M || pwx > ARENA_X_M + ARENA_MARGIN_M ||
+                        pwy < -ARENA_MARGIN_M || pwy > ARENA_Y_M + ARENA_MARGIN_M)
+                        continue;
+
+                    /* Reprojection error: mean pixel distance, detected vs projected. */
+                    std::vector<cv::Point2f> proj_pts;
+                    cv::projectPoints(single_obj, rvecs_s[sol], tvecs_s[sol],
+                                      K, D, proj_pts);
+                    float reproj_sum = 0.0f;
+                    for (int j = 0; j < 4; j++) {
+                        float ex = proj_pts[j].x - c[j].x;
+                        float ey = proj_pts[j].y - c[j].y;
+                        reproj_sum += sqrtf(ex*ex + ey*ey);
                     }
+                    float reproj = reproj_sum / 4.0f;
+
+                    if (reproj < min_reproj) {
+                        min_reproj     = reproj;
+                        chosen         = sol;
+                        chosen_reproj  = reproj;
+                        chosen_R_wc    = R_wc;
+                        chosen_p_world = p_w;
+                    }
+                }
+
+                /* Disambiguation trace (rate-limited) — confirms in the flight
+                 * log which solution survived the gates and where it placed the
+                 * drone. Remove once the fix is verified. */
+                if (diag_frame % 30 == 0) {
+                    printf("AMB M%d sols=%d chosen=%d reproj=%.2f pw=(%.2f,%.2f)\n",
+                           ids[i], (int)rvecs_s.size(), chosen, (double)chosen_reproj,
+                           chosen >= 0 ? chosen_p_world.at<double>(0) : 0.0,
+                           chosen >= 0 ? chosen_p_world.at<double>(1) : 0.0);
                 }
 
                 if (chosen < 0) continue;
@@ -976,27 +1022,14 @@ void aruco_pose_start(void)
                 py_sum += chosen_p_world.at<double>(1);
                 pz_sum += chosen_p_world.at<double>(2);
 
-                std::vector<cv::Point2f> proj_pts;
-                cv::projectPoints(single_obj, rvecs_s[chosen], tvecs_s[chosen],
-                                  K, D, proj_pts);
-                float reproj_sum = 0.0f;
-                for (int j = 0; j < 4; j++) {
-                    float ex = proj_pts[j].x - c[j].x;
-                    float ey = proj_pts[j].y - c[j].y;
-                    reproj_sum += sqrtf(ex*ex + ey*ey);
-                }
-                float reproj = reproj_sum / 4.0f;
-
                 if (dist < best_dist) {
                     best_dist   = dist;
-                    best_reproj = reproj;
+                    best_reproj = chosen_reproj;
                     best_R_wc   = chosen_R_wc;
                     best_pw_x   = (float)chosen_p_world.at<double>(0);
                     best_pw_y   = (float)chosen_p_world.at<double>(1);
                     best_pw_z   = (float)chosen_p_world.at<double>(2);
                     rot_to_quat(best_R_wc, &qx_out, &qy_out, &qz_out, &qw_out);
-                    s_prev_yaw  = atan2f((float)chosen_R_wc.at<double>(1, 2),
-                                          (float)chosen_R_wc.at<double>(0, 2));
                 }
                 pose_n++;
             }

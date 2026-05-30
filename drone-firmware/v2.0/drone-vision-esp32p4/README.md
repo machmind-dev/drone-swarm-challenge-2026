@@ -171,24 +171,42 @@ The S3 decodes the frames and forwards obstacle data as `OBSTACLE_DISTANCE` and
 
 ## Fixed Issues
 
-### 1. Yaw oscillation on wall markers — IPPE planar ambiguity ✓ Fixed 2026-05-30
+### 1. Yaw flip on wall markers — IPPE planar ambiguity ✓ Fixed 2026-05-30
 
-**Symptom** (flight-tested 2026-05-29, LH scene, keyboard manual control):
-When facing ArUco 12 (y=0 wall) or ArUco 14 (y=10 wall) head-on, the drone
-rotated 180°, saw the opposite-wall marker, rotated back, and repeated.
+**Symptom** (flight-tested 2026-05-29/30, LH scene, keyboard manual control):
+Facing ArUco 12 (y=0 wall) or ArUco 14 (y=10 wall) head-on, the drone flipped
+180° in yaw. A direct approach to ArUco 13 (x=0 wall) as the *first* marker of
+the flight sent the drone flying off-axis into the wall — while the *same*
+marker stabilised correctly when it was acquired *after* marker 12. That
+order-dependence was the tell.
 
-**Root cause.** For near-frontal wall views the two IPPE solutions have
-identical positions but yaws 180° apart. The orientation guard
-(`R_l2c[1][1] < -0.8`) passes both solutions because the in-plane IPPE
-ambiguity leaves `R_l2c[1][1] ≈ -1` for both — only the world-frame yaw
-differs.
+**Root cause.** For a vertical wall marker the IPPE planar ambiguity is a ~180°
+rotation about the marker's vertical axis. In world frame this is
+`R_wc_flip = Rot(worldZ, 180°)·R_wc`, which reflects the recovered drone
+position *across the wall plane*: the wrong solution lands **behind the wall,
+outside the arena**, with a 180°-flipped yaw — and both the bad position and bad
+yaw get fused into EKF2. The marker-frame upright guard (`R_l2c[1][1] < -0.8`)
+cannot see this because a vertical-axis flip keeps the marker upright for both
+solutions.
 
-**Fix (commit `24eb720`).** Switched from `solvePnP(SOLVEPNP_IPPE_SQUARE)`
-to `solvePnPGeneric(SOLVEPNP_IPPE)` in `main/aruco_pose.cpp`. Both solutions
-are evaluated; the one whose world-frame yaw is closest to `s_prev_yaw`
-(last accepted frame) is selected. `s_prev_yaw` is updated each time the
-closest-marker solution is accepted. No FPS impact — IPPE computes both
-solutions internally regardless.
+**Superseded first attempt (commit `24eb720`).** Switched to
+`solvePnPGeneric(SOLVEPNP_IPPE)` and picked the solution whose world-frame yaw
+was closest to the previous accepted yaw (`s_prev_yaw`, temporal continuity).
+This **did not work**: temporal continuity has no absolute anchor, so on the
+first frame (`s_prev_yaw = NaN`) it blindly took `sol 0` and latched onto it.
+Whether that was correct depended on acquisition order — hence marker 13 working
+or crashing depending on what was seen before it.
+
+**Fix.** Replaced the temporal heuristic with an **absolute, history-free
+geometric gate** in `main/aruco_pose.cpp`. For each IPPE solution the recovered
+drone position must (a) lie on the arena-facing side of the marker face
+(`(p_w − marker)·normal > 0` — you can only detect a face from in front of it,
+so the true solution always satisfies this and the mirror solution never does)
+and (b) fall inside the arena envelope (`[−1,21]×[−1,11]` m). Among the
+survivors the lowest reprojection error wins. No temporal state, correct on the
+very first frame. A rate-limited `AMB …` serial trace logs the surviving
+solution and recovered `(x,y)` for in-flight confirmation (remove once
+verified). No FPS impact — IPPE computes both solutions internally regardless.
 
 ### 2. Emergency-landing rotates drone to yaw=0 before descending ✓ Fixed 2026-05-30
 
