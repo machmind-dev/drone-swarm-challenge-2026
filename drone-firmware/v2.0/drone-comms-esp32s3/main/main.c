@@ -101,6 +101,9 @@ static const char *TAG = "drone";
 #define VISION_TIMEOUT_MS      1500
 #define VISION_FADE_MS         3000   /* send last pose with rising covariance after ArUco loss */
 #define MAX_POSE_JUMP_M        1.0f   /* reject single-frame pose jumps larger than this (m) */
+#define MAX_YAW_JUMP_RAD       1.5708f /* 90° — reject single-frame ArUco yaw flips. With no
+                                        * magnetometer, EKF2 has no independent heading reference
+                                        * to veto a flipped ArUco yaw, so we gate it here. */
 #define VISION_YAW_COV         0.05f  /* vision yaw covariance fed to EKF2 (rad²) */
 #define COLLISION_MARGIN_M     0.3f   /* keep this distance from any detected obstacle */
 #define REPROJ_REJECT_PX       10.0f  /* reject ArUco frame if reprojection error > this */
@@ -1523,8 +1526,23 @@ void app_main(void)
 
             float dxv  = pose.x - vp_x, dyv = pose.y - vp_y, dzv = pose.z - vp_z;
             float jump = sqrtf(dxv * dxv + dyv * dyv + dzv * dzv);
+            /* Candidate heading from the incoming quaternion (same convention as
+             * vision_yaw below) for the yaw-continuity gate. */
+            float cand_fwd_x = 2.0f * (pose.qx * pose.qz + pose.qy * pose.qw);
+            float cand_fwd_y = 2.0f * (pose.qy * pose.qz - pose.qx * pose.qw);
+            float cand_yaw   = atan2f(cand_fwd_y, cand_fwd_x);
+            float dyaw       = cand_yaw - vision_yaw;
+            while (dyaw >  (float)M_PI) dyaw -= 2.0f * (float)M_PI;
+            while (dyaw < -(float)M_PI) dyaw += 2.0f * (float)M_PI;
+            /* Yaw-continuity gate: reject the ~180° IPPE same-position yaw flip
+             * (which the position-jump gate cannot see). Only active once vision
+             * is established — the first fix after arm/dropout is taken as the
+             * baseline (unavoidable without a yaw reference; see FINDINGS.md). */
             if (vision_pose_valid && jump > MAX_POSE_JUMP_M) {
                 ESP_LOGW(TAG, "Vision jump %.2fm rejected (ArUco flip?)", (double)jump);
+            } else if (vision_pose_valid && fabsf(dyaw) > MAX_YAW_JUMP_RAD) {
+                ESP_LOGW(TAG, "Vision yaw jump %.0f° rejected (ArUco yaw flip?)",
+                         (double)(dyaw * 180.0f / (float)M_PI));
             } else {
                 vp_x = pose.x; vp_y = pose.y; vp_z = pose.z;
                 vp_qx = pose.qx; vp_qy = pose.qy; vp_qz = pose.qz; vp_qw = pose.qw;
