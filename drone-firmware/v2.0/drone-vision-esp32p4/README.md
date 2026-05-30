@@ -171,7 +171,7 @@ The S3 decodes the frames and forwards obstacle data as `OBSTACLE_DISTANCE` and
 
 ## Fixed Issues
 
-### 1. Yaw flip on wall markers — IPPE planar ambiguity ✓ Fixed 2026-05-30
+### 1. Yaw flip on wall markers — IPPE ambiguity + mag-less EKF ⚠ Partial fix / root cause identified 2026-05-30
 
 **Symptom** (flight-tested 2026-05-29/30, LH scene, keyboard manual control):
 Facing ArUco 12 (y=0 wall) or ArUco 14 (y=10 wall) head-on, the drone flipped
@@ -207,6 +207,27 @@ survivors the lowest reprojection error wins. No temporal state, correct on the
 very first frame. A rate-limited `AMB …` serial trace logs the surviving
 solution and recovered `(x,y)` for in-flight confirmation (remove once
 verified). No FPS impact — IPPE computes both solutions internally regardless.
+
+**Deeper root cause — found in the PX4 log (flight 2026-05-30, drone_2).** The gate
+above stops the *position*-reflection flip, but flights kept flipping on first
+acquisition. The flight-controller log explains why:
+
+- The airframe **has no magnetometer** (`EKF2_MAG_TYPE = 5`) and indoors there is no
+  GPS — so **ArUco yaw is EKF2's only absolute heading source** (`EKF2_EV_CTRL = 15`).
+- At poor geometry (low altitude / steep look-up) the two IPPE solutions have nearly
+  the **same position but ~180°-opposite yaw** — both pass the position gate, so a
+  flipped *yaw* can still be selected. With no mag to veto it, EKF2 fuses it
+  (observed external-vision heading innovations of ~2.5–2.9 rad ≈ 180°), the heading
+  estimate snaps, and the drone rotates. At ~marker height square-on, yaw is
+  unambiguous → innovation ≈ 0 → stable. Hence "first bad-angle marker flips, then
+  everything works."
+
+**Remaining work (not yet implemented).** (1) S3 *yaw-continuity* reject gate mirroring
+the existing 1 m position-jump gate (drop frames whose `vision_yaw` jumps > ~90°);
+(2) loosen `EKF2_EVA_NOISE` (0.10 → ~0.3–0.5) so EKF2 smooths a bad yaw instead of
+snapping; (3) operationally, acquire the first marker at altitude; (4) give EKF2 a
+heading reference (mag, or seed yaw at arm from the known start pose). Full analysis,
+parameters, and the flight logs: [`docs/flight-tests/2026-05-30/FINDINGS.md`](../../../docs/flight-tests/2026-05-30/FINDINGS.md).
 
 ### 2. Emergency-landing rotates drone to yaw=0 before descending ✓ Fixed 2026-05-30
 
