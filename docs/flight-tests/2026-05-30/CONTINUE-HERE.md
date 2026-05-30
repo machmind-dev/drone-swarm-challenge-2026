@@ -25,33 +25,45 @@ behaves once the heading settles. Manual keyboard flight, indoor arena.
 | `8ed12e5` | P4 `aruco_pose.cpp`: absolute arena/wall-side gate (fixes the *position*-reflection flip; not the same-position yaw flip) |
 | `b9b5d99` | `docs/flight-tests/2026-05-30/` FINDINGS + ulog + rosbags |
 | `575f05f` | S3 `main.c`: yaw-continuity reject gate (`MAX_YAW_JUMP_RAD`, drops >90° yaw jumps after the first fix) |
-| *(this checkpoint)* | S3 scene-aware **heading seed** + P4 `POSE_MAX_RANGE_M` 8→5; `DRONE_ID=2` (test drone); these docs |
+| *(prev checkpoint)* | S3 scene-aware **heading seed** + P4 `POSE_MAX_RANGE_M` 8→5; `DRONE_ID=2` (test drone); these docs |
+| *(this commit)* | S3 `main.c`: seed defaults to LH (+X) at boot — no longer requires `team_color` over micro-ROS |
 
 ## The heading-seed feature (S3 `main.c`)
 Goal: kill the **first-fix flip**. With no mag, seed EKF2's heading at arm from the
 known launch heading so the gyro (low drift) carries it and the first ArUco fix agrees.
-- Scene-aware: set from `team_color` — **LH/red → +X (0°)**, **RH/blue → −X (180°)**
-  (`seed_yaw_rad`, `seed_yaw_valid`; consts `START_YAW_LH_DEG`/`START_YAW_RH_DEG`).
+- Defaults to **LH/+X (0°)** at boot; `team_color` callback overrides to **RH/−X (180°)**
+  if received before arm (`seed_yaw_rad`, `seed_yaw_valid`; consts `START_YAW_LH_DEG`/`START_YAW_RH_DEG`).
 - Sends a **yaw-only** VISION_POSITION_ESTIMATE (position echoes EKF's own estimate at
-  loose covariance) for `SEED_YAW_MS=4000` ms after arm, then stops so it can't fight
-  later yaw maneuvers. Gated on `vision_enabled && seed_yaw_valid`. Toggle `SEED_YAW_ENABLE`.
+  loose covariance `9.0 m²`, yaw covariance `0.05 rad²`) for `SEED_YAW_MS=4000` ms after
+  arm, then stops so it can't fight later yaw maneuvers. Stops early if real vision arrives.
+  Gated on `vision_enabled`. Toggle `SEED_YAW_ENABLE`.
 
-## ⚠ Critical: the seed has NEVER actually run on any flight yet
-Each flight had a different blocker:
-- **20:48, 21:54** — ArUco EKF **disabled at arm** → seed gated off (it requires `vision_enabled`).
-- **22:21** — micro-ROS link down → drone never received `team_color` → `seed_yaw_valid` false.
-  (The 22:21 *rosbag* has almost no drone telemetry: 60 msgs, 0 `vision_pose`.)
+## Log analysis (2026-05-31, pyulog on logs 163–165)
+- **log_163** (57s) and **log_165** (62s): EV data reached EKF2 but only at t≈42–46s after
+  arm (first marker acquisition). `estimator_ev_pos_bias` absent in the arm window → seed
+  VPE was never sent. First EV-yaw innovations were 161–171° → un-seeded flip confirmed.
+- **log_164** (39s): no EV data at all → invalid run (camera cap or vision disabled).
+- Root cause of seed never firing: `seed_yaw_valid` defaulted to `false`; only set by
+  `team_color_callback`. With micro-ROS link down, `team_color` never arrived → seed blocked.
+
+## Fix applied (2026-05-31)
+Changed `seed_yaw_valid` default from `false` → `true` and initialised `seed_yaw_rad` to
+`START_YAW_LH_DEG * M_PI / 180.0f` (= 0.0 rad). Seed now fires at arm for every LH flight
+without requiring `team_color`. `team_color` still overrides for RH scenes when link is up.
+
+**Verified via QGC MAVLink Inspector** (log_168, bench test with props off):
+- `VISION_POSITION_ESTIMATE` appeared within 4s of arm: 34 messages at ~10 Hz
+- `yaw=0`, `covariance[20]=0.05` (yaw tight), `covariance[0,6,11]=9.0` (position loose),
+  `roll/pitch` covariance = `nan` (EKF2 skips). Message structure confirmed correct.
+- Seed stopped automatically after 4s window as designed.
 
 ## NEXT STEPS
-1. **Get the 22:21 PX4 ulog from drone_2** (onboard, link-independent). See
-   `TODO-download-ulogs.md`. Read with pyulog. Check: did the seed VPE arrive (EV-yaw at
-   start heading during the arm window)? EKF yaw + EV-yaw innovation at first fix?
-2. **Decide the offered robustness fix:** default the seed to **LH (+X) at boot** so it
-   no longer depends on `team_color` arriving over the flaky micro-ROS link (team_color
-   still overrides for RH). Implement in `team_color`/seed init in S3 `main.c`.
-3. **Truly test the seed:** arm with **ArUco EKF ENABLED**, LH scene initiated AND
-   received by the drone (micro-ROS up). Record `ros2 bag record -a` AND keep the ulog.
-4. Optional: fix the RViz heading arrow to render true forward heading, not camera-right.
+1. **Real flight test** — arm with ArUco EKF **ENABLED**, LH scene, router up. Verify
+   first marker acquisition no longer causes a 180° yaw flip. Keep the ulog.
+2. **Check ulog from that flight** — `estimator_ev_pos_bias` should appear in the first 4s
+   after arm (seed), then EV-yaw innovation at first marker fix should be small (< 0.3 rad),
+   not ~3 rad as before.
+3. Optional: fix the RViz heading arrow to render true forward heading, not camera-right.
 
 ## How to read the logs
 - **rosbag (mcap):** copy the `.mcap` + rename `metadata(1).yaml`→`metadata.yaml` into a

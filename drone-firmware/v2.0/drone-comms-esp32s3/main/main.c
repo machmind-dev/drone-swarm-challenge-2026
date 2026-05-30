@@ -229,9 +229,9 @@ static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
 /* Yaw derived from ArUco quaternion; camera +Z = body forward, so yaw ≠ standard formula */
 static volatile float vision_yaw = 0.0f;
 
-/* Heading seed for the mag-less EKF — set from team_color (scene-dependent). */
-static volatile float seed_yaw_rad   = 0.0f;
-static volatile bool  seed_yaw_valid = false;
+/* Heading seed for the mag-less EKF — default LH (+X); overridden by team_color for RH. */
+static volatile float seed_yaw_rad   = START_YAW_LH_DEG * (float)M_PI / 180.0f;
+static volatile bool  seed_yaw_valid = true;
 
 /* True once map_home has been set from a real vision pose.  Guards the
  * inertial fallback so the GCS disc is never placed at arena (0,0) just
