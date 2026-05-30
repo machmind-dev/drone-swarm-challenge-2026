@@ -73,9 +73,12 @@
 /* #define VISION_RES_HVGA */
 
 /* Pose-range gate — markers detected farther than this contribute neither
- * to the averaged drone pose nor to best_R_wc. Picked to match the
- * resolution's documented reliable range; raise to ~12 if switching to HVGA. */
-#define POSE_MAX_RANGE_M  8.0f
+ * to the averaged drone pose nor to best_R_wc. Reduced 8→5 m (2026-05-30) to
+ * keep the opposite wall's marker out of view during the 12↔14 flip tests, so
+ * each flip can't pull in a second marker. Note: at the arena midline (e.g.
+ * y=5) markers 12 and 14 are both exactly 5 m away — position closer to one
+ * wall for the gate to actually exclude the other. */
+#define POSE_MAX_RANGE_M  5.0f
 
 /* Arena envelope (metres) — used to reject the wrong IPPE planar-ambiguity
  * solution, which reflects the recovered drone position across the marker's

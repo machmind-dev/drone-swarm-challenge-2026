@@ -92,7 +92,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          5
+#define DRONE_ID          2
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -105,6 +105,16 @@ static const char *TAG = "drone";
                                         * magnetometer, EKF2 has no independent heading reference
                                         * to veto a flipped ArUco yaw, so we gate it here. */
 #define VISION_YAW_COV         0.05f  /* vision yaw covariance fed to EKF2 (rad²) */
+/* Heading seed (no magnetometer): the drone's launch heading, in the SAME convention
+ * as vision_yaw — arena frame, 0°=+X, 90°=+Y, 180°=−X, −90°=−Y. Seeded into EKF2 at
+ * arm so the first ArUco fix agrees instead of snapping 180°. Scene-dependent and set
+ * from the team_color message: LH (red, x=1) faces +X; RH (blue, x=19) faces −X. */
+#define START_YAW_LH_DEG       0.0f   /* LH / red  — launch faces +X */
+#define START_YAW_RH_DEG       180.0f /* RH / blue — launch faces −X */
+#define SEED_YAW_ENABLE        1      /* 0 = disable heading seeding */
+#define SEED_YAW_MS            4000   /* seed only this long after arm (drone still on the
+                                        * ground at start heading), then stop so it does not
+                                        * fight later yaw maneuvers; gyro carries it until vision */
 #define COLLISION_MARGIN_M     0.3f   /* keep this distance from any detected obstacle */
 #define REPROJ_REJECT_PX       10.0f  /* reject ArUco frame if reprojection error > this */
 
@@ -218,6 +228,10 @@ volatile int64_t last_vision_pose_ms = 0;
 static float vp_last_x = 0.0f, vp_last_y = 0.0f, vp_last_z = 0.0f;
 /* Yaw derived from ArUco quaternion; camera +Z = body forward, so yaw ≠ standard formula */
 static volatile float vision_yaw = 0.0f;
+
+/* Heading seed for the mag-less EKF — set from team_color (scene-dependent). */
+static volatile float seed_yaw_rad   = 0.0f;
+static volatile bool  seed_yaw_valid = false;
 
 /* True once map_home has been set from a real vision pose.  Guards the
  * inertial fallback so the GCS disc is never placed at arena (0,0) just
@@ -992,10 +1006,14 @@ static void team_color_callback(const void *msg_in)
         /* LH side — D1→(1,5)  D2→(1,4)  D3→(1,3)  D4→(1,2)  D5→(1,1) */
         sx = 1.0f;
         sy = 6.0f - (float)DRONE_ID;
+        seed_yaw_rad   = START_YAW_LH_DEG * (float)M_PI / 180.0f;  /* faces +X */
+        seed_yaw_valid = true;
     } else if (strcmp(buf, "blue") == 0) {
         /* RH side — D1→(19,5) D2→(19,6) D3→(19,7) D4→(19,8) D5→(19,9) */
         sx = 19.0f;
         sy = (float)DRONE_ID + 4.0f;
+        seed_yaw_rad   = START_YAW_RH_DEG * (float)M_PI / 180.0f;  /* faces −X */
+        seed_yaw_valid = true;
     } else {
         ESP_LOGW(TAG, "team_color: unknown '%s'", buf);
         return;
@@ -1591,6 +1609,35 @@ void app_main(void)
                 mav_send_vision_estimate(tx, ty, -vp_last_z, vision_yaw, cov); /* arena Z up→NED Z down */
             }
         }
+
+#if SEED_YAW_ENABLE
+        /* ── Heading seed (no magnetometer) ─────────────────────────────────────
+         * Before the first ArUco fix, EKF2 has no absolute heading (mag off), so the
+         * first vision yaw snaps it ~180° (the "first-marker flip"). For a short
+         * window after arm — while the drone is still on the ground at the known
+         * start heading — send START_YAW as a yaw-only vision estimate (position
+         * echoes the EKF's own estimate at loose covariance, so only yaw is fused).
+         * EKF2 yaw converges to START_YAW; then we stop so the seed can't fight
+         * later yaw maneuvers, and gyro (low drift) carries it until real vision.
+         * Stops early if real vision arrives (last_vision_pose_ms != 0). */
+        {
+            static int64_t seed_start_ms = 0;
+            static uint8_t seed_prev_state = 255;
+            if (drone_state != seed_prev_state) {
+                if (drone_state == DRONE_ARMED) seed_start_ms = now_ms();  /* (re)start on arm */
+                seed_prev_state = drone_state;
+            }
+            static int64_t last_seed_ms = 0;
+            if (vision_enabled && seed_yaw_valid && last_vision_pose_ms == 0 && px4_pos_valid &&
+                seed_start_ms != 0 && (now_ms() - seed_start_ms) < SEED_YAW_MS &&
+                (drone_state == DRONE_ARMED || drone_state == DRONE_MISSION) &&
+                (now_ms() - last_seed_ms) >= 100) {                        /* ~10 Hz */
+                last_seed_ms = now_ms();
+                mav_send_vision_estimate(px4_pos_x, px4_pos_y, -px4_pos_z,
+                                         seed_yaw_rad, 9.0f);
+            }
+        }
+#endif
 
 #ifdef TEST_ARUCO_APPROACH
         if (pose.valid && pose.trigger_id == TEST_TRIGGER_ID &&
