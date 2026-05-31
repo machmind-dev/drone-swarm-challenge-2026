@@ -104,19 +104,6 @@ static const char *TAG = "drone";
 #define MAX_YAW_JUMP_RAD       1.5708f /* 90° — reject single-frame ArUco yaw flips. With no
                                         * magnetometer, EKF2 has no independent heading reference
                                         * to veto a flipped ArUco yaw, so we gate it here. */
-#define YAW_DISAMBIG_ENABLE    1      /* 0 = disable gyro-heading disambiguation */
-#define YAW_DISAMBIG_RAD       1.5708f /* 90°. The ArUco IPPE solver returns two poses ~180° apart
-                                        * in yaw at poor geometry; P4 may pick the wrong one. The
-                                        * gyro-propagated EKF heading (px4_yaw) has a CORRECT mean
-                                        * even with no mag (drift ≈0.4°/10 s measured), so if the
-                                        * incoming heading disagrees with px4_yaw by more than this,
-                                        * it is the flipped solution → add 180°. Unlike the
-                                        * continuity gate (MAX_YAW_JUMP_RAD, prior-vision-yaw based),
-                                        * this fires on the FIRST fix after arm/dropout. Assumes the
-                                        * drone booted at the arena start heading (LH +X / RH −X) so
-                                        * px4_yaw shares vision_yaw's frame; ±90° margin tolerates
-                                        * boot-heading error and gyro drift. See FINDINGS (log_171). */
-#define VISION_YAW_COV         0.05f  /* vision yaw covariance fed to EKF2 (rad²) */
 /* Heading seed (no magnetometer): the drone's launch heading, in the SAME convention
  * as vision_yaw — arena frame, 0°=+X, 90°=+Y, 180°=−X, −90°=−Y. Seeded into EKF2 at
  * arm so the first ArUco fix agrees instead of snapping 180°. Scene-dependent and set
@@ -233,8 +220,7 @@ static const char * const state_names[] = {
 static volatile float home_x = 0.0f, home_y = 0.0f, home_z = 0.0f;
 static volatile int8_t battery_remaining_pct = -1;
 static volatile float px4_pos_x = 0.0f, px4_pos_y = 0.0f, px4_pos_z = 0.0f;
-static volatile float px4_yaw   = 0.0f;   /* radians, from ATTITUDE msg */
-static volatile bool  px4_yaw_valid = false; /* set once an ATTITUDE msg arrives */
+static volatile float px4_yaw   = 0.0f;   /* radians, from ATTITUDE msg — debug log only */
 static volatile bool  px4_pos_valid = false;
 static volatile float px4_home_x = 0.0f, px4_home_y = 0.0f, px4_home_z = 0.0f;
 static float map_home_x = 0.0f, map_home_y = 0.0f, map_home_z = 0.0f;
@@ -399,7 +385,7 @@ void mav_send_vision_estimate(float x, float y, float z, float yaw_rad, float po
     /* Upper triangle of 6×6 pose covariance (position then attitude).
      * Diagonal indices: [0]=xx [6]=yy [11]=zz [15]=rr [18]=pp [20]=yy_att
      * pos_variance: 0.01 = good fix; rises toward 0.50 during fade-out after ArUco loss.
-     * Roll/pitch: NaN → EKF2 skips; yaw: VISION_YAW_COV → EKF2 fuses ArUco heading. */
+     * Roll/pitch/yaw: NaN → EKF2 skips all attitude fusion; gyro owns heading. */
     static float cov[21];
     static bool cov_init = false;
     if (!cov_init) {
@@ -407,7 +393,7 @@ void mav_send_vision_estimate(float x, float y, float z, float yaw_rad, float po
         for (int i = 0; i < 21; i++) cov[i] = 0.0f;
         cov[15] = __builtin_nanf("");  /* roll  — no attitude fusion */
         cov[18] = __builtin_nanf("");  /* pitch — no attitude fusion */
-        cov[20] = VISION_YAW_COV;     /* yaw   — fuse ArUco heading */
+        cov[20] = __builtin_nanf("");  /* yaw   — no fusion; gyro owns heading */
     }
     cov[0]  = pos_variance;
     cov[6]  = pos_variance;
@@ -1211,14 +1197,15 @@ static void mavlink_rx_task_fn(void *arg)
             } else if (rx_msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
                 mavlink_local_position_ned_t lpos;
                 mavlink_msg_local_position_ned_decode(&rx_msg, &lpos);
-                /* EKF position-reset tracking. PX4's local position cannot
-                 * physically jump > PX4_RESET_DETECT_M between telemetry frames,
-                 * so a larger step is an EKF reset (with no GPS, a vision
-                 * re-acquisition after a dropout can force one). The reset shifts
-                 * PX4's NED frame by Δ; absorb Δ into ned_offset so the setpoints
-                 * and EV we send stay locked to the arena frame instead of flying
-                 * the drone the reset delta into a wall (see FINDINGS log_24). */
-                if (px4_pos_valid) {
+                /* EKF position-reset detection. A jump > PX4_RESET_DETECT_M is an
+                 * EKF frame reset, not real motion. Absorb it into ned_offset ONLY
+                 * when vision was live recently (< 2 s ago) — meaning it is a genuine
+                 * mid-flight reset, not a re-acquisition after flow drift. If vision
+                 * has been gone > 2 s the large jump is likely legitimate optical-flow
+                 * correction; absorbing it would cancel a real position fix. */
+                if (px4_pos_valid &&
+                        last_vision_pose_ms > 0 &&
+                        (now_ms() - last_vision_pose_ms) < 2000) {
                     float dxr = lpos.x - px4_pos_x;
                     float dyr = lpos.y - px4_pos_y;
                     if (sqrtf(dxr * dxr + dyr * dyr) > PX4_RESET_DETECT_M) {
@@ -1236,7 +1223,6 @@ static void mavlink_rx_task_fn(void *arg)
                 mavlink_attitude_t att;
                 mavlink_msg_attitude_decode(&rx_msg, &att);
                 px4_yaw = att.yaw;     /* radians, NED convention */
-                px4_yaw_valid = true;
             }
         }
     }
@@ -1596,30 +1582,14 @@ void app_main(void)
             float cand_fwd_x = 2.0f * (pose.qx * pose.qz + pose.qy * pose.qw);
             float cand_fwd_y = 2.0f * (pose.qy * pose.qz - pose.qx * pose.qw);
             float cand_yaw   = atan2f(cand_fwd_y, cand_fwd_x);
-#if YAW_DISAMBIG_ENABLE
-            /* First-fix flip guard: pick the IPPE yaw solution closest to the
-             * gyro-propagated EKF heading. Works before any vision baseline exists,
-             * which the continuity gate below cannot. */
-            if (px4_yaw_valid) {
-                float dpx = cand_yaw - px4_yaw;
-                while (dpx >  (float)M_PI) dpx -= 2.0f * (float)M_PI;
-                while (dpx < -(float)M_PI) dpx += 2.0f * (float)M_PI;
-                if (fabsf(dpx) > YAW_DISAMBIG_RAD) {
-                    cand_yaw += (float)M_PI;
-                    while (cand_yaw >  (float)M_PI) cand_yaw -= 2.0f * (float)M_PI;
-                    while (cand_yaw < -(float)M_PI) cand_yaw += 2.0f * (float)M_PI;
-                    ESP_LOGW(TAG, "ArUco yaw flip corrected vs px4_yaw (Δ=%.0f° → +180°)",
-                             (double)(dpx * 180.0f / (float)M_PI));
-                }
-            }
-#endif
             float dyaw       = cand_yaw - vision_yaw;
             while (dyaw >  (float)M_PI) dyaw -= 2.0f * (float)M_PI;
             while (dyaw < -(float)M_PI) dyaw += 2.0f * (float)M_PI;
             /* Yaw-continuity gate: reject the ~180° IPPE same-position yaw flip
              * (which the position-jump gate cannot see). Only active once vision
-             * is established; the first fix after arm/dropout has no prior-vision
-             * baseline, so the px4_yaw disambiguation above guards it instead. */
+             * is established — the first fix after arm/dropout is taken as the
+             * baseline. Yaw is not fused into EKF2 so flips only affect vision_yaw
+             * used for the continuity gate itself, not PX4 heading state. */
             if (vision_pose_valid && jump > MAX_POSE_JUMP_M) {
                 ESP_LOGW(TAG, "Vision jump %.2fm rejected (ArUco flip?)", (double)jump);
             } else if (vision_pose_valid && fabsf(dyaw) > MAX_YAW_JUMP_RAD) {
@@ -1649,9 +1619,8 @@ void app_main(void)
                     inertial_anchor_valid = true;
                 }
 
-                /* Camera +Z = body forward, projected onto world XY. Use cand_yaw,
-                 * which carries the px4_yaw flip correction applied above (identical
-                 * to recomputing from the quaternion when no flip was detected). */
+                /* Camera +Z = body forward; project onto world XY to get heading.
+                 * Used only for the yaw-continuity gate — not fused into EKF2. */
                 vision_yaw  = cand_yaw;
 
                 if (vision_enabled) {

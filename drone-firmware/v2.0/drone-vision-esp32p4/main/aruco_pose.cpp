@@ -84,10 +84,10 @@
  * between the camera line-of-sight and the marker face normal (0° = square-on,
  * 90° = edge-on). At steep incidence the two IPPE solutions are ~180° apart in
  * yaw yet both reproject well, so a flipped/ambiguous pose slips through; this
- * keeps only near-head-on views where the pose is unambiguous. 30° = a ±30°
- * half-angle cone (60° total). Tighter → cleaner poses but more dropouts. */
-#define MAX_VIEW_ANGLE_DEG  30.0f
-#define MIN_VIEW_COS        0.86602540f  /* cosf(30°); accept if |n·los| >= this */
+ * keeps only near-head-on views where the pose is unambiguous. 45° = a ±45°
+ * half-angle cone (90° total). Tighter → cleaner poses but more dropouts. */
+#define MAX_VIEW_ANGLE_DEG  45.0f
+#define MIN_VIEW_COS        0.70710678f  /* cosf(45°); accept if |n·los| >= this */
 
 /* Arena envelope (metres) — used to reject the wrong IPPE planar-ambiguity
  * solution, which reflects the recovered drone position across the marker's
