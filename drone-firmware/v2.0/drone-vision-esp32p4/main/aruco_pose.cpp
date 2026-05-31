@@ -80,6 +80,15 @@
  * wall for the gate to actually exclude the other. */
 #define POSE_MAX_RANGE_M  5.0f
 
+/* Viewing-incidence gate — reject a marker viewed too obliquely. θ is the angle
+ * between the camera line-of-sight and the marker face normal (0° = square-on,
+ * 90° = edge-on). At steep incidence the two IPPE solutions are ~180° apart in
+ * yaw yet both reproject well, so a flipped/ambiguous pose slips through; this
+ * keeps only near-head-on views where the pose is unambiguous. 30° = a ±30°
+ * half-angle cone (60° total). Tighter → cleaner poses but more dropouts. */
+#define MAX_VIEW_ANGLE_DEG  30.0f
+#define MIN_VIEW_COS        0.86602540f  /* cosf(30°); accept if |n·los| >= this */
+
 /* Arena envelope (metres) — used to reject the wrong IPPE planar-ambiguity
  * solution, which reflects the recovered drone position across the marker's
  * wall and lands outside these bounds. Margin absorbs detection noise. */
@@ -972,6 +981,31 @@ void aruco_pose_start(void)
                     /* Marker-frame upright pre-filter: cheap reject of gross
                      * 90°/180° face-normal flips. */
                     if (R_l2c.at<double>(1, 1) > -0.8) continue;
+
+                    /* Viewing-incidence gate: reject markers seen too obliquely
+                     * (> MAX_VIEW_ANGLE_DEG off the face normal), where the IPPE
+                     * yaw is ambiguous. n = marker normal in camera frame (3rd col
+                     * of R_l2c); los = unit line-of-sight to the marker (tvec dir).
+                     * cos(incidence) = |n·los|; 1 = square-on, 0 = edge-on. */
+                    {
+                        double nx_c = R_l2c.at<double>(0, 2);
+                        double ny_c = R_l2c.at<double>(1, 2);
+                        double nz_c = R_l2c.at<double>(2, 2);
+                        double sx = tvecs_s[sol].at<double>(0);
+                        double sy = tvecs_s[sol].at<double>(1);
+                        double sz = tvecs_s[sol].at<double>(2);
+                        double sl = sqrt(sx*sx + sy*sy + sz*sz);
+                        double cosang = (sl > 1e-6)
+                            ? fabs((nx_c*sx + ny_c*sy + nz_c*sz) / sl) : 0.0;
+                        if (cosang < MIN_VIEW_COS) {
+                            if (diag_frame % 30 == 0)
+                                printf("VIEW M%d sol=%d incidence=%.0f° > %.0f° rejected\n",
+                                       ids[i], sol,
+                                       acos(cosang) * 180.0 / M_PI,
+                                       (double)MAX_VIEW_ANGLE_DEG);
+                            continue;
+                        }
+                    }
 
                     cv::Mat R_wc  = R_lw * R_l2c.t();
                     cv::Mat p_loc = -R_l2c.t() * tvecs_s[sol];
