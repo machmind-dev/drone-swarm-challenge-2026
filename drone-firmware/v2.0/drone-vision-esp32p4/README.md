@@ -222,12 +222,24 @@ acquisition. The flight-controller log explains why:
   unambiguous → innovation ≈ 0 → stable. Hence "first bad-angle marker flips, then
   everything works."
 
-**Remaining work (not yet implemented).** (1) S3 *yaw-continuity* reject gate mirroring
-the existing 1 m position-jump gate (drop frames whose `vision_yaw` jumps > ~90°);
-(2) loosen `EKF2_EVA_NOISE` (0.10 → ~0.3–0.5) so EKF2 smooths a bad yaw instead of
-snapping; (3) operationally, acquire the first marker at altitude; (4) give EKF2 a
-heading reference (mag, or seed yaw at arm from the known start pose). Full analysis,
-parameters, and the flight logs: [`docs/flight-tests/2026-05-30/FINDINGS.md`](../../../docs/flight-tests/2026-05-30/FINDINGS.md).
+**Resolved (2026-06-01, commit `bd10a7a`).** EV yaw fusion has been **disabled
+entirely** on the S3 side (`cov[20] = NaN`). EKF2 now fuses ArUco position
+only; gyro owns heading throughout the flight. Gyro drift over a 15 m arena
+traverse is ~1.5°, well within the 1–2 m RFID capture window. This eliminates
+all yaw-flip risk. The yaw-continuity gate (`MAX_YAW_JUMP_RAD`) is retained on
+the S3 to protect `vision_yaw` (used only for the continuity gate itself, not
+fused). The heading seed is now a no-op. Full analysis and flight logs:
+[`docs/flight-tests/2026-05-31/FINDINGS.md`](../../../docs/flight-tests/2026-05-31/FINDINGS.md).
+
+### Incidence gate — relaxed to 45° (commit `bd10a7a`)
+
+`MAX_VIEW_ANGLE_DEG` changed from 30° → 45° (`MIN_VIEW_COS` 0.866 → 0.707).
+The 30° gate caused 79 s vision gaps during cross-arena traversals: the drone
+flew parallel to the long walls so pillar markers were always viewed obliquely
+and rejected. 45° doubles the acceptance cone (90° total) while still excluding
+edge-on views where IPPE yaw is ambiguous. Since yaw is no longer fused into
+EKF2, the risk of accepting a yaw-ambiguous pose is limited to the S3
+continuity gate only.
 
 ### 2. Emergency-landing rotates drone to yaw=0 before descending ✓ Fixed 2026-05-30
 
