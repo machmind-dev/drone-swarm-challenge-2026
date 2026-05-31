@@ -129,6 +129,20 @@ static const char *TAG = "drone";
                                         * fight later yaw maneuvers; gyro carries it until vision */
 #define COLLISION_MARGIN_M     0.3f   /* keep this distance from any detected obstacle */
 #define REPROJ_REJECT_PX       10.0f  /* reject ArUco frame if reprojection error > this */
+#define PX4_RESET_DETECT_M     1.0f   /* a single-frame jump in PX4's reported local
+                                        * position larger than this is an EKF position
+                                        * RESET, not real motion (no GPS anchors NED; a
+                                        * vision re-acquisition after a dropout can force
+                                        * one). Absorb the jump into ned_offset so setpoints
+                                        * and EV stay aligned to the arena frame — otherwise
+                                        * the drone flies the reset delta into a wall.
+                                        * See docs/flight-tests/2026-05-31 (log_24). */
+#define REACQ_RAMP_MS          2000   /* after a vision dropout (> VISION_TIMEOUT_MS), ramp
+                                        * the EV position covariance loose→tight over this
+                                        * window so EKF2 converges to the re-acquired pose
+                                        * gradually instead of hard-resetting (teleporting). */
+#define REACQ_VAR_MAX          4.0f   /* initial (loose) EV position variance on re-acquire
+                                        * (m²; ~2 m std), decays to the reproj-based var */
 
 #define MARKER_ID_DISC(id)  ((id)*100)
 #define MARKER_ID_TEXT(id)  ((id)*100+1)
@@ -254,7 +268,9 @@ static volatile bool inertial_anchor_valid = false;
 /* Arena → NED offset: drone's known starting position in arena frame.
  * Subtracted from ArUco positions before sending to PX4 so the EKF
  * always sees positions relative to the drone's physical start (NED 0,0).
- * Set by team_color_callback when LH/RH Scene is pressed on GCS. */
+ * Set by team_color_callback when LH/RH Scene is pressed on GCS, and
+ * adjusted on the fly when PX4 resets its local position (see the
+ * LOCAL_POSITION_NED handler) so the arena↔NED mapping survives EKF resets. */
 static float ned_offset_x = 0.0f, ned_offset_y = 0.0f;
 
 /* Last values sent to PX4 via VISION_POSITION_ESTIMATE — for debug log */
@@ -1195,6 +1211,23 @@ static void mavlink_rx_task_fn(void *arg)
             } else if (rx_msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
                 mavlink_local_position_ned_t lpos;
                 mavlink_msg_local_position_ned_decode(&rx_msg, &lpos);
+                /* EKF position-reset tracking. PX4's local position cannot
+                 * physically jump > PX4_RESET_DETECT_M between telemetry frames,
+                 * so a larger step is an EKF reset (with no GPS, a vision
+                 * re-acquisition after a dropout can force one). The reset shifts
+                 * PX4's NED frame by Δ; absorb Δ into ned_offset so the setpoints
+                 * and EV we send stay locked to the arena frame instead of flying
+                 * the drone the reset delta into a wall (see FINDINGS log_24). */
+                if (px4_pos_valid) {
+                    float dxr = lpos.x - px4_pos_x;
+                    float dyr = lpos.y - px4_pos_y;
+                    if (sqrtf(dxr * dxr + dyr * dyr) > PX4_RESET_DETECT_M) {
+                        ned_offset_x -= dxr;
+                        ned_offset_y -= dyr;
+                        ESP_LOGW(TAG, "PX4 pos reset Δ=(%.2f,%.2f) absorbed into ned_offset",
+                                 (double)dxr, (double)dyr);
+                    }
+                }
                 px4_pos_x = lpos.x;
                 px4_pos_y = lpos.y;
                 px4_pos_z = -lpos.z;   /* NED z negated to up-positive */
@@ -1593,11 +1626,20 @@ void app_main(void)
                 ESP_LOGW(TAG, "Vision yaw jump %.0f° rejected (ArUco yaw flip?)",
                          (double)(dyaw * 180.0f / (float)M_PI));
             } else {
+                /* Detect re-acquisition after a vision dropout (or the very first
+                 * fix) so we can ramp EV covariance loose→tight below. */
+                static int64_t reacq_ms = 0;
+                int64_t prev_vis_ms = last_vision_pose_ms;
+
                 vp_x = pose.x; vp_y = pose.y; vp_z = pose.z;
                 vp_qx = pose.qx; vp_qy = pose.qy; vp_qz = pose.qz; vp_qw = pose.qw;
                 vp_last_x = vp_x; vp_last_y = vp_y; vp_last_z = vp_z;
                 vision_pose_valid   = true;
                 last_vision_pose_ms = now_ms();
+
+                if (prev_vis_ms == 0 ||
+                        (last_vision_pose_ms - prev_vis_ms) > (int64_t)VISION_TIMEOUT_MS)
+                    reacq_ms = last_vision_pose_ms;   /* start the re-acquire ramp */
 
                 /* Keep inertial anchor in sync with current vision position so the
                  * RViz disc doesn't teleport when vision times out. */
@@ -1621,6 +1663,16 @@ void app_main(void)
                      * <2px→~0.01 (excellent), 5px→~0.13, 8px→~0.32, 10px=rejected */
                     float r = pose.reproj_err / REPROJ_REJECT_PX;
                     float pos_var = 0.01f + r * r * 0.49f;
+                    /* Re-acquisition ramp: after a dropout the re-acquired pose may
+                     * disagree with the flow-propagated EKF position by metres. Start
+                     * loose and tighten over REACQ_RAMP_MS so EKF2 slews to it instead
+                     * of hard-resetting (the log_24 teleport-into-wall). */
+                    int64_t since = last_vision_pose_ms - reacq_ms;
+                    if (reacq_ms != 0 && since < (int64_t)REACQ_RAMP_MS) {
+                        float ramp = REACQ_VAR_MAX *
+                                     (1.0f - (float)since / (float)REACQ_RAMP_MS);
+                        if (ramp > pos_var) pos_var = ramp;
+                    }
                     mav_send_vision_estimate(tx, ty, -vp_z, vision_yaw, pos_var); /* arena Z up→NED Z down */
                 }
             }
