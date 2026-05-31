@@ -1080,31 +1080,24 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
         RCSOFTCHECK(rcl_publish(&publisher_battery, &battery_pub_msg, NULL));
     }
 
-    /* Update RViz disc from P4 vision pose; fall back to PX4 inertial only once
-     * the arena↔NED anchor has been established by at least one valid vision pose.
-     * Without this guard, PX4 NED starts at 0 on arm and maps to arena (0,0),
-     * causing the GCS disc to appear at the wrong corner before ArUco is acquired. */
+    /* Three-tier disc position:
+     * 1. ArUco valid  → direct vision pose (accurate)
+     * 2. NED anchor + PX4 valid → dead-reckon from last ArUco anchor via NED delta (live)
+     * 3. Pre-flight   → frozen at team_color home (set before arm) */
     if (vision_pose_valid) {
         apply_pose_to_drone_markers(vp_x, vp_y, vp_z, vp_qx, vp_qy, vp_qz, vp_qw);
-    } else if (inertial_anchor_valid) {
-        /* Freeze disc at last confirmed vision position — avoids teleport to (0,0) */
-        apply_pose_to_drone_markers(vp_last_x, vp_last_y, vp_last_z, 0.0f, 0.0f, 0.0f, 1.0f);
+    } else if (inertial_anchor_valid && px4_pos_valid) {
+        float live_x = map_home_x + (px4_pos_x - px4_home_x);
+        float live_y = map_home_y + (px4_pos_y - px4_home_y);
+        float live_z = map_home_z + (px4_pos_z - px4_home_z);
+        apply_pose_to_drone_markers(live_x, live_y, live_z, 0.0f, 0.0f, 0.0f, 1.0f);
     }
 
-    /* RViz markers at 2 Hz (every 5th tick) — was 10 Hz; reduces micro-ROS UDP load 5x */
+    /* RViz markers at 2 Hz (every 5th tick) */
     static uint32_t marker_tick = 0;
     if (++marker_tick >= 5) {
         marker_tick = 0;
-        static bool s_disc_visible = false;
-        if (!vision_pose_valid) {
-            RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
-            s_disc_visible = true;
-        } else if (s_disc_visible) {
-            drone_disc_msg.action = visualization_msgs__msg__Marker__DELETE;
-            RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
-            drone_disc_msg.action = visualization_msgs__msg__Marker__ADD;
-            s_disc_visible = false;
-        }
+        RCSOFTCHECK(rcl_publish(&publisher_marker, &drone_disc_msg, NULL));
         RCSOFTCHECK(rcl_publish(&publisher_marker, &text_msg, NULL));
         if (vision_pose_valid) {
             int64_t ts = esp_timer_get_time();
