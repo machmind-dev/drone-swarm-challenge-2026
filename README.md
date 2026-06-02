@@ -1,3 +1,12 @@
+## Team
+
+| Member | LinkedIn | Disciplines |
+|--------|----------|-------------|
+| **Mindaugas Jonauskis** (Founder) | [linkedin.com/in/mindaugas-jonauskis](https://www.linkedin.com/in/mindaugas-jonauskis-11931145/) | Firmware & Software Engineering · Electronics & Electrical Design |
+| **Hauke Renk** | [linkedin.com/in/hauke-renk](https://www.linkedin.com/in/hauke-renk-90832739a/) | Mechanical Design & Integration |
+
+---
+
 # Swarm Drone Challenge 2026
 
 Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigkair.com).
@@ -10,17 +19,6 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 ## System Architecture
 
 ![System Architecture](docs/system_architecture.png)
-
----
-
-## Team
-
-**Mach Mind** — [machmind.dev](https://machmind.dev)
-
-| Member | Disciplines |
-|--------|-------------|
-| **Mindaugas Jonauskis** (Founder) | Firmware & Software Engineering · Electronics & Electrical Design |
-| **Hauke Renk** | Mechanical Design & Integration |
 
 ---
 
