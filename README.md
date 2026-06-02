@@ -1,9 +1,9 @@
 ## Team
 
-| Member | LinkedIn | Disciplines |
-|--------|----------|-------------|
-| **Mindaugas Jonauskis** (Founder) | [linkedin.com/in/mindaugas-jonauskis](https://www.linkedin.com/in/mindaugas-jonauskis-11931145/) | Firmware & Software Engineering · Electronics & Electrical Design |
-| **Hauke Renk** | [linkedin.com/in/hauke-renk](https://www.linkedin.com/in/hauke-renk-90832739a/) | Mechanical Design & Integration |
+| Member | Disciplines |
+|--------|-------------|
+| [**Mindaugas Jonauskis**](https://www.linkedin.com/in/mindaugas-jonauskis-11931145/) (Founder) | Firmware & Software Engineering · Electronics & Electrical Design |
+| [**Hauke Renk**](https://www.linkedin.com/in/hauke-renk-90832739a/) | Mechanical Design & Integration |
 
 ---
 
