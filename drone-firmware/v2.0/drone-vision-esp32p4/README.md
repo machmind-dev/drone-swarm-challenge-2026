@@ -116,26 +116,6 @@ during flight, loosen toward `-0.6`.
 drone is level). If the camera is rotated 90° on the mount, the check needs to
 move to a different row/column of `R_l2c` accordingly.
 
-## Build & Flash
-
-Use the launcher script (recommended):
-
-```bash
-launchers/ubuntu-gnome-pc/launch-drone-vision-p4.sh
-```
-
-Or manually via Docker:
-
-```bash
-cd drone-vision/ESP32P4
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml exec esp32p4_vision bash
-# inside container:
-idf.py set-target esp32p4   # first time only
-idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
-```
-
 ## Tools
 
 | Script | Purpose |
@@ -168,6 +148,34 @@ Protocol defined in `v2.0/shared/p4_link_protocol.h`, transmitted by `main/p4_li
 The S3 decodes the frames and forwards obstacle data as `OBSTACLE_DISTANCE` and
 `DISTANCE_SENSOR` MAVLink messages to PX4, and relays ArUco pose as
 `VISION_POSITION_ESTIMATE` when vision is enabled from the GCS.
+
+## ArUco Markers — Navigation Inside Arena
+
+Four ArUco markers (IDs 11–14) are mounted one per arena wall at a known world-frame position. During flight the P4 detects visible markers, solves the camera pose via `SOLVEPNP_IPPE_SQUARE`, applies the arena-side geometric gate and reprojection filter, and transmits the averaged world-frame position + quaternion to the S3 over UART. The S3 relays this as a `VISION_POSITION_ESTIMATE` MAVLink message to PX4's EKF2, which fuses it as the primary absolute horizontal position source (no GPS, no magnetometer indoors). Navigation is enabled/disabled from the GCS via `COMMAND_VISION_ON / OFF`.
+
+**Known issues**
+
+- **OPEN-7 — No position-innovation gate (flyaway risk).** When IPPE planar ambiguity produces a reflected solution that happens to satisfy the arena-bounds check, the EKF receives a position fix with a ~6 m lateral error. PX4 may snap its position estimate to this fix and fly toward the erroneous setpoint. Fix: reject any `VISION_POSITION_ESTIMATE` that disagrees with the current PX4 local position by more than 2–3 m before relaying it from the S3.
+
+- **OPEN-8 — EV yaw fusion 180° flip on first fix.** `cov[20] = NaN` is intended to disable EKF2 yaw fusion, but PX4 may ignore message covariance for external-vision yaw and use `EKF2_EVA_NOISE` instead, leaving yaw fusion active. At poor viewing geometry (low altitude, steep look-up) the two IPPE solutions have nearly the same position but ~180°-opposite yaw; if the wrong one is selected and yaw fusion is still active, EKF2 snaps heading and the drone rotates physically. Fix: set `EKF2_EV_CTRL = 7` in PX4 params (disables yaw bit, keeps position and velocity fusion) so the gyro owns heading throughout the flight.
+
+---
+
+## ArUco Markers — Target Box Position Detection
+
+Target boxes are fitted with ArUco markers at known offsets. During a low-altitude pass the P4 reports each detected marker ID and its distance; the S3 forwards this in the COMBINED frame to the GCS. The ground station uses the marker ID to identify which box the drone is currently above and triggers the scoring sequence (RFID read / payload drop). Detection at close range (< 2 m) is reliable with the current QVGA pipeline and AEC target.
+
+No known issues.
+
+---
+
+## ToF — Obstacle Detection
+
+Six VL53L1X time-of-flight sensors provide radial short-range distance measurements around the drone body. The P4 polls all six sensors, packages the readings into the COMBINED UART frame, and the S3 unpacks them and forwards them to PX4 as `OBSTACLE_DISTANCE` and `DISTANCE_SENSOR` MAVLink messages at 20 Hz. PX4 collision prevention (`CP_DIST = 0.5 m`, `CP_GUIDE_ANG = 30°`) uses this data to decelerate and hold the drone before contact. The primary altitude source is a downward-facing LiDAR (baro disabled); ToF covers the horizontal plane only.
+
+No known issues.
+
+---
 
 ## Fixed Issues
 
