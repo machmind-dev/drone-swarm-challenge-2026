@@ -3,23 +3,6 @@
 ESP-IDF firmware for the Waveshare ESP32-P4 WiFi6 board with OV5647 MIPI-CSI camera.
 Performs real-time ArUco marker detection and outputs world-frame pose estimates over UART.
 
-## Current State (May 2026)
-
-**ArUco detection and POSE estimation working.**
-
-![ArUco detection working](docs/aruco_detection_working.png)
-
-`stream_view.py` shows the ISP-corrected color view at 80×60 with detected marker
-outlines drawn white and the world-pose overlay in cyan (top-left).  Detection runs
-at ~3–4 fps on the ESP32-P4 at 360 MHz.
-
-Console output format:
-```
-M1:4.94m POSE:1:15.538:6.171:4.056:0.059:0.736:-0.046:0.673
-```
-- `M<id>:<dist>m` — distance to each detected marker
-- `POSE:N:x:y:z:qx:qy:qz:qw` — averaged world-frame position (metres) + quaternion
-
 ## Hardware
 
 | Component | Part |
@@ -132,26 +115,19 @@ move to a different row/column of `R_l2c` accordingly.
 - **5 s ISP warmup** before the first DQBUF, matching `camera_view_mode` behaviour.
 - **R_lw world-pose formula** — verified correct for all 4 SDC26 arena walls.
 
-## UART Output → ESP32-S3
-
-Binary framed COMBINED frames are transmitted over UART1 at 115200 baud at 20 Hz.
-
-| Signal | P4 GPIO | → | S3 GPIO |
-|--------|---------|---|---------|
-| TX | GPIO22 | → | GPIO3 (RX) |
-| RX | GPIO23 | ← | GPIO2 (TX) |
-| GND | GND | — | GND |
-
-Frame: `SOF(0xAB) | LEN | TYPE(0x03) | p4_combined_t(47B) | CRC8` = 51 bytes total.
-Protocol defined in `v2.0/shared/p4_link_protocol.h`, transmitted by `main/p4_link_tx.c`.
-
-The S3 decodes the frames and forwards obstacle data as `OBSTACLE_DISTANCE` and
-`DISTANCE_SENSOR` MAVLink messages to PX4, and relays ArUco pose as
-`VISION_POSITION_ESTIMATE` when vision is enabled from the GCS.
-
 ## ArUco Markers — Navigation Inside Arena
 
 Four ArUco markers (IDs 11–14) are mounted one per arena wall at a known world-frame position. During flight the P4 detects visible markers, solves the camera pose via `SOLVEPNP_IPPE_SQUARE`, applies the arena-side geometric gate and reprojection filter, and transmits the averaged world-frame position + quaternion to the S3 over UART. The S3 relays this as a `VISION_POSITION_ESTIMATE` MAVLink message to PX4's EKF2, which fuses it as the primary absolute horizontal position source (no GPS, no magnetometer indoors). Navigation is enabled/disabled from the GCS via `COMMAND_VISION_ON / OFF`.
+
+Detection runs at ~3–4 fps on the ESP32-P4 at 360 MHz. `stream_view.py` shows the ISP-corrected colour view at 80×60 with detected marker outlines in white and the world-pose overlay in cyan (top-left).
+
+![ArUco detection working](docs/aruco_detection_working.png)
+
+Console output format:
+```
+M1:4.94m POSE:1:15.538:6.171:4.056:0.059:0.736:-0.046:0.673
+```
+- `POSE:N:x:y:z:qx:qy:qz:qw` — averaged world-frame position (metres) + quaternion sent to PX4 EKF2
 
 **Known issues**
 
@@ -164,6 +140,12 @@ Four ArUco markers (IDs 11–14) are mounted one per arena wall at a known world
 ## ArUco Markers — Target Box Position Detection
 
 Target boxes are fitted with ArUco markers at known offsets. During a low-altitude pass the P4 reports each detected marker ID and its distance; the S3 forwards this in the COMBINED frame to the GCS. The ground station uses the marker ID to identify which box the drone is currently above and triggers the scoring sequence (RFID read / payload drop). Detection at close range (< 2 m) is reliable with the current QVGA pipeline and AEC target.
+
+Console output format:
+```
+M1:4.94m POSE:1:15.538:6.171:4.056:0.059:0.736:-0.046:0.673
+```
+- `M<id>:<dist>m` — distance to each detected marker; used by the GCS to confirm box identity
 
 No known issues.
 
