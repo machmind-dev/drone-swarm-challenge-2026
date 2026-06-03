@@ -1,4 +1,4 @@
-**Team*
+**Team**
 
 | Member | Disciplines |
 |--------|-------------|
