@@ -1,4 +1,4 @@
-**Team Mach Mind**
+**Team*
 
 | Member | Disciplines |
 |--------|-------------|
