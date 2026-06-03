@@ -32,7 +32,7 @@ cat << "EOF"
 EOF
 
 echo -e "${WHITE}"
-echo -e "                   [GCS — Swarm Ollama — Gemma3 4B LLM Control]"
+echo -e "                   [GCS — Swarm Ollama — Gemma3 1B LLM Control]"
 echo -e "${RESET}"
 echo ""
 
@@ -52,14 +52,18 @@ fi
 
 # shellcheck disable=SC1090
 source "$ROS_SETUP"
-echo "[INFO] ROS 2 sourced: $ROS_DISTRO"
-echo ""
-echo -e "${YELLOW}[INFO] Ollama must be running: ollama serve${RESET}"
-echo "[INFO] Model: gemma3:4b  |  Arena: x=0-20m  y=0-10m  z=0-5m"
-echo "[INFO] Type natural-language commands, e.g. 'Send drone 1 to position 10, 5'"
-echo ""
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+
+SIM_SCRIPT="$HOME/drone-swarm-challenge-2026/ground-station-software/swarm/algorithm/simulate_drones.py"
+if [ -f "$SIM_SCRIPT" ]; then
+    python3 "$SIM_SCRIPT" &
+    SIM_PID=$!
+    sleep 3
+fi
 
 python3 "$OLLAMA_SCRIPT" "$@"
+
+[ -n "$SIM_PID" ] && kill "$SIM_PID" 2>/dev/null
 
 echo ""
 read -rp "Session ended. Press Enter to close..."

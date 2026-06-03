@@ -169,13 +169,12 @@ def validate_and_clamp(cmd: dict) -> dict | None:
 
 # ── REPL ───────────────────────────────────────────────────────────────────────
 def run_repl(node: OllamaCommanderNode, model: str, ollama_url: str):
-    print(f"\nOllama Commander  model={model}  arena=20×10×5 m")
-    print("Type a command, or 'quit' to exit.\n")
+    print()
 
     while True:
         try:
-            print(f"[{node.states_summary()}]")
-            user_input = input("cmd> ").strip()
+            print(f" {node.states_summary()}")
+            user_input = input("Swarm Input: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nExiting.")
             break
@@ -242,8 +241,12 @@ def main():
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
 
-    # Give subscriptions a moment to receive current states
-    time.sleep(0.5)
+    # Wait for DDS discovery (up to 4 s)
+    deadline = time.time() + 4.0
+    while time.time() < deadline:
+        if any(s != 'unknown' for s in node._states.values()):
+            break
+        time.sleep(0.1)
 
     try:
         run_repl(node, args.model, args.ollama)
