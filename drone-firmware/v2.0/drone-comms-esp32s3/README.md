@@ -12,18 +12,18 @@ ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.c
 
 The micro-ROS UDP port is derived automatically from `DRONE_ID`: `port = 8880 + DRONE_ID` (e.g. drone 1 → 8881, drone 2 → 8882). Set the agent IP via `idf.py menuconfig` → **micro-ROS Settings → Agent IP**.
 
-## micro-ROS Vision Toggle
+## GCS RQT Panel — Vision Toggle
 
-Send from GCS to enable/disable VISION_POSITION_ESTIMATE relay to PX4:
+Enable/disable VISION_POSITION_ESTIMATE relay to PX4 via the RQT buttons panel on the GCS:
 
 ```
 /gcs/drone_N/config  →  "CONFIG_VISION_ENABLE"
 /gcs/drone_N/config  →  "CONFIG_VISION_DISABLE"
 ```
 
-## micro-ROS Control Source Toggle
+## GCS RQT Panel — Control Source Toggle
 
-Send from GCS to switch between GCS Offboard control and RC manual control:
+Switch between GCS Offboard control and RC manual control via the RQT buttons panel on the GCS:
 
 ```
 /gcs/drone_N/config  →  "CONFIG_SOURCE_GCS"
