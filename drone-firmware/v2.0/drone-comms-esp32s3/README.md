@@ -44,6 +44,18 @@ Send from GCS to enable/disable VISION_POSITION_ESTIMATE relay to PX4:
 /gcs/drone_1/config  →  "CONFIG_VISION_DISABLE"
 ```
 
+## micro-ROS Control Source Toggle
+
+Send from GCS to switch between GCS Offboard control and RC manual control:
+
+```
+/gcs/drone_1/config  →  "CONFIG_SOURCE_GCS"
+/gcs/drone_1/config  →  "CONFIG_SOURCE_RC"
+```
+
+- `CONFIG_SOURCE_GCS` — sets PX4 to Offboard mode; position setpoints accepted from `/gcs/drone_N/control`
+- `CONFIG_SOURCE_RC` — sets PX4 to Stabilized mode; RC transmitter takes over
+
 ## Navigation Architecture (as of 2026-06-01, commit 9f65d04)
 
 ### EKF2 fusion — position only, no yaw
