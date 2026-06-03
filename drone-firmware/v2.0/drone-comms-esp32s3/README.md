@@ -2,12 +2,6 @@
 
 ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) board acting as the communication bridge in the v2.0 dual-MCU architecture. Receives sensor data from the ESP32-P4 over UART, forwards obstacle distances and pose estimates to PX4 via MAVLink, and maintains the micro-ROS link to the Ground Control Station.
 
-## Console Output
-
-```
-[ToF] L90: 320mm L45: 450mm FWD: 880mm R45:  13mm R90:  12mm UP:   2mm | STATE:disarmed       VIS:N
-```
-
 ## Configuration
 
 ### DRONE_ID
@@ -17,10 +11,6 @@ ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.c
 ### micro-ROS Agent Port
 
 The micro-ROS UDP port is derived automatically from `DRONE_ID`: `port = 8880 + DRONE_ID` (e.g. drone 1 → 8881, drone 2 → 8882). Set the agent IP via `idf.py menuconfig` → **micro-ROS Settings → Agent IP**.
-
-## ESP-IDF Version
-
-IDF 5.0 (Docker image: `espressif/idf:release-v5.0`)
 
 ## micro-ROS Vision Toggle
 
