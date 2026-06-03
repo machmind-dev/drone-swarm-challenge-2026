@@ -2,33 +2,6 @@
 
 ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) board acting as the communication bridge in the v2.0 dual-MCU architecture. Receives sensor data from the ESP32-P4 over UART, forwards obstacle distances and pose estimates to PX4 via MAVLink, and maintains the micro-ROS link to the Ground Control Station.
 
-## Role in the System
-
-```
-ESP32-P4 (Navigation)
-  │  UART binary frames @ 115200
-  │  GPIO22 TX → GPIO3 RX
-  ▼
-ESP32-S3 (Communications)
-  ├── MAVLink → PX4 (GPIO43 TX / GPIO44 RX, 57600 baud)
-  │     OBSTACLE_DISTANCE  — 5 horizontal ToF sensors, 30° FOV each
-  │     DISTANCE_SENSOR    — upward sensor (slot 5)
-  │     VISION_POSITION_ESTIMATE — ArUco pose (when vision enabled)
-  │     HEARTBEAT, SET_MODE, ARM, NAV commands
-  └── micro-ROS → GCS (Wi-Fi)
-        Publish: /drone_N/state, /drone_N/battery, /drone_N/role
-        Subscribe: /gcs/drone_N/command, /gcs/drone_N/config, /gcs/drone_N/control
-```
-
-## Hardware
-
-| Component | Part |
-|-----------|------|
-| MCU | Seeed Studio XIAO ESP32-S3 (240 MHz, 8 MB PSRAM) |
-| P4 link | UART2 — GPIO3 RX ← P4 GPIO22, GPIO2 TX → P4 GPIO23 |
-| PX4 link | UART1 — GPIO43 TX, GPIO44 RX, 57600 baud |
-| USB-UART | USB-CDC → `/dev/ttyACM0` |
-
 ## UART Protocol (P4 → S3)
 
 Binary framed, 115200 8N1. Frame layout:
