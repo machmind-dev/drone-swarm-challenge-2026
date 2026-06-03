@@ -1,15 +1,17 @@
----
-
-# Swarm Drone Challenge 2026
-
-Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigkair.com).
+**Team Mach Mind**
 
 | Member | Disciplines |
 |--------|-------------|
 | [**Mindaugas Jonauskis**](https://www.linkedin.com/in/mindaugas-jonauskis-11931145/) (Founder) | Firmware & Software Engineering · Electronics & Electrical Design |
 | [**Hauke Renk**](https://www.linkedin.com/in/hauke-renk-90832739a/) | Mechanical Design & Integration |
 
+---
 
+# Swarm Drone Challenge 2026
+
+Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigkair.com).
+
+Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified and was one of **6 finalists** competing at the Finals on **11 June 2026**.
 
 **Drone Versions**
 
@@ -17,8 +19,6 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 |---------|-------|-----|-------|-----|--------|-------|
 | [v1.0](drone-firmware/v1.0/) | Qualifying | S3 | 240 MHz, 8 MB | 4 | Offboard | 80×60 px, up to 4 m |
 | [v2.0](drone-firmware/v2.0/) | Finals | S3 & P4 | 240 & 360 MHz, 8 & 32 MB | 6 | Onboard | 320×240 px, up to 12 m |
-
-Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified and was one of **6 finalists** competing at the Finals on **11 June 2026**.
 
 
 ## System Architecture (v2.0)
