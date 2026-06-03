@@ -1,4 +1,4 @@
-# ESP32-P4 ArUco Vision Board
+# Vision Module – ESP32 P4
 
 ESP-IDF firmware for the Waveshare ESP32-P4 WiFi6 board with OV5647 MIPI-CSI camera.
 Performs real-time ArUco marker detection and outputs world-frame pose estimates over UART.
