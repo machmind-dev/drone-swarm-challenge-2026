@@ -34,31 +34,6 @@ SOF(1B) | LEN(1B) | TYPE(1B) | PAYLOAD(47B) | CRC8(1B)  =  51 bytes total
 [ToF] L90: 320mm L45: 450mm FWD: 880mm R45:  13mm R90:  12mm UP:   2mm | STATE:disarmed       VIS:N
 ```
 
-## Build & Flash
-
-Use the desktop launcher (recommended):
-
-```
-IDE - Flash S3
-```
-
-Or manually via Docker:
-
-```bash
-cd drone-firmware/v2.0/drone-comms-esp32s3
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml exec esp32s3_comms bash
-# inside container:
-source /opt/esp/idf/export.sh
-idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
-```
-
-First build only — set the target once:
-```bash
-idf.py set-target esp32s3
-```
-
 ## ESP-IDF Version
 
 IDF 5.0 (Docker image: `espressif/idf:release-v5.0`)
