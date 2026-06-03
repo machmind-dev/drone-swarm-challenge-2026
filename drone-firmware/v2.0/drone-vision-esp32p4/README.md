@@ -54,15 +54,6 @@ if (R_l2c.at<double>(1, 1) > -0.8) continue;   // current value
 | <img src="../../../launchers/stream_ico.png" width="48"><br>**IDE — Stream View** | Live camera stream with ArUco marker outlines and ToF overlay |
 | *(pending)*<br>**Mach Mind – Arena View** | ArUco Navigation Bench Testing |
 
-## Key Design Decisions
-
-- **No per-frame STREAMOFF** — camera streams continuously so ISP AE/AWB/lens-shading
-  correction converges. Previous per-frame STREAMOFF caused dark vignette frames.
-- **`SPIRAM_MALLOC_ALWAYSINTERNAL=131072`** — forces OpenCV's 76 800-byte adaptive
-  threshold workspace into SRAM, eliminating the PSRAM DMA spinlock conflict.
-- **5 s ISP warmup** before the first DQBUF, matching `camera_view_mode` behaviour.
-- **R_lw world-pose formula** — verified correct for all 4 SDC26 arena walls.
-
 ## ArUco Markers — Navigation Inside Arena
 
 16 ArUco markers (IDs 1–16) are mounted on arena poles at two heights (4 m and 2 m) with known world-frame positions:
