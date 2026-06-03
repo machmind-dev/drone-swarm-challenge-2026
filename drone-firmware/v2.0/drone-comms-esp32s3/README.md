@@ -93,7 +93,7 @@ PX4, so Ollama always speaks arena frame regardless of LH/RH scene. Launch via
 
 ## micro-ROS Topics
 
-### Publishers
+### ESP32-S3 → GCS / RViz (published by drone)
 
 | Topic | Type | Description |
 |-------|------|-------------|
@@ -103,7 +103,7 @@ PX4, so Ollama always speaks arena frame regardless of LH/RH scene. Launch via
 | `/drone_N/vision_pose` | `geometry_msgs/PoseStamped` | ArUco world-frame pose |
 | `/visualization_marker` | `visualization_msgs/Marker` | RViz drone disc + box markers |
 
-### Subscribers
+### GCS → ESP32-S3 (published by GCS, received by drone)
 
 | Topic | Type | Description |
 |-------|------|-------------|
