@@ -13,8 +13,8 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 
 | Version | Event | MCU | CPU | PSRAM | ArUco Res | ArUco Det |
 |---------|-------|-----|-----|--------|-----------|---------------------|
-| [v1.0](drone-firmware/v1.0/) | Qualifying | ESP32-S3 | 240 MHz | 8 MB | 80×60 (QQVGA) | ~3–4 m |
-| [v2.0](drone-firmware/v2.0/) | Finals | ESP32-S3 & P4 | 240 & 360 MHz | 8 & 32 MB | 320×240 (QVGA) | ~8–12 m |
+| [v1.0](drone-firmware/v1.0/) | Qualifying | S3 | 240 MHz | 8 MB | 80×60 (QQVGA) | ~3–4 m |
+| [v2.0](drone-firmware/v2.0/) | Finals | S3 & P4 | 240 & 360 MHz | 8 & 32 MB | 320×240 (QVGA) | ~8–12 m |
 
 ## System Architecture (v2.0)
 
@@ -27,8 +27,8 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 ```
 drone-swarm-challenge-2026/
 ├── drone-firmware/          # All drone onboard firmware (v1.0 and v2.0)
-│   ├── v1.0/                # SDC 2026 Qualifying — single ESP32-S3
-│   └── v2.0/                # SDC 2026 Finals — dual ESP32-P4 + ESP32-S3
+│   ├── v1.0/                # SDC 2026 Qualifying — single S3
+│   └── v2.0/                # SDC 2026 Finals — dual P4 + S3
 │       ├── drone-vision-esp32p4/  # Navigation: ArUco, ToF, UART TX
 │       ├── drone-comms-esp32s3/   # Communication: MAVLink, micro-ROS
 │       └── shared/                # Binary UART protocol header
