@@ -1,17 +1,7 @@
 # Vision Module – ESP32 P4
 
-ESP-IDF firmware for the Waveshare ESP32-P4 WiFi6 board with OV5647 MIPI-CSI camera.
+ESP-IDF firmware for the [Waveshare ESP32-P4 WiFi6](https://docs.waveshare.com/ESP32-P4-WIFI6) board with OV5647 MIPI-CSI camera.
 Performs real-time ArUco marker detection and outputs world-frame pose estimates over UART.
-
-## Hardware
-
-| Component | Part |
-|-----------|------|
-| MCU | Waveshare ESP32-P4 WiFi6 (360 MHz, 32 MB PSRAM) |
-| Camera | OV5647 MIPI-CSI, 800×800 RAW8 @ 50 fps → ISP → RGB565 |
-| USB-UART | WCH CH343 bridge → `/dev/ttyACM0` |
-
-Detection pipeline: 800×800 capture → center-crop to 800×600 → resize to 320×240 (QVGA) for ArUco.
 
 ## Camera Exposure Tuning
 
