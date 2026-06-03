@@ -2,32 +2,6 @@
 
 ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) board acting as the communication bridge in the v2.0 dual-MCU architecture. Receives sensor data from the ESP32-P4 over UART, forwards obstacle distances and pose estimates to PX4 via MAVLink, and maintains the micro-ROS link to the Ground Control Station.
 
-## UART Protocol (P4 → S3)
-
-Binary framed, 115200 8N1. Frame layout:
-
-```
-SOF(1B) | LEN(1B) | TYPE(1B) | PAYLOAD(47B) | CRC8(1B)  =  51 bytes total
-```
-
-- SOF = `0xAB`, TYPE = `0x03` (COMBINED)
-- Payload = `p4_tof_t` (18 B: 6× uint16 dist + 6× uint8 status) + `p4_pose_t` (29 B: valid + 7× float)
-- CRC-8 (poly 0x07) computed over TYPE + PAYLOAD
-- Protocol header: `v2.0/shared/p4_link_protocol.h`
-
-## MAVLink Obstacle Distance Mapping
-
-72-bin circular map at 5°/bin, bin 0 = forward, clockwise:
-
-| Sensor | Direction | Bins |
-|--------|-----------|------|
-| Slot 0 | Left −90° | 51–56 |
-| Slot 1 | L-front −45° | 60–65 |
-| Slot 2 | Front 0° | 69, 70, 71, 0, 1, 2 |
-| Slot 3 | R-front +45° | 6–11 |
-| Slot 4 | Right +90° | 15–20 |
-| Slot 5 | Up | separate `DISTANCE_SENSOR` (PITCH_90) |
-
 ## Console Output
 
 ```
