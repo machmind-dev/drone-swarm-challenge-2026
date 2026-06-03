@@ -22,6 +22,8 @@ Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 
 
 ---
 
+## Repository Structure
+
 ```
 drone-swarm-challenge-2026/
 ├── drone-firmware/          # All drone onboard firmware (v1.0 and v2.0)
