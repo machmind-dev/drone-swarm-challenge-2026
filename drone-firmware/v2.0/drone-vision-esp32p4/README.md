@@ -51,8 +51,8 @@ if (R_l2c.at<double>(1, 1) > -0.8) continue;   // current value
 
 | Launcher | Purpose |
 |----------|---------|
-| `Mach Mind – Stream View.desktop` | Live camera stream with ArUco marker outlines and ToF overlay |
-| `Mach Mind – Arena View.desktop` | Two-panel debug viewer — colour RGB (left) and grayscale (right) |
+| <img src="../../../launchers/stream_ico.png" width="48"><br>**IDE — Stream View** | Live camera stream with ArUco marker outlines and ToF overlay |
+| *(pending)*<br>**Mach Mind – Arena View** | Two-panel debug viewer — colour RGB (left) and grayscale (right) |
 
 ## Key Design Decisions
 

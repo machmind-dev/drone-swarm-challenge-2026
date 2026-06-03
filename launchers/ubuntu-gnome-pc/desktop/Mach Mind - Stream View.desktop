@@ -7,4 +7,4 @@ Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-str
 Path=/home/pihas/drone-swarm-challenge-2026/
 Name=IDE — Stream View
 Comment=ESP32-P4 live camera stream with ArUco and ToF overlay
-Icon=/home/pihas/drone-swarm-challenge-2026/launchers/flash_ico.png
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/stream_ico.png
