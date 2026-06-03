@@ -15,9 +15,6 @@ Detection pipeline: 800×800 capture → center-crop to 800×600 → resize to 3
 
 ## Camera Exposure Tuning
 
-The OV5647 AEC (auto-exposure) brightness target is set via `CONFIG_VISION_AEC_TARGET`
-in `main/aruco_pose.cpp`. Range is 0–47; the sensor target is `value × 4.92` out of 255.
-
 ```cpp
 #define CONFIG_VISION_AEC_TARGET 15   // ← tune per venue
 ```
@@ -29,82 +26,33 @@ in `main/aruco_pose.cpp`. Range is 0–47; the sensor target is `value × 4.92` 
 | 15 | ~29% | Daylit venue, windows visible — **current default** |
 | 10 | ~19% | Strong window glare / direct sunlight |
 
-To override without editing source, add to `main/CMakeLists.txt`:
-```cmake
-target_compile_options(${COMPONENT_LIB} PRIVATE ... "-DCONFIG_VISION_AEC_TARGET=10")
-```
-
-Confirmed at value 15: ArUco markers detected correctly in daylit conditions (2026-05-25).
-
 ## Detection Resolution
-
-Two modes are selectable at the top of `main/aruco_pose.cpp`:
 
 ```cpp
 #define VISION_RES_QVGA   // 320×240 — ~8 m detection range (default)
 // #define VISION_RES_HVGA // 480×320 — ~12 m detection range, slower
 ```
 
-Stream preview is always 80×60 (10× downscale of the detection crop).
-
 ## Pose-Acceptance Tuning
 
-Two stateless filters in the per-marker PnP loop in `main/aruco_pose.cpp` reject
-unreliable pose solutions before they reach the averager, `best_R_wc`, or the
-S3/PX4 EKF. Both are critical — without them PX4 will physically fly the drone
-to chase a wrong pose (long-range noise) or rotate it 180° (PnP planar
-ambiguity flips).
-
-### 1. Distance gate — `POSE_MAX_RANGE_M`
+### Distance gate — `POSE_MAX_RANGE_M`
 
 ```cpp
 #define POSE_MAX_RANGE_M  8.0f   // metres; match to detection resolution
 ```
 
-Markers detected farther than this drop out of the pose averaging entirely.
-At QVGA a 50 cm marker projects to ~12 pixels at 8 m and ~7 pixels at 11 m —
-beyond ~8 m, sub-pixel corner noise produces PnP solutions metres off truth
-(verified by stationary test: at 11 m the reported drone Z was 6 m vs. 1 m
-truth). The matching value if switching to HVGA is ~12.
-
-| Resolution | Recommended gate |
-|------------|------------------|
-| QVGA 320×240 (default) | **8.0 m** |
-| HVGA 480×320 | ~12 m |
-
-### 2. Orientation guard — R<sub>l2c</sub>[1][1] threshold
+### Orientation guard — R<sub>l2c</sub>[1][1] threshold
 
 ```cpp
 if (R_l2c.at<double>(1, 1) > -0.8) continue;   // current value
 ```
 
-Wall markers are mounted with their printed "+Y" axis pointing world-up. The
-correct PnP solution puts marker +Y near image-up in the camera frame, i.e.
-`R_l2c[1][1] ≈ -1`. The 90°/180°/270° PnP planar-ambiguity flips that
-`SOLVEPNP_IPPE_SQUARE` occasionally returns instead land at `R[1][1] ≈ 0` (90°),
-`+1` (180°), or `0` (270°). The guard rejects anything that isn't clearly
-right-side up.
+## Troubleshooting & Debugging
 
-| Threshold | Accepts up to | When to use |
-|-----------|---------------|-------------|
-| `-0.5`    | ~60° camera tilt | Aggressive flight envelope; risk of letting borderline wrong solutions through |
-| **`-0.8`** (current default) | ~37° camera tilt | Hover/cruise — recommended; catches the wrong solutions that slipped past `-0.5` during bench testing |
-| `-0.95`   | ~18° camera tilt | Very tight; will start rejecting valid solutions when the drone banks |
-
-Tighter (closer to `-1`) → fewer wrong solutions accepted, but more correct
-solutions rejected during banking turns. If pose updates become too sparse
-during flight, loosen toward `-0.6`.
-
-**Assumes camera is mounted upright on the drone** (image-up = world-up when
-drone is level). If the camera is rotated 90° on the mount, the check needs to
-move to a different row/column of `R_l2c` accordingly.
-
-## Tools
-
-| Script | Purpose |
-|--------|---------|
-| `tools/stream_view.py /dev/ttyACM0 921600` | Live 80×60 detection crop with marker outlines and POSE overlay |
-| `tools/view_frame.py /dev/ttyACM0 115200` | Two-panel debug viewer — color RGB (left) and grayscale (right) via hex dump protocol |
+| Launcher | Purpose |
+|----------|---------|
+| `Mach Mind – Stream View.desktop` | Live camera stream with ArUco marker outlines and ToF overlay |
+| `Mach Mind – Arena View.desktop` | Two-panel debug viewer — colour RGB (left) and grayscale (right) |
 
 ## Key Design Decisions
 
