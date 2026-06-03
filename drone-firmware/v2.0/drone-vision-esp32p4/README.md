@@ -103,6 +103,17 @@ No known issues.
 
 ## ToF — Obstacle Detection
 
-Six VL53L1X time-of-flight sensors provide radial short-range distance measurements around the drone body. The P4 polls all six sensors, packages the readings into the COMBINED UART frame, and the S3 unpacks them and forwards them to PX4 as `OBSTACLE_DISTANCE` and `DISTANCE_SENSOR` MAVLink messages at 20 Hz. PX4 collision prevention (`CP_DIST = 0.5 m`, `CP_GUIDE_ANG = 30°`) uses this data to decelerate and hold the drone before contact. The primary altitude source is a downward-facing LiDAR (baro disabled); ToF covers the horizontal plane only.
+Six VL53L1X time-of-flight sensors are polled at 20 Hz by the P4 and packed into the COMBINED UART frame. The S3 unpacks them and forwards to PX4 as `OBSTACLE_DISTANCE` (slots 0–4, horizontal) and `DISTANCE_SENSOR` (slot 5, upward) MAVLink messages. The S3 puts the drone into hover when an obstacle is detected within 0.5 m.
 
-No known issues.
+| Slot | Direction | Body-frame angle |
+|------|-----------|-----------------|
+| 0 | Left | −90° |
+| 1 | Left-front | −45° |
+| 2 | Front | 0° |
+| 3 | Right-front | +45° |
+| 4 | Right | +90° |
+| 5 | Up | — |
+
+**Known issues**
+
+- **Issue 1 — PX4 in Offboard mode ignores `OBSTACLE_DISTANCE` and `DISTANCE_SENSOR`.** PX4's built-in collision prevention (`CP_DIST`) is not active in Offboard mode. The S3 handles obstacle stopping by clamping position setpoints directly before sending them to PX4.
