@@ -2,6 +2,29 @@
 
 ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) board acting as the communication bridge in the v2.0 dual-MCU architecture. Receives sensor data from the ESP32-P4 over UART, forwards obstacle distances and pose estimates to PX4 via MAVLink, and maintains the micro-ROS link to the Ground Control Station.
 
+## micro-ROS Topics
+
+### Publishers
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/drone_N/state` | `std_msgs/String` | Flight state (disarmed / armed / flying / landing) |
+| `/drone_N/role` | `std_msgs/String` | Assigned mission role |
+| `/drone_N/battery` | `std_msgs/Int8` | Battery level (%) |
+| `/drone_N/vision_pose` | `geometry_msgs/PoseStamped` | ArUco world-frame pose |
+| `/visualization_marker` | `visualization_msgs/Marker` | RViz drone disc + box markers |
+
+### Subscribers
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/gcs/drone_N/command` | `std_msgs/String` | Flight commands (ARM, TAKEOFF, LAND, etc.) |
+| `/gcs/drone_N/config` | `std_msgs/String` | Runtime config (CONFIG_VISION_ENABLE / DISABLE) |
+| `/gcs/drone_N/control` | `geometry_msgs/PoseStamped` | Position setpoint in arena coordinates |
+| `/gcs/system/team_color` | `std_msgs/String` | Scene selection — `red` (LH) or `blue` (RH) |
+
+---
+
 ## Configuration
 
 ### DRONE_ID
