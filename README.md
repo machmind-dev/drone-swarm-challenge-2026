@@ -15,10 +15,10 @@ Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified an
 
 **Drone Versions**
 
-| Version | Event | MCU | CPU | PSRAM | ToF | Vision | ArUco Res | ArUco Det |
-|---------|-------|-----|-----|--------|-----|--------|-----------|-----------|
-| [v1.0](drone-firmware/v1.0/) | Qualifying | S3 | 240 MHz | 8 MB | 4 | Offboard | 80×60 (QQVGA) | ~3–4 m |
-| [v2.0](drone-firmware/v2.0/) | Finals | S3 & P4 | 240 & 360 MHz | 8 & 32 MB | 6 | Onboard | 320×240 (QVGA) | ~8–12 m |
+| Version | Event | MCU | Specs | ToF | Vision | ArUco |
+|---------|-------|-----|-------|-----|--------|-------|
+| [v1.0](drone-firmware/v1.0/) | Qualifying | S3 | 240 MHz / 8 MB | 4 | Offboard | 80×60 / ~4 m |
+| [v2.0](drone-firmware/v2.0/) | Finals | S3 & P4 | 240/360 MHz / 8/32 MB | 6 | Onboard | 320×240 / ~12 m |
 
 ## System Architecture (v2.0)
 
