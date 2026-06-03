@@ -51,8 +51,8 @@ if (R_l2c.at<double>(1, 1) > -0.8) continue;   // current value
 
 | Launcher | Purpose |
 |----------|---------|
-| <img src="../../../launchers/stream_ico.png" width="96"><br>**IDE — Stream View** | ArUco Recognition Bench Testing, Obstacle Detection Bench Testing |
-| <img src="../../../launchers/stream_ico.png" width="96"><br>**IDE – Arena View** | ArUco Navigation Bench Testing |
+| <img src="../../../launchers/stream_ico.png" width="96"><br>**Stream View** | ArUco Recognition Bench Testing, Obstacle Detection Bench Testing |
+| <img src="../../../launchers/stream_ico.png" width="96"><br>**Arena View** | ArUco Navigation Bench Testing |
 
 ## ArUco Markers — Navigation Inside Arena
 
