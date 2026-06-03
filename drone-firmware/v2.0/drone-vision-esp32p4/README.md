@@ -117,7 +117,18 @@ move to a different row/column of `R_l2c` accordingly.
 
 ## ArUco Markers — Navigation Inside Arena
 
-Four ArUco markers (IDs 11–14) are mounted one per arena wall at a known world-frame position. During flight the P4 detects visible markers, solves the camera pose via `SOLVEPNP_IPPE_SQUARE`, applies the arena-side geometric gate and reprojection filter, and transmits the averaged world-frame position + quaternion to the S3 over UART. The S3 relays this as a `VISION_POSITION_ESTIMATE` MAVLink message to PX4's EKF2, which fuses it as the primary absolute horizontal position source (no GPS, no magnetometer indoors). Navigation is enabled/disabled from the GCS via `COMMAND_VISION_ON / OFF`.
+16 ArUco markers (IDs 1–16) are mounted on arena poles at two heights (4 m and 2 m) with known world-frame positions:
+
+| IDs | Location | Facing |
+|-----|----------|--------|
+| 1, 9 | x=20 end pole (x=20, y=5) | −X (yaw 270°) |
+| 5, 13 | x=0 end pole (x=0, y=5) | +X (yaw 90°) |
+| 6, 14 / 7, 15 / 8, 16 | y=10 wall at x=5 / x=10 / x=15 | −Y (yaw 0°) |
+| 4, 12 / 3, 11 / 2, 10 | y=0 wall at x=5 / x=10 / x=15 | +Y (yaw 180°) |
+
+Odd-numbered IDs are at z=4 m; even-numbered at z=2 m. All positions are defined in `MARKER_MAP[]` in `main/aruco_pose.cpp`.
+
+During flight the P4 detects visible markers, solves the camera pose via `SOLVEPNP_IPPE_SQUARE`, applies the arena-side geometric gate and reprojection filter, and transmits the averaged world-frame position + quaternion to the S3 over UART. The S3 relays this as a `VISION_POSITION_ESTIMATE` MAVLink message to PX4's EKF2, which fuses it as the primary absolute horizontal position source (no GPS, no magnetometer indoors). Navigation is enabled/disabled from the GCS via `COMMAND_VISION_ON / OFF`.
 
 Detection runs at ~3–4 fps on the ESP32-P4 at 360 MHz. `stream_view.py` shows the ISP-corrected colour view at 80×60 with detected marker outlines in white and the world-pose overlay in cyan (top-left).
 
@@ -139,7 +150,7 @@ M1:4.94m POSE:1:15.538:6.171:4.056:0.059:0.736:-0.046:0.673
 
 ## ArUco Markers — Target Box Position Detection
 
-Target boxes are fitted with ArUco markers at known offsets. During a low-altitude pass the P4 reports each detected marker ID and its distance; the S3 forwards this in the COMBINED frame to the GCS. The ground station uses the marker ID to identify which box the drone is currently above and triggers the scoring sequence (RFID read / payload drop). Detection at close range (< 2 m) is reliable with the current QVGA pipeline and AEC target.
+Target boxes are fitted with ArUco markers (IDs 31–36 and 41–46). During a low-altitude pass the P4 detects visible box markers, computes their world positions, and reports each marker ID and distance. The S3 forwards this in the COMBINED frame to the GCS. The ground station uses the marker ID to identify which box the drone is currently above and triggers the scoring sequence (RFID read / payload drop). Detection at close range (< 2 m) is reliable with the current QVGA pipeline and AEC target.
 
 Console output format:
 ```
@@ -156,89 +167,3 @@ No known issues.
 Six VL53L1X time-of-flight sensors provide radial short-range distance measurements around the drone body. The P4 polls all six sensors, packages the readings into the COMBINED UART frame, and the S3 unpacks them and forwards them to PX4 as `OBSTACLE_DISTANCE` and `DISTANCE_SENSOR` MAVLink messages at 20 Hz. PX4 collision prevention (`CP_DIST = 0.5 m`, `CP_GUIDE_ANG = 30°`) uses this data to decelerate and hold the drone before contact. The primary altitude source is a downward-facing LiDAR (baro disabled); ToF covers the horizontal plane only.
 
 No known issues.
-
----
-
-## Fixed Issues
-
-### 1. Yaw flip on wall markers — IPPE ambiguity + mag-less EKF ⚠ Partial fix / root cause identified 2026-05-30
-
-**Symptom** (flight-tested 2026-05-29/30, LH scene, keyboard manual control):
-Facing ArUco 12 (y=0 wall) or ArUco 14 (y=10 wall) head-on, the drone flipped
-180° in yaw. A direct approach to ArUco 13 (x=0 wall) as the *first* marker of
-the flight sent the drone flying off-axis into the wall — while the *same*
-marker stabilised correctly when it was acquired *after* marker 12. That
-order-dependence was the tell.
-
-**Root cause.** For a vertical wall marker the IPPE planar ambiguity is a ~180°
-rotation about the marker's vertical axis. In world frame this is
-`R_wc_flip = Rot(worldZ, 180°)·R_wc`, which reflects the recovered drone
-position *across the wall plane*: the wrong solution lands **behind the wall,
-outside the arena**, with a 180°-flipped yaw — and both the bad position and bad
-yaw get fused into EKF2. The marker-frame upright guard (`R_l2c[1][1] < -0.8`)
-cannot see this because a vertical-axis flip keeps the marker upright for both
-solutions.
-
-**Superseded first attempt (commit `24eb720`).** Switched to
-`solvePnPGeneric(SOLVEPNP_IPPE)` and picked the solution whose world-frame yaw
-was closest to the previous accepted yaw (`s_prev_yaw`, temporal continuity).
-This **did not work**: temporal continuity has no absolute anchor, so on the
-first frame (`s_prev_yaw = NaN`) it blindly took `sol 0` and latched onto it.
-Whether that was correct depended on acquisition order — hence marker 13 working
-or crashing depending on what was seen before it.
-
-**Fix.** Replaced the temporal heuristic with an **absolute, history-free
-geometric gate** in `main/aruco_pose.cpp`. For each IPPE solution the recovered
-drone position must (a) lie on the arena-facing side of the marker face
-(`(p_w − marker)·normal > 0` — you can only detect a face from in front of it,
-so the true solution always satisfies this and the mirror solution never does)
-and (b) fall inside the arena envelope (`[−1,21]×[−1,11]` m). Among the
-survivors the lowest reprojection error wins. No temporal state, correct on the
-very first frame. A rate-limited `AMB …` serial trace logs the surviving
-solution and recovered `(x,y)` for in-flight confirmation (remove once
-verified). No FPS impact — IPPE computes both solutions internally regardless.
-
-**Deeper root cause — found in the PX4 log (flight 2026-05-30, drone_2).** The gate
-above stops the *position*-reflection flip, but flights kept flipping on first
-acquisition. The flight-controller log explains why:
-
-- The airframe **has no magnetometer** (`EKF2_MAG_TYPE = 5`) and indoors there is no
-  GPS — so **ArUco yaw is EKF2's only absolute heading source** (`EKF2_EV_CTRL = 15`).
-- At poor geometry (low altitude / steep look-up) the two IPPE solutions have nearly
-  the **same position but ~180°-opposite yaw** — both pass the position gate, so a
-  flipped *yaw* can still be selected. With no mag to veto it, EKF2 fuses it
-  (observed external-vision heading innovations of ~2.5–2.9 rad ≈ 180°), the heading
-  estimate snaps, and the drone rotates. At ~marker height square-on, yaw is
-  unambiguous → innovation ≈ 0 → stable. Hence "first bad-angle marker flips, then
-  everything works."
-
-**Resolved (2026-06-01, commit `bd10a7a`).** EV yaw fusion has been **disabled
-entirely** on the S3 side (`cov[20] = NaN`). EKF2 now fuses ArUco position
-only; gyro owns heading throughout the flight. Gyro drift over a 15 m arena
-traverse is ~1.5°, well within the 1–2 m RFID capture window. This eliminates
-all yaw-flip risk. The yaw-continuity gate (`MAX_YAW_JUMP_RAD`) is retained on
-the S3 to protect `vision_yaw` (used only for the continuity gate itself, not
-fused). The heading seed is now a no-op. Full analysis and flight logs:
-[`docs/flight-tests/2026-05-31/FINDINGS.md`](../../../docs/flight-tests/2026-05-31/FINDINGS.md).
-
-### Incidence gate — relaxed to 45° (commit `bd10a7a`)
-
-`MAX_VIEW_ANGLE_DEG` changed from 30° → 45° (`MIN_VIEW_COS` 0.866 → 0.707).
-The 30° gate caused 79 s vision gaps during cross-arena traversals: the drone
-flew parallel to the long walls so pillar markers were always viewed obliquely
-and rejected. 45° doubles the acceptance cone (90° total) while still excluding
-edge-on views where IPPE yaw is ambiguous. Since yaw is no longer fused into
-EKF2, the risk of accepting a yaw-ambiguous pose is limited to the S3
-continuity gate only.
-
-### 2. Emergency-landing rotates drone to yaw=0 before descending ✓ Fixed 2026-05-30
-
-**Symptom.** Pressing emergency land from rqt caused the drone to rotate
-(sometimes 180°) before descending.
-
-**Cause.** `mav_eland()` in `s3-comms/main.c` sent `MAV_CMD_NAV_LAND` with
-`param4 = 0` — commanding a yaw-to-North before landing.
-
-**Fix (commit `cc81f6d`).** Changed `param4` from `0` to `NAN` in the
-`mavlink_msg_command_long_pack` call. Drone now holds its current heading
-throughout the landing.
