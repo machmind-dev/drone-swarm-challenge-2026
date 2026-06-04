@@ -248,7 +248,7 @@ static volatile bool  nav_new_dest  = false;
 static volatile bool  nav_active    = false;
 static volatile bool  nav_obs_hold  = false;
 
-volatile bool vision_enabled = true;
+volatile bool vision_enabled = false;
 
 /* Vision pose — written by main loop from p4_link data */
 volatile float vp_x = 0.0f, vp_y = 0.0f, vp_z = 0.0f;

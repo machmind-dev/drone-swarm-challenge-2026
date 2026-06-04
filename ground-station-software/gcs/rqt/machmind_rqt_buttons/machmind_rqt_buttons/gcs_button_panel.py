@@ -353,7 +353,7 @@ class GcsButtonPanel(Plugin):
 
         vision_btn = QPushButton("ARUCO EKF")
         vision_btn.setCheckable(True)
-        vision_btn.setChecked(True)
+        vision_btn.setChecked(False)
         vision_btn.setStyleSheet(small_toggle_style)
         vision_btn.clicked.connect(partial(self._send_config_toggle, drone_id, vision_btn,
                                            "CONFIG_VISION_ENABLE", "CONFIG_VISION_DISABLE"))
