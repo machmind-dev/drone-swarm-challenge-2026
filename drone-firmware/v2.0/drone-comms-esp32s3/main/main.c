@@ -163,6 +163,13 @@ static const char *TAG = "drone";
 #define MISSION_LAND_DESCEND_MS    5000
 #define OFFBOARD_STREAM_PERIOD_MS  50
 
+/* ── Manhattan waypoint navigation ─────────────────────────────────────── */
+#define MANHATTAN_STEP_M        1.0f   /* distance between intermediate waypoints */
+#define MANHATTAN_ARRIVAL_M     1.0f   /* waypoint reached when closer than this */
+#define MANHATTAN_PASSTHROUGH_M 1.0f   /* setpoints ≤ this skip Manhattan (keyboard) */
+#define MANHATTAN_OBSTACLE_MM   500    /* ToF threshold — stop and await new GCS command */
+#define MANHATTAN_MAX_WPS       40     /* 20 m + 10 m at 1 m steps + margin */
+
 /* ════════════════════════════════════════════════════════════════════════════
  * TEST — Yaw spin on marker 22.
  * Place physical marker 22 at arena position (10.0, 5.0) z=2 m.
@@ -228,6 +235,18 @@ static float map_home_x = 0.0f, map_home_y = 0.0f, map_home_z = 0.0f;
 static volatile float setpoint_x = 0.0f, setpoint_y = 0.0f, setpoint_z = 1.5f;
 static volatile float setpoint_yaw = 0.0f;
 static volatile bool  setpoint_received = false;
+
+/* ── Manhattan navigation state ─────────────────────────────────────────── */
+static float          nav_wps_x[MANHATTAN_MAX_WPS];
+static float          nav_wps_y[MANHATTAN_MAX_WPS];
+static int            nav_wp_count  = 0;
+static int            nav_wp_idx    = 0;
+static volatile float nav_dest_x    = 0.0f;
+static volatile float nav_dest_y    = 0.0f;
+static volatile float nav_dest_z    = MISSION_TAKEOFF_ALT_M;
+static volatile bool  nav_new_dest  = false;
+static volatile bool  nav_active    = false;
+static volatile bool  nav_obs_hold  = false;
 
 volatile bool vision_enabled = true;
 
@@ -664,6 +683,42 @@ static void clamp_setpoint_for_obstacles(float cur_x, float cur_y,
     }
 }
 
+/* ── Build Manhattan waypoint list: X-leg first, then Y-leg, in STEP_M steps.
+ * Returns the number of waypoints written into wps_x / wps_y. */
+static int nav_build_waypoints(float fx, float fy, float tx, float ty,
+                                float step, float *wps_x, float *wps_y, int max_wps)
+{
+    int   n      = 0;
+    float cx     = fx;
+    float cy     = fy;
+    float dx     = tx - fx;
+    float dy     = ty - fy;
+    float sign_x = dx >= 0.0f ? 1.0f : -1.0f;
+    float sign_y = dy >= 0.0f ? 1.0f : -1.0f;
+
+    /* X-leg */
+    int nx = (int)(fabsf(dx) / step);
+    for (int i = 0; i < nx && n < max_wps; i++) {
+        cx += sign_x * step;
+        wps_x[n] = cx; wps_y[n] = cy; n++;
+    }
+    if (fabsf(tx - cx) > 0.05f && n < max_wps) {
+        wps_x[n] = tx; wps_y[n] = cy; n++;  /* X remainder */
+    }
+
+    /* Y-leg */
+    int ny = (int)(fabsf(dy) / step);
+    for (int i = 0; i < ny && n < max_wps; i++) {
+        cy += sign_y * step;
+        wps_x[n] = tx; wps_y[n] = cy; n++;
+    }
+    if (fabsf(ty - cy) > 0.05f && n < max_wps) {
+        wps_x[n] = tx; wps_y[n] = ty; n++;  /* Y remainder */
+    }
+
+    return n;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * Mission FreeRTOS task
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -703,12 +758,91 @@ static void mission_task_fn(void *arg)
     do {
         if (drone_state != DRONE_MISSION) goto mission_abort;
         {
-            float sp_x   = setpoint_received ? setpoint_x   : home_x;
-            float sp_y   = setpoint_received ? setpoint_y   : home_y;
-            float sp_z   = setpoint_received ? -setpoint_z  : -MISSION_TAKEOFF_ALT_M;
-            float sp_yaw = setpoint_received ? setpoint_yaw : (vision_pose_valid ? vision_yaw : 0.0f);
-            if (px4_pos_valid)
-                clamp_setpoint_for_obstacles(px4_pos_x, px4_pos_y, &sp_x, &sp_y);
+            float sp_x, sp_y, sp_z, sp_yaw;
+            float cur_x = px4_pos_valid ? px4_pos_x : home_x;
+            float cur_y = px4_pos_valid ? px4_pos_y : home_y;
+
+            /* ── 1. New GCS destination → build waypoint list ── */
+            if (nav_new_dest) {
+                nav_wp_count = nav_build_waypoints(cur_x, cur_y,
+                                                   nav_dest_x, nav_dest_y,
+                                                   MANHATTAN_STEP_M,
+                                                   nav_wps_x, nav_wps_y,
+                                                   MANHATTAN_MAX_WPS);
+                nav_wp_idx   = 0;
+                nav_active   = (nav_wp_count > 0);
+                nav_obs_hold = false;
+                nav_new_dest = false;
+                ESP_LOGI(TAG, "Manhattan: %d wp → NED(%.2f,%.2f)",
+                         nav_wp_count, (double)nav_dest_x, (double)nav_dest_y);
+            }
+
+            /* ── 2. Manhattan active — advance through waypoints ── */
+            if (nav_active) {
+                float wp_x = nav_wps_x[nav_wp_idx];
+                float wp_y = nav_wps_y[nav_wp_idx];
+                float dx   = wp_x - cur_x;
+                float dy   = wp_y - cur_y;
+                float wp_yaw = atan2f(dy, dx);
+
+                /* ToF check in direction of travel */
+                float bearing_body = wp_yaw - vision_yaw;
+                uint16_t clearance = tof_clearance_for_bearing(bearing_body);
+
+                if (clearance != UINT16_MAX && clearance < MANHATTAN_OBSTACLE_MM) {
+                    /* Obstacle — stop and wait for new GCS command */
+                    nav_active   = false;
+                    nav_obs_hold = true;
+                    sp_x   = cur_x;
+                    sp_y   = cur_y;
+                    sp_z   = -nav_dest_z;
+                    sp_yaw = vision_pose_valid ? vision_yaw : 0.0f;
+                    ESP_LOGW(TAG, "Manhattan: obstacle %u mm — awaiting new GCS command",
+                             clearance);
+                } else {
+                    sp_x   = wp_x;
+                    sp_y   = wp_y;
+                    sp_z   = -nav_dest_z;
+                    sp_yaw = wp_yaw;
+
+                    /* Arrival check */
+                    float dist = sqrtf(dx * dx + dy * dy);
+                    if (dist < MANHATTAN_ARRIVAL_M) {
+                        nav_wp_idx++;
+                        if (nav_wp_idx >= nav_wp_count) {
+                            nav_active = false;
+                            ESP_LOGI(TAG, "Manhattan: arrived at destination");
+                        } else {
+                            ESP_LOGI(TAG, "Manhattan: wp %d/%d reached",
+                                     nav_wp_idx, nav_wp_count);
+                        }
+                    }
+                }
+
+            /* ── 3. Obstacle hold — hover until new GCS command ── */
+            } else if (nav_obs_hold) {
+                sp_x   = cur_x;
+                sp_y   = cur_y;
+                sp_z   = -nav_dest_z;
+                sp_yaw = vision_pose_valid ? vision_yaw : 0.0f;
+
+            /* ── 4. Pass-through (keyboard / small steps) ── */
+            } else if (setpoint_received) {
+                sp_x   = setpoint_x;
+                sp_y   = setpoint_y;
+                sp_z   = -setpoint_z;
+                sp_yaw = setpoint_yaw;
+                if (px4_pos_valid)
+                    clamp_setpoint_for_obstacles(cur_x, cur_y, &sp_x, &sp_y);
+
+            /* ── 5. No setpoint — hover at home ── */
+            } else {
+                sp_x   = home_x;
+                sp_y   = home_y;
+                sp_z   = -MISSION_TAKEOFF_ALT_M;
+                sp_yaw = vision_pose_valid ? vision_yaw : 0.0f;
+            }
+
             mav_set_position_yaw_ned(sp_x, sp_y, sp_z, sp_yaw);
         }
         vTaskDelay(pdMS_TO_TICKS(OFFBOARD_STREAM_PERIOD_MS));
@@ -987,22 +1121,41 @@ static void control_callback(const void *msg_in)
         (const geometry_msgs__msg__PoseStamped *)msg_in;
     if (!msg) return;
 
-    setpoint_x = (float)msg->pose.position.x - ned_offset_x;
-    setpoint_y = (float)msg->pose.position.y - ned_offset_y;
-    setpoint_z = (float)msg->pose.position.z;
+    float ned_x = (float)msg->pose.position.x - ned_offset_x;
+    float ned_y = (float)msg->pose.position.y - ned_offset_y;
+    float ned_z = (float)msg->pose.position.z;
     float qx = (float)msg->pose.orientation.x;
     float qy = (float)msg->pose.orientation.y;
     float qz = (float)msg->pose.orientation.z;
     float qw = (float)msg->pose.orientation.w;
-    setpoint_yaw = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
-    setpoint_received = true;
+    float yaw = atan2f(2.0f*(qw*qz + qx*qy), 1.0f - 2.0f*(qy*qy + qz*qz));
 
-    ESP_LOGI(TAG, "Setpoint arena=(%.2f,%.2f) NED=(%.2f,%.2f) z=%.2f",
-             (double)((float)msg->pose.position.x), (double)((float)msg->pose.position.y),
-             (double)setpoint_x, (double)setpoint_y, (double)setpoint_z);
+    /* Manhattan distance from current position to new setpoint */
+    float cur_x = px4_pos_valid ? px4_pos_x : 0.0f;
+    float cur_y = px4_pos_valid ? px4_pos_y : 0.0f;
+    float man_dist = fabsf(ned_x - cur_x) + fabsf(ned_y - cur_y);
 
-    if (gcs_control_active && drone_state == DRONE_ARMED)
-        mav_set_position_ned(setpoint_x, setpoint_y, -setpoint_z);
+    if (man_dist <= MANHATTAN_PASSTHROUGH_M) {
+        /* Small step (keyboard / fly mode) — pass through directly */
+        setpoint_x    = ned_x;
+        setpoint_y    = ned_y;
+        setpoint_z    = ned_z;
+        setpoint_yaw  = yaw;
+        setpoint_received = true;
+        ESP_LOGI(TAG, "Setpoint pass-through NED=(%.2f,%.2f) z=%.2f dist=%.2f",
+                 (double)ned_x, (double)ned_y, (double)ned_z, (double)man_dist);
+        if (gcs_control_active && drone_state == DRONE_ARMED)
+            mav_set_position_ned(ned_x, ned_y, -ned_z);
+    } else {
+        /* Large step — hand to Manhattan sequencer */
+        nav_dest_x   = ned_x;
+        nav_dest_y   = ned_y;
+        nav_dest_z   = ned_z;
+        nav_new_dest = true;
+        nav_obs_hold = false;
+        ESP_LOGI(TAG, "Setpoint → Manhattan NED=(%.2f,%.2f) z=%.2f dist=%.2f",
+                 (double)ned_x, (double)ned_y, (double)ned_z, (double)man_dist);
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
