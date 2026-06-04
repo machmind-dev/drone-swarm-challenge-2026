@@ -167,7 +167,11 @@ static const char *TAG = "drone";
 #define MANHATTAN_STEP_M        1.0f   /* distance between intermediate waypoints */
 #define MANHATTAN_ARRIVAL_M     1.0f   /* waypoint reached when closer than this */
 #define MANHATTAN_PASSTHROUGH_M 1.0f   /* setpoints ≤ this skip Manhattan (keyboard) */
-#define MANHATTAN_OBSTACLE_MM   500    /* ToF threshold — stop and await new GCS command */
+#define MANHATTAN_OBSTACLE_MM   1000   /* ToF threshold — stop and await new GCS command.
+                                        * Must exceed the drone's braking distance at cruise
+                                        * speed + desired margin, else it coasts onto the
+                                        * obstacle: closest approach ≈ threshold − braking dist.
+                                        * Was 500 (≈braking dist → stopped on the obstacle). */
 #define MANHATTAN_MAX_WPS       40     /* 20 m + 10 m at 1 m steps + margin */
 
 /* ════════════════════════════════════════════════════════════════════════════
