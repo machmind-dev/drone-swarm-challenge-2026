@@ -280,6 +280,12 @@ static volatile bool inertial_anchor_valid = false;
  * adjusted on the fly when PX4 resets its local position (see the
  * LOCAL_POSITION_NED handler) so the arena↔NED mapping survives EKF resets. */
 static float ned_offset_x = 0.0f, ned_offset_y = 0.0f;
+/* Arena↔NED frame sign. With no magnetometer/vision, EKF "North" = the drone's
+ * physical facing at arm. Red (LH) faces +X → North=+X, East=−Y (the baseline
+ * convention). Blue (RH) faces −X → North=−X, East=+Y, i.e. red's frame rotated
+ * 180°. So blue negates BOTH axes in every arena↔NED conversion: +1 = red/LH,
+ * −1 = blue/RH. Set by team_color_callback. */
+static volatile float frame_sign = 1.0f;
 
 /* Last values sent to PX4 via VISION_POSITION_ESTIMATE — for debug log */
 static float last_vis_sent_x = 0.0f, last_vis_sent_y = 0.0f;
@@ -1028,8 +1034,8 @@ static void command_callback(const void *msg_in)
             /* vp_x/vp_y are arena coords; home_x/y must be NED (drone start = NED 0,0).
              * Subtracting ned_offset converts arena → NED so all mav_set_position_ned
              * calls using home_x/y hold the drone at its physical start position. */
-            home_x = vp_x - ned_offset_x;
-            home_y = ned_offset_y - vp_y;   /* East = arena −Y (Z-up arena vs Z-down NED) */
+            home_x = frame_sign * (vp_x - ned_offset_x);
+            home_y = frame_sign * (ned_offset_y - vp_y);   /* frame_sign flips both axes for blue/RH */
             home_z = vp_z;
             ESP_LOGI(TAG, "Home captured from vision: arena(%.2f,%.2f) → NED(%.2f,%.2f)",
                      (double)vp_x, (double)vp_y, (double)home_x, (double)home_y);
@@ -1154,12 +1160,12 @@ static void control_callback(const void *msg_in)
         (const geometry_msgs__msg__PoseStamped *)msg_in;
     if (!msg) return;
 
-    float ned_x = (float)msg->pose.position.x - ned_offset_x;
+    float ned_x = frame_sign * ((float)msg->pose.position.x - ned_offset_x);
     /* East = arena −Y: the arena frame is Z-up/CCW but PX4 NED is Z-down/CW, so a
      * right-handed NED with North=arena+X forces East to run along arena −Y. Negate
      * Y here (and at every arena↔NED boundary) or commands mirror about the start.
      * Confirmed 2026-06-04: drone2 cmd y=2 → phys y=6 = 2*sy − cmd. */
-    float ned_y = ned_offset_y - (float)msg->pose.position.y;
+    float ned_y = frame_sign * (ned_offset_y - (float)msg->pose.position.y);
     float ned_z = (float)msg->pose.position.z;
     float qx = (float)msg->pose.orientation.x;
     float qy = (float)msg->pose.orientation.y;
@@ -1217,12 +1223,14 @@ static void team_color_callback(const void *msg_in)
         sy = 6.0f - (float)DRONE_ID;
         seed_yaw_rad   = START_YAW_LH_DEG * (float)M_PI / 180.0f;  /* faces +X */
         seed_yaw_valid = true;
+        frame_sign     = 1.0f;   /* North=+X, East=−Y */
     } else if (strcmp(buf, "blue") == 0) {
         /* RH side — D1→(19,5) D2→(19,6) D3→(19,7) D4→(19,8) D5→(19,9) */
         sx = 19.0f;
         sy = (float)DRONE_ID + 4.0f;
         seed_yaw_rad   = START_YAW_RH_DEG * (float)M_PI / 180.0f;  /* faces −X */
         seed_yaw_valid = true;
+        frame_sign     = -1.0f;  /* RH faces −X → North=−X, East=+Y: negate both axes */
     } else {
         ESP_LOGW(TAG, "team_color: unknown '%s'", buf);
         return;
@@ -1281,10 +1289,10 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
     if (vision_pose_valid) {
         apply_pose_to_drone_markers(vp_x, vp_y, vp_z, vp_qx, vp_qy, vp_qz, vp_qw);
     } else if (inertial_anchor_valid && px4_pos_valid) {
-        float live_x = map_home_x + (px4_pos_x - px4_home_x);
-        /* NED East delta → arena Y is negated (East = arena −Y) so the dead-reckon
-         * disc tracks the true arena side. */
-        float live_y = map_home_y - (px4_pos_y - px4_home_y);
+        float live_x = map_home_x + frame_sign * (px4_pos_x - px4_home_x);
+        /* frame_sign maps the NED delta back to arena for both LH (+1) and RH (−1)
+         * starts; the −Y on the East term is the red baseline (East = arena −Y). */
+        float live_y = map_home_y - frame_sign * (px4_pos_y - px4_home_y);
         float live_z = map_home_z + (px4_pos_z - px4_home_z);
         apply_pose_to_drone_markers(live_x, live_y, live_z, 0.0f, 0.0f, 0.0f, 1.0f);
     }
@@ -1398,8 +1406,8 @@ static void mavlink_rx_task_fn(void *arg)
                     float dxr = lpos.x - px4_pos_x;
                     float dyr = lpos.y - px4_pos_y;
                     if (sqrtf(dxr * dxr + dyr * dyr) > PX4_RESET_DETECT_M) {
-                        ned_offset_x -= dxr;
-                        ned_offset_y += dyr;   /* East = arena −Y: absorb reset with opposite sign to X */
+                        ned_offset_x -= frame_sign * dxr;
+                        ned_offset_y += frame_sign * dyr;   /* frame_sign generalizes to blue/RH */
                         ESP_LOGW(TAG, "PX4 pos reset Δ=(%.2f,%.2f) absorbed into ned_offset",
                                  (double)dxr, (double)dyr);
                     }
@@ -1813,8 +1821,8 @@ void app_main(void)
                 vision_yaw  = cand_yaw;
 
                 if (vision_enabled) {
-                    float tx = vp_x - ned_offset_x;
-                    float ty = ned_offset_y - vp_y;   /* East = arena −Y (Z-up arena vs Z-down NED) */
+                    float tx = frame_sign * (vp_x - ned_offset_x);
+                    float ty = frame_sign * (ned_offset_y - vp_y);
                     last_vis_sent_x = tx;
                     last_vis_sent_y = ty;
                     /* Dynamic covariance: var = 0.01 + (reproj/10)² × 0.49
@@ -1843,8 +1851,8 @@ void app_main(void)
             int64_t age = now_ms() - last_vision_pose_ms;
             if (age < (int64_t)VISION_FADE_MS) {
                 float cov = 0.01f + (float)age / (float)VISION_FADE_MS * 0.49f;
-                float tx = vp_last_x - ned_offset_x;
-                float ty = ned_offset_y - vp_last_y;   /* East = arena −Y (Z-up arena vs Z-down NED) */
+                float tx = frame_sign * (vp_last_x - ned_offset_x);
+                float ty = frame_sign * (ned_offset_y - vp_last_y);
                 last_vis_sent_x = tx;
                 last_vis_sent_y = ty;
                 mav_send_vision_estimate(tx, ty, -vp_last_z, vision_yaw, cov); /* arena Z up→NED Z down */
