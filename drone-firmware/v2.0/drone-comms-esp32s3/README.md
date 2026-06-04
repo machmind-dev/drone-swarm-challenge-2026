@@ -51,13 +51,6 @@ All parameters are `#define` constants in `main/main.c`.
 - `vision_enabled` (ArUco EKF toggle) has **no effect** on Manhattan — `vision_yaw` and `vision_pose_valid` are updated by the ArUco pipeline regardless of this flag. Only the MAVLink relay to PX4 is gated.
 - `DRONE_ID` and team colour affect `ned_offset_x/y`, which converts GCS arena coordinates to NED before the Manhattan distance check — the sequencer operates entirely in NED space and is team/drone-ID agnostic.
 
-## Pending Work
-
-| # | Item | Decisions |
-|---|------|-----------|
-| 1 | **Manhattan waypoint navigation** | Implement after basic fly-to-point is confirmed in arena. When a destination arrives: break into 2 m steps, X-leg first then Y-leg. At each waypoint: yaw to face direction of travel, check ToF, proceed or hold until clear. On obstacle: stop and wait for clearance. New destination mid-flight: stop/hover and restart sequence from current position. Arrival tolerance: 1 m. |
-| 2 | **Remove dead heading-seed code** | `SEED_YAW_ENABLE`, `seed_yaw_rad`, `seed_yaw_valid` are no longer effective. Remove once nav is confirmed stable. |
-
 ## micro-ROS Topics
 
 ### ESP32-S3 → GCS / RViz (published by drone)
