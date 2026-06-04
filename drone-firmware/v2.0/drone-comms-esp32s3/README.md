@@ -39,13 +39,13 @@ All parameters are `#define` constants in `main/main.c`.
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `MANHATTAN_STEP_M` | `1.0 m` | Maximum distance between intermediate waypoints. X-leg is broken into steps of this size first, then Y-leg. Smaller values = smoother path but more waypoints and more frequent ToF checks. |
-| `MANHATTAN_ARRIVAL_M` | `1.0 m` | Radius within which a waypoint is considered reached and the sequencer advances to the next one. Must be ≤ `MANHATTAN_STEP_M` to avoid skipping waypoints. |
-| `MANHATTAN_PASSTHROUGH_M` | `1.0 m` | Setpoints with a Manhattan distance (\|Δx\| + \|Δy\|) from the drone's current position at or below this threshold bypass the sequencer entirely and are streamed directly to PX4. Covers keyboard fly-mode (0.5 m increments) and rotation-only commands (0 m). |
-| `MANHATTAN_OBSTACLE_MM` | `500 mm` | ToF clearance threshold in the direction of travel. If any horizontal sensor reads below this the sequencer stops, enters obstacle-hold, and waits for a new GCS destination. Does **not** auto-resume when the obstacle clears — requires explicit new setpoint. |
-| `MANHATTAN_MAX_WPS` | `40` | Static waypoint array size. At 1 m steps the worst-case path across the full arena (20 m + 10 m) needs 30 entries; 40 gives margin for rounding remainder waypoints. Only increase if `MANHATTAN_STEP_M` is reduced below ~0.7 m. |
-| `COLLISION_MARGIN_M` | `0.3 m` | Safety buffer subtracted from ToF clearance in pass-through mode (`clamp_setpoint_for_obstacles`). Does **not** apply during Manhattan sequencing — Manhattan uses `MANHATTAN_OBSTACLE_MM` for a full stop instead. |
-| `OFFBOARD_STREAM_PERIOD_MS` | `50 ms` | Tick rate of the mission loop (20 Hz). Controls how frequently the active waypoint setpoint is re-sent to PX4 and how quickly a new GCS destination or obstacle detection is acted on. |
+| `MANHATTAN_STEP_M` | `1.0 m` | Step size between intermediate waypoints; X-leg first, then Y-leg. |
+| `MANHATTAN_ARRIVAL_M` | `1.0 m` | Radius within which a waypoint is considered reached; must be ≤ `MANHATTAN_STEP_M` to avoid skipping waypoints. |
+| `MANHATTAN_PASSTHROUGH_M` | `1.0 m` | Setpoints within this Manhattan distance bypass the sequencer and stream directly to PX4 (covers keyboard fly-mode and rotation-only commands). |
+| `MANHATTAN_OBSTACLE_MM` | `500 mm` | ToF clearance threshold in the direction of travel; below this the sequencer stops and waits for a new GCS destination. |
+| `MANHATTAN_MAX_WPS` | `40` | Static waypoint array size; 40 covers the worst-case 30-step arena crossing (20 m + 10 m at 1 m steps) with margin. |
+| `COLLISION_MARGIN_M` | `0.3 m` | Safety buffer subtracted from ToF clearance in pass-through mode only; not used during Manhattan sequencing. |
+| `OFFBOARD_STREAM_PERIOD_MS` | `50 ms` | Mission loop tick rate (20 Hz); sets how quickly new destinations and obstacle detections are acted on. |
 
 **Notes:**
 - `vision_enabled` (ArUco EKF toggle) has **no effect** on Manhattan — `vision_yaw` and `vision_pose_valid` are updated by the ArUco pipeline regardless of this flag. Only the MAVLink relay to PX4 is gated.
