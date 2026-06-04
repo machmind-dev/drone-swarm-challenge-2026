@@ -8,7 +8,7 @@ Usage:
 At the prompt enter:  <drone_id> <x> <y> [z] [yaw_deg]
   drone_id : 1-5
   x, y     : arena coordinates in metres  (x: 0-20, y: 0-10)
-  z        : altitude in metres, default 1.5
+  z        : altitude in metres, default 1.0
   yaw_deg  : heading in degrees, default 0  (0=+X, 90=+Y, 180=-X, -90=-Y)
 
 Examples:
@@ -31,7 +31,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 
 NUM_DRONES   = 5
-DEFAULT_ALT  = 1.5
+DEFAULT_ALT  = 1.0
 ARENA_X_MAX  = 20.0
 ARENA_Y_MAX  = 10.0
 ARENA_Z_MAX  = 5.0
