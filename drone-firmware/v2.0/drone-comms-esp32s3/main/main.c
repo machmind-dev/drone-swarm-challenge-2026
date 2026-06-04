@@ -653,6 +653,23 @@ static uint16_t tof_clearance_for_bearing(float bearing_body_rad)
     return tof.dist_mm[slot];
 }
 
+/* ── Smallest valid clearance (mm) across the 5 horizontal ToF sensors
+ * (slots 0-4: LH −90°, 45° LH, FWD, 45° RH, RH +90°).  Skips sensors with a
+ * non-zero status or a zero reading.  Returns UINT16_MAX when no horizontal
+ * sensor currently has a valid reading. Used to stop on an obstacle in ANY
+ * horizontal direction while stepping along a leg. */
+static uint16_t tof_min_horizontal_clearance(void)
+{
+    p4_tof_data_t tof;
+    if (!p4_link_get_tof(&tof)) return UINT16_MAX;
+    uint16_t min_mm = UINT16_MAX;
+    for (int s = 0; s < 5; s++) {
+        if (tof.status[s] != 0 || tof.dist_mm[s] == 0) continue;  /* invalid → skip */
+        if (tof.dist_mm[s] < min_mm) min_mm = tof.dist_mm[s];
+    }
+    return min_mm;
+}
+
 /* ── Clamp setpoint so the drone stops COLLISION_MARGIN_M short of any obstacle
  * in the direction of travel.  Modifies *sp_x / *sp_y in place. */
 static void clamp_setpoint_for_obstacles(float cur_x, float cur_y,
@@ -663,11 +680,9 @@ static void clamp_setpoint_for_obstacles(float cur_x, float cur_y,
     float dist = sqrtf(dx * dx + dy * dy);
     if (dist < 0.05f) return;  /* already at target, nothing to clamp */
 
-    /* World-frame bearing → body-frame bearing using latest vision yaw */
-    float bearing_world = atan2f(dy, dx);
-    float bearing_body  = bearing_world - vision_yaw;
-
-    uint16_t clearance_mm = tof_clearance_for_bearing(bearing_body);
+    /* The drone flies facing its travel direction, so the obstacle in the
+     * approach direction is on the forward sensor (body 0°). */
+    uint16_t clearance_mm = tof_clearance_for_bearing(0.0f);
     if (clearance_mm == UINT16_MAX) return;  /* no sensor / rearward */
 
     float safe_m = (clearance_mm / 1000.0f) - COLLISION_MARGIN_M;
@@ -785,9 +800,12 @@ static void mission_task_fn(void *arg)
                 float dy   = wp_y - cur_y;
                 float wp_yaw = atan2f(dy, dx);
 
-                /* ToF check in direction of travel */
-                float bearing_body = wp_yaw - vision_yaw;
-                uint16_t clearance = tof_clearance_for_bearing(bearing_body);
+                /* Obstacle check each step: scan ALL 5 horizontal ToF sensors
+                 * (LH, 45° LH, FWD, 45° RH, RH) and take the nearest. If anything
+                 * is within MANHATTAN_OBSTACLE_MM on any side, stop and hover on
+                 * the current position. No heading estimate is used (it previously
+                 * picked the wrong sensor and flew through the obstacle). */
+                uint16_t clearance = tof_min_horizontal_clearance();
 
                 if (clearance != UINT16_MAX && clearance < MANHATTAN_OBSTACLE_MM) {
                     /* Obstacle — stop and wait for new GCS command */
