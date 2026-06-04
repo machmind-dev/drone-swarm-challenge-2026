@@ -10,7 +10,7 @@ from std_msgs.msg import String, Int8
 
 NUM_DRONES = 5
 PUBLISH_HZ  = 1.0
-ACTIVE_DRONES = [2]
+ACTIVE_DRONES = list(range(1, NUM_DRONES + 1))
 
 
 class DroneSimulator(Node):
