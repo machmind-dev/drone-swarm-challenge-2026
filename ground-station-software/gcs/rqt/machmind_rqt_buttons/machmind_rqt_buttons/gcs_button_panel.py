@@ -27,7 +27,7 @@ class GcsButtonPanel(Plugin):
     DRONE_COUNT = 5
     ARM_MISSION_GUARD_MS = 400   # minimum ms between ARM and MISSION_START
     DRONE_OFFLINE_TIMEOUT_S = 3  # seconds without a state message → OFFLINE
-    VERSION = "1.3.9"
+    VERSION = "1.4.0"
 
     def __init__(self, context):
         super().__init__(context)
