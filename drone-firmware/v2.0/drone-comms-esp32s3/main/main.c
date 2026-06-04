@@ -811,7 +811,19 @@ static void mission_task_fn(void *arg)
                         nav_wp_idx++;
                         if (nav_wp_idx >= nav_wp_count) {
                             nav_active = false;
-                            ESP_LOGI(TAG, "Manhattan: arrived at destination");
+                            /* Hover at the arrived position. Without latching a
+                             * hold, the next cycle finds nav_active/nav_obs_hold
+                             * false and setpoint_received false (the Manhattan
+                             * path never sets it) → falls through to the
+                             * "hover at home" branch and the drone flies all the
+                             * way back to launch. Latch the destination into the
+                             * pass-through hold so branch 4 parks it here. */
+                            setpoint_x        = nav_dest_x;
+                            setpoint_y        = nav_dest_y;
+                            setpoint_z        = nav_dest_z;
+                            setpoint_yaw      = sp_yaw;
+                            setpoint_received = true;
+                            ESP_LOGI(TAG, "Manhattan: arrived at destination — holding");
                         } else {
                             ESP_LOGI(TAG, "Manhattan: wp %d/%d reached",
                                      nav_wp_idx, nav_wp_count);
