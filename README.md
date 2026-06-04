@@ -45,3 +45,30 @@ drone-swarm-challenge-2026/
 └── docs/                    # Documentation and media
 ```
 
+---
+
+## To Do
+
+### Pre-Finals Critical
+
+- [ ] **Lower `C2_FAIL_THRESHOLD` to 1** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:157`) — currently set to 3 (6 s timeout) for WiFi RTT tolerance during testing. Must be lowered to 1 (2 s) before the competition flight.
+
+- [ ] **ARM-time inertial anchor fix** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:~874`) — ARM handler already captures `px4_home_x/y/z` but does not set `inertial_anchor_valid = true` or seed `map_home_x/y` from the known team-colour home. This causes a ~47 s frozen trail at the start of each flight. Fix: set `inertial_anchor_valid = true` and seed `map_home_x/y` at ARM time.
+
+### Navigation
+
+- [ ] **Manhattan waypoint navigation** (`drone-firmware/v2.0/drone-comms-esp32s3/`) — When a GCS destination arrives: break into 2 m steps, X-leg first then Y-leg. At each intermediate waypoint: yaw to face direction of travel, check ToF, proceed or hold until clear. On obstacle: stop and wait for clearance. New destination mid-flight: stop/hover and restart sequence from current position. Arrival tolerance: 1 m.
+
+### Analysis
+
+- [ ] **Analyse drift test `log_63_UnknownDate.ulg`** (`drone-firmware/v2.0/logs/2026-06-01_2109_drone4/`) — 5-minute aggressive inertial-only flight. Goal: quantify position error accumulation over time to set the mission planning envelope for how long the drone can fly without a position correction.
+
+### Calibration
+
+- [ ] **Full ChArUco calibration on ESP32-P4** (`drone-firmware/v2.0/drone-vision-esp32p4/`) — barrel distortion not yet corrected. Current focal-length correction (fx=438.6 px) achieves ~1% range error but sub-cm accuracy requires a full calibration run with a ChArUco board.
+
+### Cleanup
+
+- [ ] **Remove dead heading-seed code** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c`) — `SEED_YAW_ENABLE`, `seed_yaw_rad`, `seed_yaw_valid` are no longer effective. Remove once nav is confirmed stable.
+
+- [ ] **Review `simulate_drones.py` active drone list** (`ground-station-software/swarm/algorithm/simulate_drones.py:20`) — `ACTIVE_DRONES = [2]` is hardcoded. Update to reflect the drones used at the finals.
