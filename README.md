@@ -53,7 +53,7 @@ drone-swarm-challenge-2026/
 
 - [ ] **Lower `C2_FAIL_THRESHOLD` to 1** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:157`) — currently set to 3 (6 s timeout) for WiFi RTT tolerance during testing. Must be lowered to 1 (2 s) before the competition flight.
 
-- [ ] **ARM-time inertial anchor fix** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:~874`) — ARM handler already captures `px4_home_x/y/z` but does not set `inertial_anchor_valid = true` or seed `map_home_x/y` from the known team-colour home. This causes a ~47 s frozen trail at the start of each flight. Fix: set `inertial_anchor_valid = true` and seed `map_home_x/y` at ARM time.
+- [x] **ARM-time inertial anchor fix** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:874`) — `inertial_anchor_valid = true` now set at ARM time; trail tracks live from takeoff.
 
 ### Navigation
 

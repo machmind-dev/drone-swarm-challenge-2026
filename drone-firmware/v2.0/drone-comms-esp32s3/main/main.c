@@ -875,6 +875,10 @@ static void command_callback(const void *msg_in)
             px4_home_x = px4_pos_x;
             px4_home_y = px4_pos_y;
             px4_home_z = px4_pos_z;
+            inertial_anchor_valid = true;
+            ESP_LOGI(TAG, "Inertial anchor set at ARM: map_home=(%.2f,%.2f) px4_home=(%.2f,%.2f)",
+                     (double)map_home_x, (double)map_home_y,
+                     (double)px4_home_x, (double)px4_home_y);
         }
         drone_state = DRONE_ARMED;
         publish_state_now();
