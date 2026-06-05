@@ -89,6 +89,21 @@
 #define MAX_VIEW_ANGLE_DEG  45.0f
 #define MIN_VIEW_COS        0.70710678f  /* cosf(45°); accept if |n·los| >= this */
 
+/* Box drop-zone gate — boxes only ever sit in the two team areas at the arena
+ * ends.  A box whose computed world position falls outside BOTH rectangles is a
+ * spurious/mislocated detection (bad solvePnP, stale anchor, wrong marker) and
+ * is NOT published over the P4→S3 link / micro-ROS.
+ *   Red  team area: x ∈ [0, 7],   y ∈ [0, 10]
+ *   Blue team area: x ∈ [13, 20], y ∈ [0, 10]
+ * BOX_AREA_MARGIN_M widens each rectangle to tolerate pose noise (0 = strict). */
+#define BOX_RED_X_MIN     0.0f
+#define BOX_RED_X_MAX     7.0f
+#define BOX_BLUE_X_MIN    13.0f
+#define BOX_BLUE_X_MAX    20.0f
+#define BOX_AREA_Y_MIN    0.0f
+#define BOX_AREA_Y_MAX    10.0f
+#define BOX_AREA_MARGIN_M 0.0f
+
 /* Arena envelope (metres) — used to reject the wrong IPPE planar-ambiguity
  * solution, which reflects the recovered drone position across the marker's
  * wall and lands outside these bounds. Margin absorbs detection noise. */
@@ -1095,10 +1110,26 @@ void aruco_pose_start(void)
                                          (double)best_pw_y,
                                          (double)best_pw_z)
                                         + best_R_wc * tvec_b;
+                        float bx = (float)p_box.at<double>(0);
+                        float by = (float)p_box.at<double>(1);
+                        /* Drop-zone gate: only publish boxes inside a team area. */
+                        bool in_red  = bx >= BOX_RED_X_MIN  - BOX_AREA_MARGIN_M &&
+                                       bx <= BOX_RED_X_MAX  + BOX_AREA_MARGIN_M &&
+                                       by >= BOX_AREA_Y_MIN - BOX_AREA_MARGIN_M &&
+                                       by <= BOX_AREA_Y_MAX + BOX_AREA_MARGIN_M;
+                        bool in_blue = bx >= BOX_BLUE_X_MIN - BOX_AREA_MARGIN_M &&
+                                       bx <= BOX_BLUE_X_MAX + BOX_AREA_MARGIN_M &&
+                                       by >= BOX_AREA_Y_MIN - BOX_AREA_MARGIN_M &&
+                                       by <= BOX_AREA_Y_MAX + BOX_AREA_MARGIN_M;
+                        if (!in_red && !in_blue) {
+                            printf("BOX id=%d dropped: world=(%.2f,%.2f) outside team areas\n",
+                                   bid, bx, by);
+                            continue;
+                        }
                         p4_box_entry_t &e = new_boxes.entries[new_boxes.count++];
                         e.id = (uint8_t)bid;
-                        e.x  = (float)p_box.at<double>(0);
-                        e.y  = (float)p_box.at<double>(1);
+                        e.x  = bx;
+                        e.y  = by;
                         e.z  = 0.0f;   /* boxes are on the ground plane */
                     }
                 }
