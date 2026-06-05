@@ -102,7 +102,7 @@ static const char *TAG = "aruco_pose";
  * Range 0-47: sensor_target = value × 4.92; 47 ≈ 91% of full scale (maximum).
  * 47: dark indoor venue.  15-20: daylit venue with windows. */
 #ifndef CONFIG_VISION_AEC_TARGET
-#define CONFIG_VISION_AEC_TARGET 15
+#define CONFIG_VISION_AEC_TARGET 10
 #endif
 
 /* ── Shared pose state — written by aruco task (CPU0), read by tof task (CPU1) */
