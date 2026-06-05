@@ -1286,8 +1286,20 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
      * 1. ArUco valid  → direct vision pose (accurate)
      * 2. NED anchor + PX4 valid → dead-reckon from last ArUco anchor via NED delta (live)
      * 3. Pre-flight   → frozen at team_color home (set before arm) */
+    /* Heading arrow/disc orientation: the P4 quaternion is camera-in-world
+     * (camera +Z = forward), but RViz draws the pose arrow along local +X, so
+     * the raw quaternion renders 90° off (arrow follows camera +X = drone
+     * right). Rebuild a yaw-only quaternion from the camera forward vector
+     * (same extraction that feeds vision_yaw) so the arrow points where the
+     * drone looks, flat, in both LH and RH scenes. */
+    float vp_fwd_x  = 2.0f * (vp_qx * vp_qz + vp_qy * vp_qw);
+    float vp_fwd_y  = 2.0f * (vp_qy * vp_qz - vp_qx * vp_qw);
+    float vp_yaw    = atan2f(vp_fwd_y, vp_fwd_x);
+    float vp_yaw_qz = sinf(vp_yaw * 0.5f);
+    float vp_yaw_qw = cosf(vp_yaw * 0.5f);
+
     if (vision_pose_valid) {
-        apply_pose_to_drone_markers(vp_x, vp_y, vp_z, vp_qx, vp_qy, vp_qz, vp_qw);
+        apply_pose_to_drone_markers(vp_x, vp_y, vp_z, 0.0f, 0.0f, vp_yaw_qz, vp_yaw_qw);
     } else if (inertial_anchor_valid && px4_pos_valid) {
         float live_x = map_home_x + frame_sign * (px4_pos_x - px4_home_x);
         /* frame_sign maps the NED delta back to arena for both LH (+1) and RH (−1)
@@ -1310,10 +1322,10 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
             vision_pose_msg.pose.position.x    = vp_x;
             vision_pose_msg.pose.position.y    = vp_y;
             vision_pose_msg.pose.position.z    = vp_z;
-            vision_pose_msg.pose.orientation.x = vp_qx;
-            vision_pose_msg.pose.orientation.y = vp_qy;
-            vision_pose_msg.pose.orientation.z = vp_qz;
-            vision_pose_msg.pose.orientation.w = vp_qw;
+            vision_pose_msg.pose.orientation.x = 0.0f;
+            vision_pose_msg.pose.orientation.y = 0.0f;
+            vision_pose_msg.pose.orientation.z = vp_yaw_qz;
+            vision_pose_msg.pose.orientation.w = vp_yaw_qw;
             RCSOFTCHECK(rcl_publish(&publisher_pose, &vision_pose_msg, NULL));
         }
     }
