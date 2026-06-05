@@ -1,5 +1,7 @@
 > **TODO (box detection):** box detection needs to be double-checked for correctness.
 >
+> **TODO (obstacle, hover):** add a 1 s hover/debounce on obstacle detection in the Manhattan leg path — the ToF (`MANHATTAN_OBSTACLE_MM`, now 1.0 m) fluctuates against the net wall's holes, so a single flickering reading can trigger a stop. Not yet implemented; decide whether the 1 s should debounce the trigger (confirm before halting) or settle before the await-GCS hold.
+>
 > **TODO (obstacle, pass-through):** the pass-through clamp (`clamp_setpoint_for_obstacles`, keyboard-fly mode — not the leg path) still uses only the **forward** sensor, because it clamps motion along the travel vector; an all-5 min there would wrongly shorten forward motion when passing a side wall. Decide whether that mode should also stop on any-side proximity.
 >
 > **Known issue (frame-mix):** `drone-comms-esp32s3/main/main.c:931` (`aruco_approach_task`) — `hold_y = vision_pose_valid ? vp_y : px4_pos_y` mixes arena-frame `vp_y` with NED `px4_pos_y`. Pre-existing bug, only in the ArUco-spin approach feature, not the waypoint path. Needs the vision branch converted to NED (`ned_offset_y - vp_y`).

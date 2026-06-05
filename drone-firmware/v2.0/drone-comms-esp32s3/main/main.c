@@ -167,10 +167,11 @@ static const char *TAG = "drone";
 #define MANHATTAN_STEP_M        1.0f   /* distance between intermediate waypoints */
 #define MANHATTAN_ARRIVAL_M     1.0f   /* waypoint reached when closer than this */
 #define MANHATTAN_PASSTHROUGH_M 1.0f   /* setpoints ≤ this skip Manhattan (keyboard) */
-#define MANHATTAN_OBSTACLE_MM   1500   /* ToF threshold (mm) — stop and await new GCS command.
+#define MANHATTAN_OBSTACLE_MM   1000   /* ToF threshold (mm) — stop and await new GCS command.
                                         * Detection window is 1..MANHATTAN_OBSTACLE_MM with a
                                         * valid (status==0, non-zero) reading; ≥ this, 0 mm, or
-                                        * an error status all read as "clear". 500→1000→1500. */
+                                        * an error status all read as "clear". 500→1000→1500→1000.
+                                        * TODO: add 1 s hover/debounce on detection (net-hole flicker). */
 #define MANHATTAN_MAX_WPS       40     /* 20 m + 10 m at 1 m steps + margin */
 
 /* ════════════════════════════════════════════════════════════════════════════
