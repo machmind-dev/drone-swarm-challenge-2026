@@ -1100,8 +1100,8 @@ void aruco_pose_start(void)
              *
              * REQUIRE a fresh same-frame anchor (best_dist < 1e9f means an arena
              * marker was chosen THIS frame).  tvec_b is the box measured in the
-             * current camera frame; best_pw_*/best_R_wc must describe the camera's
-             * pose in that SAME frame or the box is projected from a stale drone
+             * current camera frame; best_pw_x/y/z and best_R_wc must describe the
+             * camera's pose in that SAME frame or the box is projected from a stale
              * pose and lands in front of the wrong marker.  The earlier
              * !best_R_wc.empty() gate reused the last-ever anchor across frames,
              * which mislocated boxes whenever no arena marker was co-visible. */
