@@ -569,7 +569,7 @@ void aruco_pose_start(void)
     auto dict = cv::aruco::getPredefinedDictionary(
         (cv::aruco::PredefinedDictionaryType)CONFIG_VISION_ARUCO_DICT);
     cv::aruco::DetectorParameters params;
-    params.minMarkerPerimeterRate      = 0.20f;
+    params.minMarkerPerimeterRate      = 0.10f;  /* 0.20→0.10: detect smaller/farther box markers */
     params.maxMarkerPerimeterRate      = 4.0f;
     params.polygonalApproxAccuracyRate = 0.08f;
     params.minCornerDistanceRate       = 0.02f;
