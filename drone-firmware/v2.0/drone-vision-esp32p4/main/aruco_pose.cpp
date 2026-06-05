@@ -84,8 +84,11 @@
  * midline now that the opposite wall is admissible again.
  * Reverted 8→5 m (2026-06-05): a far anchor gives a noisy/flip-prone pose, and
  * the drone pose AND box coords both derive from it — back to 5 m for accuracy
- * during the ArUco position-bias investigation. */
-#define POSE_MAX_RANGE_M  5.0f
+ * during the ArUco position-bias investigation.
+ * Relaxed 5→8 m (2026-06-05): boxes weren't appearing — widen so a wall anchor
+ * stays resolvable while framing a box. 8 m ≈ QVGA detection limit (higher
+ * won't help). Accept the noisier far-anchor pose for box-visibility testing. */
+#define POSE_MAX_RANGE_M  8.0f
 
 /* Viewing-incidence gate — reject a marker viewed too obliquely. θ is the angle
  * between the camera line-of-sight and the marker face normal (0° = square-on,
