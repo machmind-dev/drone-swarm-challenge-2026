@@ -1,5 +1,10 @@
 > **TODO (box detection):** box detection needs to be double-checked for correctness.
 >
+> **TODO (hardware mod):** planned board/wiring revisions —
+> - establish a **common ground** between the BEC and the sensors (shared ground reference);
+> - add a **series current-limiting resistor** on the LED-strip control/data line(s);
+> - (firmware) implement **per-drone roles** in the ESP32-S3 firmware — **Seeker**, **Executor**, **Lead**.
+>
 > **TODO (obstacle, hover):** add a 1 s hover/debounce on obstacle detection in the Manhattan leg path — the ToF (`MANHATTAN_OBSTACLE_MM`, now 1.0 m) fluctuates against the net wall's holes, so a single flickering reading can trigger a stop. Not yet implemented; decide whether the 1 s should debounce the trigger (confirm before halting) or settle before the await-GCS hold.
 >
 > **TODO (obstacle, pass-through):** the pass-through clamp (`clamp_setpoint_for_obstacles`, keyboard-fly mode — not the leg path) still uses only the **forward** sensor, because it clamps motion along the travel vector; an all-5 min there would wrongly shorten forward motion when passing a side wall. Decide whether that mode should also stop on any-side proximity.
