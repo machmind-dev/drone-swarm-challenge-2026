@@ -85,10 +85,18 @@
  * Reverted 8→5 m (2026-06-05): a far anchor gives a noisy/flip-prone pose, and
  * the drone pose AND box coords both derive from it — back to 5 m for accuracy
  * during the ArUco position-bias investigation.
- * Relaxed 5→8 m (2026-06-05): boxes weren't appearing — widen so a wall anchor
- * stays resolvable while framing a box. 8 m ≈ QVGA detection limit (higher
- * won't help). Accept the noisier far-anchor pose for box-visibility testing. */
-#define POSE_MAX_RANGE_M  8.0f
+ * Relaxed 5→8 m: boxes weren't appearing, but 8 m admitted far/oblique markers
+ * whose flipped pose placed the drone OUTSIDE the arena. Back to 5 m for a clean
+ * near-anchor pose; box co-visibility is now handled by the bounded-staleness
+ * anchor below instead of widening the range. */
+#define POSE_MAX_RANGE_M  5.0f
+
+/* Bounded-staleness box anchor: a box may be positioned from the most recent
+ * resolved arena anchor if it is at most this many frames old, instead of
+ * requiring a same-frame co-visible wall marker. Lets you frame a clean wall
+ * marker (≤5 m) then pan to a box and still get a position. 0 = strict
+ * same-frame; large = original "last-ever anchor" behaviour (may mislocate). */
+#define BOX_ANCHOR_MAX_AGE_FRAMES 30
 
 /* Viewing-incidence gate — reject a marker viewed too obliquely. θ is the angle
  * between the camera line-of-sight and the marker face normal (0° = square-on,
@@ -956,6 +964,11 @@ void aruco_pose_start(void)
              * (previous-frame) value — see box loop below. */
             cv::Mat best_R_wc;
             float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
+            /* Bounded-staleness anchor (persists across frames). Box positions use
+             * this if it is fresh enough (anchor_age <= BOX_ANCHOR_MAX_AGE_FRAMES). */
+            static cv::Mat last_R_wc;
+            static float   last_pw_x = 0.0f, last_pw_y = 0.0f, last_pw_z = 0.0f;
+            static int     anchor_age = 1000000;
 
             /* solvePnPGeneric(IPPE) returns both ambiguous planar solutions.
              * For a vertical wall marker the ambiguity is a ~180° rotation
@@ -1109,18 +1122,24 @@ void aruco_pose_start(void)
                 if (ids[i] == 22) { new_tid = 22; break; }
             }
 
-            /* Compute world positions for detected box markers (31-36, 41-46).
-             * Uses world-from-camera transform from the closest arena map marker.
-             *
-             * REQUIRE a fresh same-frame anchor (best_dist < 1e9f means an arena
-             * marker was chosen THIS frame).  tvec_b is the box measured in the
-             * current camera frame; best_pw_x/y/z and best_R_wc must describe the
-             * camera's pose in that SAME frame or the box is projected from a stale
-             * pose and lands in front of the wrong marker.  The earlier
-             * !best_R_wc.empty() gate reused the last-ever anchor across frames,
-             * which mislocated boxes whenever no arena marker was co-visible. */
-            p4_boxes_t new_boxes = {};
+            /* Update bounded-staleness anchor: refresh on a fresh same-frame fix,
+             * else age the cached one so it can still position boxes for a while. */
             if (best_dist < 1e9f) {
+                last_R_wc = best_R_wc.clone();
+                last_pw_x = best_pw_x; last_pw_y = best_pw_y; last_pw_z = best_pw_z;
+                anchor_age = 0;
+            } else if (anchor_age < 1000000) {
+                anchor_age++;
+            }
+
+            /* Compute world positions for detected box markers (31-36, 41-46).
+             * Uses the bounded-staleness anchor: the most recent resolved
+             * world-from-camera transform, accepted if at most
+             * BOX_ANCHOR_MAX_AGE_FRAMES old. Same-frame (age 0) is most accurate;
+             * older frames let you pan from a wall marker to a box, at the cost of
+             * the drone-motion error accrued since the anchor was set. */
+            p4_boxes_t new_boxes = {};
+            if (!last_R_wc.empty() && anchor_age <= BOX_ANCHOR_MAX_AGE_FRAMES) {
                 for (int i = 0; i < (int)ids.size(); i++) {
                     if (new_boxes.count >= P4_LINK_BOX_MAX) break;
                     int bid = ids[i];
@@ -1130,10 +1149,10 @@ void aruco_pose_start(void)
                                      rvec_b, tvec_b, false, cv::SOLVEPNP_IPPE_SQUARE);
                         /* box_world = drone_world + R_world_cam * tvec_box */
                         cv::Mat p_box = (cv::Mat_<double>(3,1) <<
-                                         (double)best_pw_x,
-                                         (double)best_pw_y,
-                                         (double)best_pw_z)
-                                        + best_R_wc * tvec_b;
+                                         (double)last_pw_x,
+                                         (double)last_pw_y,
+                                         (double)last_pw_z)
+                                        + last_R_wc * tvec_b;
                         float bx = (float)p_box.at<double>(0);
                         float by = (float)p_box.at<double>(1);
                         /* Drop-zone gate: only publish boxes inside a team area. */
