@@ -576,6 +576,8 @@ static const uint8_t BOX_IDS[BOX_COUNT] = {
     41, 42, 43, 44, 45, 46,   /* red team  */
 };
 static visualization_msgs__msg__Marker box_markers_storage[BOX_COUNT];
+/* Floating coordinate labels above each box cube: "ArUco No. ZZ (X, Y)". */
+static visualization_msgs__msg__Marker box_text_storage[BOX_COUNT];
 
 static rcl_subscription_t command_sub;
 static rcl_subscription_t config_sub;
@@ -1355,6 +1357,15 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                     s_box_x[bi] = boxes.entries[j].x;
                     s_box_y[bi] = boxes.entries[j].y;
                     s_box_z[bi] = boxes.entries[j].z;
+                    /* Label "ArUco No. ZZ (X, Y)" floating above the cube.
+                     * Assigned only on update to limit String__assign churn. */
+                    char lbl[48];
+                    snprintf(lbl, sizeof(lbl), "ArUco No. %u (%.1f, %.1f)",
+                             (unsigned)bid, (double)s_box_x[bi], (double)s_box_y[bi]);
+                    rosidl_runtime_c__String__assign(&box_text_storage[bi].text, lbl);
+                    box_text_storage[bi].pose.position.x = s_box_x[bi];
+                    box_text_storage[bi].pose.position.y = s_box_y[bi];
+                    box_text_storage[bi].pose.position.z = s_box_z[bi] + 0.7f; /* above cube top */
                     break;
                 }
             }
@@ -1376,9 +1387,11 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                 box_markers_storage[bi].pose.position.y = s_box_y[bi];
                 box_markers_storage[bi].pose.position.z = s_box_z[bi] + 0.25f; /* centre at half-height */
                 RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
+                RCSOFTCHECK(rcl_publish(&publisher_marker, &box_text_storage[bi], NULL));
                 s_box_add_sent[bi] = true;
             } else if (do_refresh && s_box_add_sent[bi]) {
                 RCSOFTCHECK(rcl_publish(&publisher_marker, &box_markers_storage[bi], NULL));
+                RCSOFTCHECK(rcl_publish(&publisher_marker, &box_text_storage[bi], NULL));
             }
             /* No DELETE — fixed boxes persist in RViz once detected */
         }
@@ -1742,6 +1755,19 @@ void app_main(void)
             box_markers_storage[bi].color.b = 0.1f;
         }
         box_markers_storage[bi].color.a = 0.75f;
+
+        /* Coordinate label — distinct ns ("box_label") so it does not overwrite
+         * the cube. Text + position are filled in when box data arrives. */
+        visualization_msgs__msg__Marker__init(&box_text_storage[bi]);
+        rosidl_runtime_c__String__assign(&box_text_storage[bi].header.frame_id, "map");
+        rosidl_runtime_c__String__assign(&box_text_storage[bi].ns, "box_label");
+        box_text_storage[bi].id     = BOX_IDS[bi];
+        box_text_storage[bi].type   = visualization_msgs__msg__Marker__TEXT_VIEW_FACING;
+        box_text_storage[bi].action = visualization_msgs__msg__Marker__ADD;
+        box_text_storage[bi].pose.orientation.w = 1.0f;
+        box_text_storage[bi].scale.z = 0.18f;   /* text height (m) */
+        box_text_storage[bi].color.r = box_text_storage[bi].color.g =
+            box_text_storage[bi].color.b = box_text_storage[bi].color.a = 1.0f;
     }
 
     uart_mavlink_init();
