@@ -269,7 +269,12 @@ def run_fly(node: MissionNode):
 
     # Position state in arena coordinates (firmware subtracts ned_offset → NED)
     pos = [HOME_ARENA_X, HOME_ARENA_Y, CRUISE_ALT_M]
-    yaw = 180.0 if _TEAM == 'blue' else 0.0   # blue starts facing -X, red facing +X
+    # Command yaw is sent straight through as NED yaw (firmware does NOT reflect it).
+    # Each team's NED North points along its own launch heading (red +X, blue −X via
+    # frame_sign −1), so BOTH launch at command-yaw 0. Must match the climb-wait yaw
+    # (0.0) above, or entering fly mode commands a heading change — blue spun 180°
+    # when this was 180 (it described blue in the arena CCW frame, not the NED frame).
+    yaw = 0.0   # red faces +X, blue faces −X; both are NED-North = command-yaw 0
 
     # Body-relative move handedness. The firmware (drone-comms-esp32s3 control_callback)
     # maps arena→NED as dx_n = frame_sign·dx_a, dy_n = -frame_sign·dy_a — a Y-reflection.
