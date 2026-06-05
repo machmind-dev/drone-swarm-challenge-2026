@@ -271,6 +271,15 @@ def run_fly(node: MissionNode):
     pos = [HOME_ARENA_X, HOME_ARENA_Y, CRUISE_ALT_M]
     yaw = 180.0 if _TEAM == 'blue' else 0.0   # blue starts facing -X, red facing +X
 
+    # Body-relative move handedness. The firmware (drone-comms-esp32s3 control_callback)
+    # maps arena→NED as dx_n = frame_sign·dx_a, dy_n = -frame_sign·dy_a — a Y-reflection.
+    # Pre-apply the same factors here so a key press translates the drone along its
+    # commanded nose (forward == heading) for both teams. Without this, forward/strafe
+    # inverted once Q/E rotated off 0°/180° (sin(yaw)≠0). frame_sign: red +1, blue −1.
+    _frame_sign = -1.0 if _TEAM == 'blue' else 1.0
+    _MX = _frame_sign        # X (cos) factor
+    _MY = -_frame_sign       # Y (sin) factor — the reflected axis
+
     key_queue: list = []
     lock = threading.Lock()
     stop_event = threading.Event()
@@ -307,21 +316,21 @@ def run_fly(node: MissionNode):
             for token in tokens:
                 yaw_rad = math.radians(yaw)
                 if token == K_FORWARD:
-                    pos[0] += FLY_STEP_M * math.cos(yaw_rad)
-                    pos[1] += FLY_STEP_M * math.sin(yaw_rad)
+                    pos[0] += FLY_STEP_M * _MX * math.cos(yaw_rad)
+                    pos[1] += FLY_STEP_M * _MY * math.sin(yaw_rad)
                     moved = True
                 elif token == K_BACKWARD:
-                    pos[0] -= FLY_STEP_M * math.cos(yaw_rad)
-                    pos[1] -= FLY_STEP_M * math.sin(yaw_rad)
+                    pos[0] -= FLY_STEP_M * _MX * math.cos(yaw_rad)
+                    pos[1] -= FLY_STEP_M * _MY * math.sin(yaw_rad)
                     moved = True
                 elif token == K_LEFT:
                     # strafe left = 90° CCW from heading
-                    pos[0] += FLY_STEP_M * math.cos(yaw_rad - math.pi / 2)
-                    pos[1] += FLY_STEP_M * math.sin(yaw_rad - math.pi / 2)
+                    pos[0] += FLY_STEP_M * _MX * math.cos(yaw_rad - math.pi / 2)
+                    pos[1] += FLY_STEP_M * _MY * math.sin(yaw_rad - math.pi / 2)
                     moved = True
                 elif token == K_RIGHT:
-                    pos[0] += FLY_STEP_M * math.cos(yaw_rad + math.pi / 2)
-                    pos[1] += FLY_STEP_M * math.sin(yaw_rad + math.pi / 2)
+                    pos[0] += FLY_STEP_M * _MX * math.cos(yaw_rad + math.pi / 2)
+                    pos[1] += FLY_STEP_M * _MY * math.sin(yaw_rad + math.pi / 2)
                     moved = True
                 elif token == K_ROT_L:
                     yaw = (yaw - FLY_ROT_DEG) % 360
