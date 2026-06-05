@@ -77,8 +77,12 @@
  * keep the opposite wall's marker out of view during the 12↔14 flip tests, so
  * each flip can't pull in a second marker. Note: at the arena midline (e.g.
  * y=5) markers 12 and 14 are both exactly 5 m away — position closer to one
- * wall for the gate to actually exclude the other. */
-#define POSE_MAX_RANGE_M  5.0f
+ * wall for the gate to actually exclude the other.
+ * Raised 5→8 m (2026-06-05) so a wall anchor stays resolvable while viewing a
+ * ground box — boxes need a co-visible arena marker to be positioned. 8 m
+ * matches the QVGA reliable-detection range; re-check the 12↔14 flip at the
+ * midline now that the opposite wall is admissible again. */
+#define POSE_MAX_RANGE_M  8.0f
 
 /* Viewing-incidence gate — reject a marker viewed too obliquely. θ is the angle
  * between the camera line-of-sight and the marker face normal (0° = square-on,
