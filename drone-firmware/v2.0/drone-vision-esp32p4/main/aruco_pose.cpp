@@ -935,11 +935,13 @@ void aruco_pose_start(void)
             int    pose_n = 0;
             float  best_dist = 1e9f;
             float  best_reproj = 0.0f;
-            /* Static: persist last valid world-camera transform across frames so
-             * box positions can be computed even when no arena map marker is
-             * currently visible (uses most-recent known pose). */
-            static cv::Mat best_R_wc;
-            static float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
+            /* World-from-camera transform + drone world pose of the closest arena
+             * marker chosen THIS frame.  best_dist (reset to 1e9f each frame) is
+             * the freshness flag: only valid when an arena marker was chosen this
+             * frame.  Boxes are positioned from these and MUST NOT reuse a stale
+             * (previous-frame) value — see box loop below. */
+            cv::Mat best_R_wc;
+            float   best_pw_x = 0.0f, best_pw_y = 0.0f, best_pw_z = 0.0f;
 
             /* solvePnPGeneric(IPPE) returns both ambiguous planar solutions.
              * For a vertical wall marker the ambiguity is a ~180° rotation
@@ -1094,9 +1096,17 @@ void aruco_pose_start(void)
             }
 
             /* Compute world positions for detected box markers (31-36, 41-46).
-             * Uses world-from-camera transform from the closest arena map marker. */
+             * Uses world-from-camera transform from the closest arena map marker.
+             *
+             * REQUIRE a fresh same-frame anchor (best_dist < 1e9f means an arena
+             * marker was chosen THIS frame).  tvec_b is the box measured in the
+             * current camera frame; best_pw_*/best_R_wc must describe the camera's
+             * pose in that SAME frame or the box is projected from a stale drone
+             * pose and lands in front of the wrong marker.  The earlier
+             * !best_R_wc.empty() gate reused the last-ever anchor across frames,
+             * which mislocated boxes whenever no arena marker was co-visible. */
             p4_boxes_t new_boxes = {};
-            if (!best_R_wc.empty()) {
+            if (best_dist < 1e9f) {
                 for (int i = 0; i < (int)ids.size(); i++) {
                     if (new_boxes.count >= P4_LINK_BOX_MAX) break;
                     int bid = ids[i];
