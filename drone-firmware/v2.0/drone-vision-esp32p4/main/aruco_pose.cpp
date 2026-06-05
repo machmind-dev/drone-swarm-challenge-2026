@@ -81,8 +81,11 @@
  * Raised 5→8 m (2026-06-05) so a wall anchor stays resolvable while viewing a
  * ground box — boxes need a co-visible arena marker to be positioned. 8 m
  * matches the QVGA reliable-detection range; re-check the 12↔14 flip at the
- * midline now that the opposite wall is admissible again. */
-#define POSE_MAX_RANGE_M  8.0f
+ * midline now that the opposite wall is admissible again.
+ * Reverted 8→5 m (2026-06-05): a far anchor gives a noisy/flip-prone pose, and
+ * the drone pose AND box coords both derive from it — back to 5 m for accuracy
+ * during the ArUco position-bias investigation. */
+#define POSE_MAX_RANGE_M  5.0f
 
 /* Viewing-incidence gate — reject a marker viewed too obliquely. θ is the angle
  * between the camera line-of-sight and the marker face normal (0° = square-on,
@@ -569,10 +572,11 @@ void aruco_pose_start(void)
     auto dict = cv::aruco::getPredefinedDictionary(
         (cv::aruco::PredefinedDictionaryType)CONFIG_VISION_ARUCO_DICT);
     cv::aruco::DetectorParameters params;
-    params.minMarkerPerimeterRate      = 0.15f;  /* 0.20→0.10→0.15: 0.10 detected boxes well but
-                                                  * doubled detectMarkers cost (3→2 fps) and starved
-                                                  * the CPU1 ToF loop (laggy obstacle readings). 0.15
-                                                  * keeps some reach while restoring ToF headroom. */
+    params.minMarkerPerimeterRate      = 0.20f;  /* 0.20→0.10→0.15→0.20: reverted to original.
+                                                  * Lower values raised box reach but added CPU
+                                                  * (fps/ToF) and admitted noisy small detections;
+                                                  * back to 0.20 for cleaner poses during the
+                                                  * ArUco position-bias investigation. */
     params.maxMarkerPerimeterRate      = 4.0f;
     params.polygonalApproxAccuracyRate = 0.08f;
     params.minCornerDistanceRate       = 0.02f;
