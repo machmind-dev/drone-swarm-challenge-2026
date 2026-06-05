@@ -35,25 +35,33 @@ typedef struct __attribute__((packed)) {
 /* ── Box marker entries (detected capture-zone boxes) */
 #define P4_LINK_BOX_MAX  6   /* max box markers per frame (blue 31-36, red 41-46) */
 
+/* Box position reference frame. ANCHORED = P4 had a fresh arena-marker anchor
+ * and (x,y) are arena-world metres (z=0). CAMERA = no anchor; (x,y,z) are the
+ * box in the camera optical frame (X right, Y down, Z forward, metres) and the
+ * S3 projects it to world using the drone's own px4 position + heading. */
+#define P4_BOX_FRAME_ANCHORED 0
+#define P4_BOX_FRAME_CAMERA   1
+
 typedef struct __attribute__((packed)) {
     uint8_t id;       /* ArUco ID: 31-36 = blue team, 41-46 = red team */
-    float   x, y, z;  /* world position, metres (arena frame) */
-} p4_box_entry_t;   /* 13 bytes */
+    uint8_t frame;    /* P4_BOX_FRAME_ANCHORED or P4_BOX_FRAME_CAMERA */
+    float   x, y, z;  /* ANCHORED: arena world x,y (z=0) | CAMERA: optical x,y,z */
+} p4_box_entry_t;   /* 14 bytes */
 
 typedef struct __attribute__((packed)) {
     uint8_t        count;                    /* 0..P4_LINK_BOX_MAX valid entries */
     p4_box_entry_t entries[P4_LINK_BOX_MAX]; /* only [0..count-1] are valid */
-} p4_boxes_t;   /* 1 + 6x13 = 79 bytes */
+} p4_boxes_t;   /* 1 + 6x14 = 85 bytes */
 
 typedef struct __attribute__((packed)) {
     p4_tof_t   tof;    /* 18 B */
     p4_pose_t  pose;   /* 34 B */
-    p4_boxes_t boxes;  /* 79 B */
-} p4_combined_t;   /* 131 bytes */
+    p4_boxes_t boxes;  /* 85 B */
+} p4_combined_t;   /* 137 bytes */
 
 /* ── Frame sizes ──────────────────────────────────────────────────────── */
-#define P4_LINK_PAYLOAD_LEN  ((uint8_t)sizeof(p4_combined_t))  /* 131 */
-#define P4_LINK_FRAME_LEN    (1 + 1 + 1 + P4_LINK_PAYLOAD_LEN + 1)  /* 135 */
+#define P4_LINK_PAYLOAD_LEN  ((uint8_t)sizeof(p4_combined_t))  /* 137 */
+#define P4_LINK_FRAME_LEN    (1 + 1 + 1 + P4_LINK_PAYLOAD_LEN + 1)  /* 141 */
 
 /* ── CRC-8 (poly 0x07) — computed over [TYPE, PAYLOAD...] ────────────── */
 static inline uint8_t p4_link_crc8(const uint8_t *data, uint8_t len)

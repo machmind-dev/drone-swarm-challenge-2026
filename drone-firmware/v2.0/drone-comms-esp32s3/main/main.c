@@ -571,6 +571,20 @@ static rcl_publisher_t    publisher_battery;
 #define BOX_COUNT      12
 #define BOX_TIMEOUT_MS 3000
 
+/* Box drop-zone (arena frame) — boxes only valid in the two team areas.
+ * Applied here for both ANCHORED and CAMERA frames after world projection. */
+#define BOX_RED_X_MIN   0.0f
+#define BOX_RED_X_MAX   7.0f
+#define BOX_BLUE_X_MIN  13.0f
+#define BOX_BLUE_X_MAX  20.0f
+#define BOX_AREA_Y_MIN  0.0f
+#define BOX_AREA_Y_MAX  10.0f
+#define BOX_AREA_MARGIN_M 0.0f
+/* Camera mount: forward-facing, level, no offset. CAM_TILT_DEG = downward pitch
+ * (0 = level); applied as a rotation about the body-right axis when projecting a
+ * CAMERA-frame box into the level body frame. */
+#define CAM_TILT_DEG    0.0f
+
 static const uint8_t BOX_IDS[BOX_COUNT] = {
     31, 32, 33, 34, 35, 36,   /* blue team */
     41, 42, 43, 44, 45, 46,   /* red team  */
@@ -1351,12 +1365,51 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
 
         for (int j = 0; j < (int)boxes.count; j++) {
             uint8_t bid = boxes.entries[j].id;
+
+            /* Resolve the box to arena world (wx,wy). */
+            float wx, wy;
+            if (boxes.entries[j].frame == P4_BOX_FRAME_ANCHORED) {
+                wx = boxes.entries[j].x;
+                wy = boxes.entries[j].y;
+            } else {
+                /* CAMERA frame: project via the drone's own nav (px4 pose+heading).
+                 * Needs valid nav — skip otherwise. */
+                if (!px4_pos_valid) continue;
+                float ox = boxes.entries[j].x;   /* optical right   */
+                float oy = boxes.entries[j].y;    /* optical down    */
+                float oz = boxes.entries[j].z;    /* optical forward */
+                /* camera optical → level body FRD (forward-level mount; undo any
+                 * downward pitch CAM_TILT_DEG about the body-right axis). */
+                float th    = CAM_TILT_DEG * (float)M_PI / 180.0f;
+                float fwd   = oz * cosf(th) + oy * sinf(th);
+                float right = ox;
+                /* body FRD → NED by drone heading */
+                float dN = fwd * cosf(px4_yaw) - right * sinf(px4_yaw);
+                float dE = fwd * sinf(px4_yaw) + right * cosf(px4_yaw);
+                float nx = px4_pos_x + dN;
+                float ny = px4_pos_y + dE;
+                /* NED → arena (inverse of the control_callback conversion) */
+                wx = ned_offset_x + frame_sign * nx;
+                wy = ned_offset_y - frame_sign * ny;
+            }
+
+            /* Drop-zone gate (arena frame) — keep boxes only inside a team area. */
+            bool in_red  = wx >= BOX_RED_X_MIN  - BOX_AREA_MARGIN_M &&
+                           wx <= BOX_RED_X_MAX  + BOX_AREA_MARGIN_M &&
+                           wy >= BOX_AREA_Y_MIN - BOX_AREA_MARGIN_M &&
+                           wy <= BOX_AREA_Y_MAX + BOX_AREA_MARGIN_M;
+            bool in_blue = wx >= BOX_BLUE_X_MIN - BOX_AREA_MARGIN_M &&
+                           wx <= BOX_BLUE_X_MAX + BOX_AREA_MARGIN_M &&
+                           wy >= BOX_AREA_Y_MIN - BOX_AREA_MARGIN_M &&
+                           wy <= BOX_AREA_Y_MAX + BOX_AREA_MARGIN_M;
+            if (!in_red && !in_blue) continue;
+
             for (int bi = 0; bi < BOX_COUNT; bi++) {
                 if (BOX_IDS[bi] == bid) {
                     s_box_last_ms[bi] = t;
-                    s_box_x[bi] = boxes.entries[j].x;
-                    s_box_y[bi] = boxes.entries[j].y;
-                    s_box_z[bi] = boxes.entries[j].z;
+                    s_box_x[bi] = wx;
+                    s_box_y[bi] = wy;
+                    s_box_z[bi] = 0.0f;   /* ground plane */
                     /* Label "(X,Y)" with integer arena coords, floating 1 m above
                      * the box. Assigned only on update to limit String__assign churn. */
                     char lbl[32];

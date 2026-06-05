@@ -1132,49 +1132,41 @@ void aruco_pose_start(void)
                 anchor_age++;
             }
 
-            /* Compute world positions for detected box markers (31-36, 41-46).
-             * Uses the bounded-staleness anchor: the most recent resolved
-             * world-from-camera transform, accepted if at most
-             * BOX_ANCHOR_MAX_AGE_FRAMES old. Same-frame (age 0) is most accurate;
-             * older frames let you pan from a wall marker to a box, at the cost of
-             * the drone-motion error accrued since the anchor was set. */
+            /* Emit detected box markers (31-36, 41-46). Hybrid output:
+             *  - ANCHORED: if a fresh bounded-staleness arena anchor exists, send
+             *    the box's arena-world (x,y) — accurate, ground-truth-referenced.
+             *  - CAMERA: otherwise send the box vector in the camera optical frame
+             *    and let the S3 project it via the drone's own px4 pose + heading,
+             *    so a box publishes whenever the camera sees it (no wall marker
+             *    co-visibility needed). Drop-zone gating is done on the S3 in arena
+             *    frame for both cases. */
             p4_boxes_t new_boxes = {};
-            if (!last_R_wc.empty() && anchor_age <= BOX_ANCHOR_MAX_AGE_FRAMES) {
-                for (int i = 0; i < (int)ids.size(); i++) {
-                    if (new_boxes.count >= P4_LINK_BOX_MAX) break;
-                    int bid = ids[i];
-                    if ((bid >= 31 && bid <= 36) || (bid >= 41 && bid <= 46)) {
-                        cv::Mat rvec_b, tvec_b;
-                        cv::solvePnP(box_obj, corners[i], K, D,
-                                     rvec_b, tvec_b, false, cv::SOLVEPNP_IPPE_SQUARE);
-                        /* box_world = drone_world + R_world_cam * tvec_box */
-                        cv::Mat p_box = (cv::Mat_<double>(3,1) <<
-                                         (double)last_pw_x,
-                                         (double)last_pw_y,
-                                         (double)last_pw_z)
-                                        + last_R_wc * tvec_b;
-                        float bx = (float)p_box.at<double>(0);
-                        float by = (float)p_box.at<double>(1);
-                        /* Drop-zone gate: only publish boxes inside a team area. */
-                        bool in_red  = bx >= BOX_RED_X_MIN  - BOX_AREA_MARGIN_M &&
-                                       bx <= BOX_RED_X_MAX  + BOX_AREA_MARGIN_M &&
-                                       by >= BOX_AREA_Y_MIN - BOX_AREA_MARGIN_M &&
-                                       by <= BOX_AREA_Y_MAX + BOX_AREA_MARGIN_M;
-                        bool in_blue = bx >= BOX_BLUE_X_MIN - BOX_AREA_MARGIN_M &&
-                                       bx <= BOX_BLUE_X_MAX + BOX_AREA_MARGIN_M &&
-                                       by >= BOX_AREA_Y_MIN - BOX_AREA_MARGIN_M &&
-                                       by <= BOX_AREA_Y_MAX + BOX_AREA_MARGIN_M;
-                        if (!in_red && !in_blue) {
-                            printf("BOX id=%d dropped: world=(%.2f,%.2f) outside team areas\n",
-                                   bid, bx, by);
-                            continue;
-                        }
-                        p4_box_entry_t &e = new_boxes.entries[new_boxes.count++];
-                        e.id = (uint8_t)bid;
-                        e.x  = bx;
-                        e.y  = by;
-                        e.z  = 0.0f;   /* boxes are on the ground plane */
-                    }
+            bool anchor_ok = (!last_R_wc.empty() && anchor_age <= BOX_ANCHOR_MAX_AGE_FRAMES);
+            for (int i = 0; i < (int)ids.size(); i++) {
+                if (new_boxes.count >= P4_LINK_BOX_MAX) break;
+                int bid = ids[i];
+                if (!((bid >= 31 && bid <= 36) || (bid >= 41 && bid <= 46))) continue;
+                cv::Mat rvec_b, tvec_b;
+                cv::solvePnP(box_obj, corners[i], K, D,
+                             rvec_b, tvec_b, false, cv::SOLVEPNP_IPPE_SQUARE);
+                p4_box_entry_t &e = new_boxes.entries[new_boxes.count++];
+                e.id = (uint8_t)bid;
+                if (anchor_ok) {
+                    /* box_world = drone_world + R_world_cam * tvec_box */
+                    cv::Mat p_box = (cv::Mat_<double>(3,1) <<
+                                     (double)last_pw_x,
+                                     (double)last_pw_y,
+                                     (double)last_pw_z)
+                                    + last_R_wc * tvec_b;
+                    e.frame = P4_BOX_FRAME_ANCHORED;
+                    e.x = (float)p_box.at<double>(0);
+                    e.y = (float)p_box.at<double>(1);
+                    e.z = 0.0f;   /* ground plane */
+                } else {
+                    e.frame = P4_BOX_FRAME_CAMERA;
+                    e.x = (float)tvec_b.at<double>(0);   /* optical X (right)   */
+                    e.y = (float)tvec_b.at<double>(1);   /* optical Y (down)    */
+                    e.z = (float)tvec_b.at<double>(2);   /* optical Z (forward) */
                 }
             }
 
