@@ -89,7 +89,7 @@
  * whose flipped pose placed the drone OUTSIDE the arena. Back to 5 m for a clean
  * near-anchor pose; box co-visibility is now handled by the bounded-staleness
  * anchor below instead of widening the range. */
-#define POSE_MAX_RANGE_M  5.0f
+#define POSE_MAX_RANGE_M  6.0f
 
 /* Bounded-staleness box anchor: a box may be positioned from the most recent
  * resolved arena anchor if it is at most this many frames old, instead of

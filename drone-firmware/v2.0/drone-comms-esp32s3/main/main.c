@@ -1357,15 +1357,15 @@ static void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
                     s_box_x[bi] = boxes.entries[j].x;
                     s_box_y[bi] = boxes.entries[j].y;
                     s_box_z[bi] = boxes.entries[j].z;
-                    /* Label "ArUco No. ZZ (X, Y)" floating above the cube.
-                     * Assigned only on update to limit String__assign churn. */
-                    char lbl[48];
-                    snprintf(lbl, sizeof(lbl), "ArUco No. %u (%.1f, %.1f)",
-                             (unsigned)bid, (double)s_box_x[bi], (double)s_box_y[bi]);
+                    /* Label "(X,Y)" with integer arena coords, floating 1 m above
+                     * the box. Assigned only on update to limit String__assign churn. */
+                    char lbl[32];
+                    snprintf(lbl, sizeof(lbl), "(%ld,%ld)",
+                             lroundf(s_box_x[bi]), lroundf(s_box_y[bi]));
                     rosidl_runtime_c__String__assign(&box_text_storage[bi].text, lbl);
                     box_text_storage[bi].pose.position.x = s_box_x[bi];
                     box_text_storage[bi].pose.position.y = s_box_y[bi];
-                    box_text_storage[bi].pose.position.z = s_box_z[bi] + 0.7f; /* above cube top */
+                    box_text_storage[bi].pose.position.z = s_box_z[bi] + 1.0f; /* 1 m above box */
                     break;
                 }
             }
