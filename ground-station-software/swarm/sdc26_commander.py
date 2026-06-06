@@ -130,6 +130,7 @@ class SDC26Commander(Node):
         self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
+        self._fallback_ids = set()           # ids we publish as fallback (ignore echoes)
         self._start_t = self.get_clock().now()
 
         # ── QoS ─────────────────────────────────────────────────────────────
@@ -147,6 +148,7 @@ class SDC26Commander(Node):
             for i in range(1, NUM_DRONES + 1)
         }
         self.roster_pub = self.create_publisher(String, '/gcs/system/roles', latched)
+        self.box_pub = self.create_publisher(Marker, '/visualization_marker', 10)
 
         # ── Subscribers ─────────────────────────────────────────────────────
         self.create_subscription(Marker, '/visualization_marker', self._marker_cb, 50)
@@ -208,6 +210,17 @@ class SDC26Commander(Node):
         # Same filter as the RQT panel: team-coloured CUBEs are boxes.
         if msg.type != Marker.CUBE or msg.ns not in ('red', 'blue'):
             return
+        if msg.id in self._fallback_ids:
+            # Tell our own fallback echo from a genuine firmware detection of the
+            # same id: same position = our echo (ignore, keep the fallback);
+            # different position = the box was actually FOUND, so yield to the
+            # firmware (it owns found boxes — we drop the fallback and stop
+            # republishing it).
+            fb = self.boxes.get(msg.id)
+            if fb and (abs(msg.pose.position.x - fb['x']) < 0.5 and
+                       abs(msg.pose.position.y - fb['y']) < 0.5):
+                return
+            self._fallback_ids.discard(msg.id)
         self.boxes[msg.id] = {
             'x': msg.pose.position.x,
             'y': msg.pose.position.y,
@@ -250,6 +263,7 @@ class SDC26Commander(Node):
             return   # hold until RQT publishes our team on /gcs/system/team_color
         self._update_box_registry()
         self._apply_fallback_if_due()
+        self._publish_fallback_boxes()
         if self._elapsed_s() < STARTUP_DELAY_S:
             return   # startup grace period — track boxes but send no commands yet
         self._assign_executors()
@@ -289,6 +303,7 @@ class SDC26Commander(Node):
             self.boxes[bid] = {'x': float(x), 'y': float(y), 'z': 0.0,
                                'team': opp_team, 'last_seen': self._elapsed_s(),
                                'source': 'fallback'}
+            self._fallback_ids.add(bid)
             self.get_logger().info(
                 f'boxes-timeout: fallback box id={bid} -> ({x:.0f}, {y:.0f}) [RND]')
 
@@ -337,6 +352,58 @@ class SDC26Commander(Node):
         msg = String()
         msg.data = json.dumps({'team': self.team, 'roles': ROLES})
         self.roster_pub.publish(msg)
+
+    def _box_marker(self, box_id, x, y):
+        """CUBE marker matching the firmware box format (frame map, ns by team,
+        0.5 m cube, z=0.25, blue/red colour by id). The [RND] tag is NOT included
+        — that marker is terminal-only."""
+        m = Marker()
+        m.header.frame_id = 'map'
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = 'blue' if box_id <= 36 else 'red'
+        m.id = int(box_id)
+        m.type = Marker.CUBE
+        m.action = Marker.ADD
+        m.pose.position.x = float(x)
+        m.pose.position.y = float(y)
+        m.pose.position.z = 0.25
+        m.pose.orientation.w = 1.0
+        m.scale.x = m.scale.y = m.scale.z = 0.5
+        if box_id <= 36:
+            m.color.r, m.color.g, m.color.b = 0.1, 0.3, 0.9
+        else:
+            m.color.r, m.color.g, m.color.b = 0.9, 0.1, 0.1
+        m.color.a = 0.75
+        return m
+
+    def _box_label_marker(self, box_id, x, y):
+        """'(X,Y)' label matching the firmware: ns 'box_label', integer coords,
+        1 m above the box. No [RND] — terminal-only."""
+        m = Marker()
+        m.header.frame_id = 'map'
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = 'box_label'
+        m.id = int(box_id)
+        m.type = Marker.TEXT_VIEW_FACING
+        m.action = Marker.ADD
+        m.pose.position.x = float(x)
+        m.pose.position.y = float(y)
+        m.pose.position.z = 1.0
+        m.pose.orientation.w = 1.0
+        m.scale.z = 0.18
+        m.color.r = m.color.g = m.color.b = m.color.a = 1.0
+        m.text = f'({round(x)},{round(y)})'
+        return m
+
+    def _publish_fallback_boxes(self):
+        """Publish ONLY the random fallback boxes to RViz — CUBE + '(X,Y)' label,
+        same format as the firmware. Found (real) boxes are published by the
+        ESP32-S3 firmware and are never republished/overwritten here. Fallback
+        boxes are re-sent each tick so a late-starting RViz still picks them up."""
+        for bid, b in self.boxes.items():
+            if b.get('source') == 'fallback':
+                self.box_pub.publish(self._box_marker(bid, b['x'], b['y']))
+                self.box_pub.publish(self._box_label_marker(bid, b['x'], b['y']))
 
     # ════════════════════════ Terminal dashboard ════════════════════════
     def _render(self):
