@@ -263,7 +263,6 @@ class SDC26Commander(Node):
             return   # hold until RQT publishes our team on /gcs/system/team_color
         self._update_box_registry()
         self._apply_fallback_if_due()
-        self._publish_fallback_boxes()
         if self._elapsed_s() < STARTUP_DELAY_S:
             return   # startup grace period — track boxes but send no commands yet
         self._assign_executors()
@@ -304,6 +303,10 @@ class SDC26Commander(Node):
                                'team': opp_team, 'last_seen': self._elapsed_s(),
                                'source': 'fallback'}
             self._fallback_ids.add(bid)
+            # Publish to RViz ONCE — markers persist; if the box is later found,
+            # the firmware's marker (same id) overwrites ours.
+            self.box_pub.publish(self._box_marker(bid, x, y))
+            self.box_pub.publish(self._box_label_marker(bid, x, y))
             self.get_logger().info(
                 f'boxes-timeout: fallback box id={bid} -> ({x:.0f}, {y:.0f}) [RND]')
 
@@ -394,16 +397,6 @@ class SDC26Commander(Node):
         m.color.r = m.color.g = m.color.b = m.color.a = 1.0
         m.text = f'({round(x)},{round(y)})'
         return m
-
-    def _publish_fallback_boxes(self):
-        """Publish ONLY the random fallback boxes to RViz — CUBE + '(X,Y)' label,
-        same format as the firmware. Found (real) boxes are published by the
-        ESP32-S3 firmware and are never republished/overwritten here. Fallback
-        boxes are re-sent each tick so a late-starting RViz still picks them up."""
-        for bid, b in self.boxes.items():
-            if b.get('source') == 'fallback':
-                self.box_pub.publish(self._box_marker(bid, b['x'], b['y']))
-                self.box_pub.publish(self._box_label_marker(bid, b['x'], b['y']))
 
     # ════════════════════════ Terminal dashboard ════════════════════════
     def _render(self):
