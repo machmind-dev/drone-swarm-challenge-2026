@@ -129,7 +129,8 @@ class SDC26Commander(Node):
         self.boxes = {}
         self.drone_states = {}               # id -> str
         self.drone_roles = {}                # id -> str (firmware-reported)
-        self.drone_poses = {}                # id -> (x, y, z)
+        self.drone_poses = {}                # id -> (x, y, z) — RViz-actual (disc marker)
+        self.drone_hdg = {}                  # id -> heading degrees (disc orientation)
         # Per-executor mission state machine (see _advance_executor):
         #   idle → to_box → (dwell/cooldown) → to_border → to_out → hover
         self._exec = {ex: {'phase': 'idle', 'box': None, 'ref_y': None,
@@ -167,8 +168,9 @@ class SDC26Commander(Node):
                                      lambda m, d=i: self._role_cb(m, d), 10)
             self.create_subscription(String, f'/drone_{i}/state',
                                      lambda m, d=i: self._state_cb(m, d), 10)
-            self.create_subscription(PoseStamped, f'/drone_{i}/vision_pose',
-                                     lambda m, d=i: self._pose_cb(m, d), 10)
+            # Drone position/heading come from the RViz disc marker on
+            # /visualization_marker (see _marker_cb) — the actual displayed pose,
+            # not the vision_pose (which can be held/faded after ArUco loss).
 
         self.create_timer(CONTROL_PERIOD_S, self._control_loop)
         self.create_timer(1.0, self._render)
@@ -208,6 +210,13 @@ class SDC26Commander(Node):
         m, sec = divmod(int(s), 60)
         return f'{m:02d}:{sec:02d}'
 
+    @staticmethod
+    def _yaw_deg(qx, qy, qz, qw):
+        """Heading in arena degrees [0,360) from a quaternion (0=+X, 90=+Y)."""
+        yaw = math.atan2(2.0 * (qw * qz + qx * qy),
+                         1.0 - 2.0 * (qy * qy + qz * qz))
+        return math.degrees(yaw) % 360.0
+
     def _executor_ids(self):
         return [i for i, r in ROLES.items() if r == 'executor']
 
@@ -234,6 +243,20 @@ class SDC26Commander(Node):
 
     # ════════════════════════ Subscriptions ════════════════════════
     def _marker_cb(self, msg: Marker):
+        # Drone disc (CYLINDER, ns 'drone_<id>') — the RViz-actual pose + heading
+        # the firmware draws. Use it for LOC/ALT/HDG and executor arrival.
+        if msg.type == Marker.CYLINDER and msg.ns.startswith('drone_'):
+            try:
+                n = int(msg.ns.split('_', 1)[1])
+            except (IndexError, ValueError):
+                n = msg.id // 100
+            self.drone_poses[n] = (msg.pose.position.x, msg.pose.position.y,
+                                   msg.pose.position.z)
+            self.drone_hdg[n] = self._yaw_deg(msg.pose.orientation.x,
+                                              msg.pose.orientation.y,
+                                              msg.pose.orientation.z,
+                                              msg.pose.orientation.w)
+            return
         # Same filter as the RQT panel: team-coloured CUBEs are boxes.
         if msg.type != Marker.CUBE or msg.ns not in ('red', 'blue'):
             return
@@ -267,11 +290,6 @@ class SDC26Commander(Node):
 
     def _state_cb(self, msg: String, drone_id: int):
         self.drone_states[drone_id] = msg.data.strip().lower()
-
-    def _pose_cb(self, msg: PoseStamped, drone_id: int):
-        self.drone_poses[drone_id] = (msg.pose.position.x,
-                                      msg.pose.position.y,
-                                      msg.pose.position.z)
 
     def _team_color_cb(self, msg: String):
         t = msg.data.strip().lower()
@@ -531,14 +549,17 @@ class SDC26Commander(Node):
         lines.append('')
 
         # Per-drone table.
-        lines.append(WHITE + f'   {"DRONE":<7}{"STATUS":<16}{"ROLE":<10}'
-                     f'{"LOC":<16}{"WP":<16}{"COOLDOWN":<9}' + RESET)
+        lines.append(WHITE + f'   {"DRONE":<6}{"STATUS":<15}{"ROLE":<9}'
+                     f'{"LOC":<13}{"ALT":<6}{"HDG":<6}{"WP":<13}{"COOLDOWN":<8}' + RESET)
         now = self._now_s()
         for n in range(1, NUM_DRONES + 1):
             status = self.drone_states.get(n, '—')
             role = self.drone_roles.get(n) or ROLES.get(n, '—')
             loc = self.drone_poses.get(n)
             loc_s = f'({loc[0]:.1f}, {loc[1]:.1f})' if loc else '—'
+            alt_s = f'{loc[2]:.1f}m' if loc else '—'
+            hdg = self.drone_hdg.get(n)
+            hdg_s = f'{hdg:.0f}°' if hdg is not None else '—'
             rec = self._exec.get(n)
             if rec and rec['phase'] == 'hover':
                 wp_s = 'hover'
@@ -553,7 +574,8 @@ class SDC26Commander(Node):
             else:
                 rem = cu - now
                 cd_s = f'{rem:.1f}s' if rem > 0 else 'ready'
-            lines.append(f'   {n:<7}{status:<16}{role:<10}{loc_s:<16}{wp_s:<16}{cd_s:<9}')
+            lines.append(f'   {n:<6}{status:<15}{role:<9}{loc_s:<13}'
+                         f'{alt_s:<6}{hdg_s:<6}{wp_s:<13}{cd_s:<8}')
 
         # Last command sent — below the table.
         if self._last_cmd:
