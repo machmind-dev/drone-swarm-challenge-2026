@@ -42,6 +42,72 @@ Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified an
 
 ---
 
+## Swarm Information
+
+Each drone is assigned a **fixed swarm role** at firmware compile time, keyed on
+its `DRONE_ID`. The role is published on `/drone_<ID>/role` and drives the
+mission behaviour (which drone publishes box locations, which captures boxes, and
+which watches the home base).
+
+### Initial role assignment
+
+| Drone ID | Role | Responsibility |
+|----------|----------|----------------|
+| 1 | **Seeker** | Only role allowed to publish box locations |
+| 2 | **Executor** | Only role sent to capture a discovered opponent box |
+| 3 | **Seeker** | Only role allowed to publish box locations |
+| 4 | **Executor** | Only role sent to capture a discovered opponent box |
+| 5 | **Leader** | Checks the home base while no boxes have been captured |
+
+### How roles can be changed
+
+Roles are **hard-coded at compile time** in
+[`drone-comms-esp32s3/main/main.c`](drone-firmware/v2.0/drone-comms-esp32s3/main/main.c)
+— the `DRONE_ID → DRONE_ROLE` mapping (`ROLE_SEEKER` / `ROLE_EXECUTOR` /
+`ROLE_LEADER`) sits directly under the `#define DRONE_ID` identity block. The
+role always follows the ID, so:
+
+- **To repurpose a drone during the challenge**, change its `#define DRONE_ID`
+  to an ID that carries the desired role and re-flash — e.g. flashing a spare as
+  `DRONE_ID 5` makes it the Leader. No separate role flag to keep in sync.
+- **To change the mapping itself** (e.g. make ID 4 a Seeker), edit the
+  `#if (DRONE_ID == …)` role block and re-flash the affected drone(s).
+
+#### Override a role from the GCS at runtime (no re-flash)
+
+The firmware emits its role on `/drone_<ID>/role` **once at boot**. Because ROS 2
+allows multiple publishers on a topic, the GCS can publish onto the same topic to
+override the role seen by every consumer — RViz, the RQT panel, and the planned
+SDC26 Commander (which keys its box→executor assignment off this topic):
+
+```bash
+# One-shot override — make drone 5 act as a Seeker for the swarm logic
+ros2 topic pub --once /drone_5/role std_msgs/msg/String "{data: seeker}"
+
+# Keep it asserted for late-joining subscribers (publishes continuously; Ctrl-C to stop)
+ros2 topic pub --rate 1 /drone_5/role std_msgs/msg/String "{data: seeker}"
+```
+
+> **Caveat:** this overrides only what the *ground station* consumes — it does
+> **not** change the drone's compile-time `DRONE_ROLE`. Any behaviour gated
+> on-board by role (e.g. the future Seeker-only box-publish gate) still follows
+> the flashed value; permanent changes need a re-flash. There is no runtime role
+> switch inside the firmware yet.
+
+### Quick test
+
+After flashing, confirm a drone reports the expected role over ROS 2:
+
+```bash
+ros2 topic echo /drone_5/role
+# → data: leader
+```
+
+Substitute the drone number to check the others (e.g. `/drone_1/role` → `seeker`,
+`/drone_2/role` → `executor`).
+
+---
+
 ## Repository Structure
 
 ```

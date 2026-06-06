@@ -92,7 +92,28 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          5
+#define DRONE_ID          1
+
+/* ── Swarm role (compile-time, keyed on DRONE_ID) ───────────────────────────
+ * Fixed role assignment for SDC26:
+ *   Drone 1,3 → Seeker   (only role allowed to publish box locations)
+ *   Drone 2,4 → Executor (only role sent to capture discovered opponent boxes)
+ *   Drone 5   → Leader   (checks home base while no boxes captured)
+ * Published on /drone_<ID>/role; the Python SDC26 Commander mirrors this table
+ * for box→executor assignment. */
+#define ROLE_SEEKER   "seeker"
+#define ROLE_EXECUTOR "executor"
+#define ROLE_LEADER   "leader"
+
+#if   (DRONE_ID == 1) || (DRONE_ID == 3)
+  #define DRONE_ROLE   ROLE_SEEKER
+#elif (DRONE_ID == 2) || (DRONE_ID == 4)
+  #define DRONE_ROLE   ROLE_EXECUTOR
+#elif (DRONE_ID == 5)
+  #define DRONE_ROLE   ROLE_LEADER
+#else
+  #define DRONE_ROLE   "idle"
+#endif
 
 /* ── RViz marker IDs ────────────────────────────────────────────────────── */
 #define DRONE_DISC_DIAMETER_M  0.18f
@@ -1163,6 +1184,16 @@ static void config_callback(const void *msg_in)
         gcs_control_active = true;
         mav_set_mode(PX4_MODE_OFFBOARD);
 
+    } else if (strncmp(buf, "CONFIG_ROLE_", 12) == 0) {
+        /* PROVISION ONLY — has NO effect.
+         * The GCS may send CONFIG_ROLE_SEEKER / _EXECUTOR / _LEADER here, but the
+         * drone's role stays the compile-time DRONE_ROLE (keyed on DRONE_ID); the
+         * /drone_<ID>/role topic is not changed and no on-board behaviour switches.
+         * Reserved so the GCS→drone config path exists today. To make it live
+         * later: store a runtime role variable here and re-publish it on
+         * publisher_role / topic_role. */
+        ESP_LOGW(TAG, "CFG: %s — provision only, NO-OP (role is compile-time)", buf);
+
     } else {
         ESP_LOGW(TAG, "CFG: unknown '%s'", buf);
     }
@@ -1598,7 +1629,7 @@ static void micro_ros_task(void *arg)
     role_pub_msg.data.data = (char *)malloc(32);
     role_pub_msg.data.size = 0; role_pub_msg.data.capacity = 32;
 
-    rosidl_runtime_c__String__assign(&role_pub_msg.data, "idle");
+    rosidl_runtime_c__String__assign(&role_pub_msg.data, DRONE_ROLE);
     RCSOFTCHECK(rcl_publish(&publisher_role, &role_pub_msg, NULL));
 
     /* ── Timer + executor (1 timer + 4 subscriptions = 5 handles) ───────── */

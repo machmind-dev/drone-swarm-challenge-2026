@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=true
+Exec=/home/pihas/drone-swarm-challenge-2026/launchers/ubuntu-gnome-pc/launch-sdc26-commander.sh
+Path=/home/pihas/drone-swarm-challenge-2026/
+Name=GCS — SDC26 Commander
+Comment=Swarm orchestrator — assigns boxes to executors, leader home-check
+Icon=/home/pihas/drone-swarm-challenge-2026/launchers/swam_commander_ico.png
