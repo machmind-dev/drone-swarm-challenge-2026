@@ -75,6 +75,7 @@ ARRIVAL_RADIUS_M    = 0.7     # executor "reached" a box within this distance
 ARRIVAL_HOLD_TICKS  = 4       # consecutive in-radius ticks to count as captured
 CONTROL_PERIOD_S    = 0.5     # control loop rate (2 Hz)
 STARTUP_DELAY_S     = 5.0     # grace period after start before any drone command
+COMMAND_COOLDOWN_S  = 5.0     # per-drone min time between commands (shown as COOLDOWN)
 
 # Random fallback positions for still-missing opponent boxes, by our scene/team.
 # LH scene = team red  (opponent boxes assumed in the blue area, x~17-18);
@@ -126,7 +127,7 @@ class SDC26Commander(Node):
         self.assignments = {}                # executor id -> box_id (current target)
         self.captured = set()                # box_ids confirmed captured
         self._arrival_ticks = {}             # executor id -> consecutive in-radius count
-        self._last_contact = {}              # id -> seconds of last received message
+        self._last_cmd_time = {}             # id -> seconds when last command was sent
         self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
@@ -231,7 +232,6 @@ class SDC26Commander(Node):
         }
 
     def _role_cb(self, msg: String, drone_id: int):
-        self._last_contact[drone_id] = self._now_s()
         role = msg.data.strip().lower()
         self.drone_roles[drone_id] = role
         expected = ROLES.get(drone_id)
@@ -240,11 +240,9 @@ class SDC26Commander(Node):
                 f'D{drone_id} reports role "{role}" but table expects "{expected}"')
 
     def _state_cb(self, msg: String, drone_id: int):
-        self._last_contact[drone_id] = self._now_s()
         self.drone_states[drone_id] = msg.data.strip().lower()
 
     def _pose_cb(self, msg: PoseStamped, drone_id: int):
-        self._last_contact[drone_id] = self._now_s()
         self.drone_poses[drone_id] = (msg.pose.position.x,
                                       msg.pose.position.y,
                                       msg.pose.position.z)
@@ -327,6 +325,7 @@ class SDC26Commander(Node):
     def _send_control(self, drone_id: int, x: float, y: float, z: float, yaw_deg=0.0):
         role = self.drone_roles.get(drone_id) or ROLES.get(drone_id, '—')
         self._last_cmd = (drone_id, role, x, y)
+        self._last_cmd_time[drone_id] = self._now_s()
         if self.dry_run:
             self.get_logger().info(f'[dry-run] D{drone_id} → ({x:.2f}, {y:.2f}, {z:.2f})')
             return
@@ -445,7 +444,7 @@ class SDC26Commander(Node):
 
         # Per-drone table.
         lines.append(WHITE + f'   {"DRONE":<7}{"STATUS":<16}{"ROLE":<10}'
-                     f'{"LOC":<16}{"WP":<16}{"DELAY":<8}' + RESET)
+                     f'{"LOC":<16}{"WP":<16}{"COOLDOWN":<9}' + RESET)
         now = self._now_s()
         for n in range(1, NUM_DRONES + 1):
             status = self.drone_states.get(n, '—')
@@ -458,9 +457,13 @@ class SDC26Commander(Node):
                 wp_s = f'({b["x"]:.1f}, {b["y"]:.1f})'
             else:
                 wp_s = '—'
-            last = self._last_contact.get(n)
-            delay_s = f'{now - last:.1f}s' if last else '—'
-            lines.append(f'   {n:<7}{status:<16}{role:<10}{loc_s:<16}{wp_s:<16}{delay_s:<8}')
+            lc = self._last_cmd_time.get(n)
+            if lc is None:
+                cd_s = '—'
+            else:
+                rem = max(0.0, COMMAND_COOLDOWN_S - (now - lc))
+                cd_s = f'{rem:.1f}s' if rem > 0 else 'ready'
+            lines.append(f'   {n:<7}{status:<16}{role:<10}{loc_s:<16}{wp_s:<16}{cd_s:<9}')
 
         # Last command sent — below the table.
         if self._last_cmd:
