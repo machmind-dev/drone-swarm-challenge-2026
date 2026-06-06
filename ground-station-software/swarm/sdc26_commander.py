@@ -71,6 +71,7 @@ EXPECTED_BOX_COUNT  = 3       # physical boxes in the arena
 DISCOVERY_TIMEOUT_S = 120.0   # after this, fill missing boxes from fallback list
 START_ALT_M         = 1.0     # starting altitude all drones climb to; the per-drone
                               # mission altitude differs and is set later by assignment
+EXECUTOR_ALT_M      = 2.0     # executors fly to/from the box at this altitude
 ARRIVAL_RADIUS_M    = 0.7     # executor "reached" a box within this distance
 ARRIVAL_HOLD_TICKS  = 4       # consecutive in-radius ticks to count as captured
 CONTROL_PERIOD_S    = 0.5     # control loop rate (2 Hz)
@@ -410,7 +411,7 @@ class SDC26Commander(Node):
             bx, by = self.boxes[bid]['x'], self.boxes[bid]['y']
             rec.update(phase='to_box', box=bid, ref_y=by, target=(bx, by), arr_ticks=0)
             claimed.add(bid)
-            self._send_control(ex, bx, by, self.start_alt)
+            self._send_control(ex, bx, by, EXECUTOR_ALT_M)
             self.get_logger().info(
                 f'executor D{ex} → box {bid} ({bx:.1f}, {by:.1f})')
 
@@ -437,13 +438,13 @@ class SDC26Commander(Node):
                 return
             self._cooldown_until.pop(ex, None)
             rec.update(phase='to_border', target=(border_x, ref_y), arr_ticks=0)
-            self._send_control(ex, border_x, ref_y, self.start_alt)
+            self._send_control(ex, border_x, ref_y, EXECUTOR_ALT_M)
             self.get_logger().info(f'executor D{ex} → border ({border_x:.0f}, {ref_y:.1f})')
 
         elif phase == 'to_border':
             # Exit the zone by 3 m, same Y, then hover.
             rec.update(phase='to_out', target=(out_x, ref_y), arr_ticks=0)
-            self._send_control(ex, out_x, ref_y, self.start_alt)
+            self._send_control(ex, out_x, ref_y, EXECUTOR_ALT_M)
             self.get_logger().info(f'executor D{ex} → out ({out_x:.0f}, {ref_y:.1f})')
 
         elif phase == 'to_out':
