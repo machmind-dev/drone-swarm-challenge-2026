@@ -83,6 +83,14 @@ COMMAND_COOLDOWN_S  = 5.0     # post-arrival dwell at the box before returning (
 ZONE_BORDER_X = {'red': 5.0,  'blue': 15.0}
 ZONE_OUT_X    = {'red': 8.0,  'blue': 12.0}
 
+# Seeker search waypoints in the opponent area, by scene then drone. After the
+# start-up grace each Seeker is sent here once and hovers until the next waypoint.
+# (Seekers are drones 1 & 3; LH=red → x=15, RH=blue → x=5.)
+SEEKER_WP = {
+    'red':  {1: (15.0, 5.0), 3: (15.0, 3.0)},   # LH scene
+    'blue': {1: (5.0, 5.0),  3: (5.0, 3.0)},    # RH scene
+}
+
 # Random fallback positions for still-missing opponent boxes, by our scene/team.
 # LH scene = team red  (opponent boxes assumed in the blue area, x~17-18);
 # RH scene = team blue (opponent boxes assumed in the red  area, x~4).
@@ -137,6 +145,7 @@ class SDC26Commander(Node):
                            'target': None, 'arr_ticks': 0}
                       for ex in self._executor_ids()}
         self._cooldown_until = {}            # id -> ts when post-arrival cooldown ends
+        self._seeker_target = {}             # seeker id -> (x, y) last commanded
         self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
@@ -216,6 +225,9 @@ class SDC26Commander(Node):
         yaw = math.atan2(2.0 * (qw * qz + qx * qy),
                          1.0 - 2.0 * (qy * qy + qz * qz))
         return math.degrees(yaw) % 360.0
+
+    def _seeker_ids(self):
+        return [i for i, r in ROLES.items() if r == 'seeker']
 
     def _executor_ids(self):
         return [i for i, r in ROLES.items() if r == 'executor']
@@ -307,6 +319,7 @@ class SDC26Commander(Node):
         self._apply_fallback_if_due()
         if self._elapsed_s() < STARTUP_DELAY_S:
             return   # startup grace period — track boxes but send no commands yet
+        self._update_seekers()
         self._assign_executors()
         self._update_leader()
 
@@ -351,6 +364,20 @@ class SDC26Commander(Node):
             self.box_pub.publish(self._box_label_marker(bid, x, y))
             self.get_logger().info(
                 f'boxes-timeout: fallback box id={bid} -> ({x:.0f}, {y:.0f}) [RND]')
+
+    def _update_seekers(self):
+        """Send each Seeker (drones 1 & 3) to its fixed scene waypoint in the
+        opponent area, then leave it hovering. Only re-commanded if the scene
+        (and thus the target) changes — so it holds 'till the next waypoint'."""
+        wps = SEEKER_WP.get(self.team, {})
+        for sid in self._seeker_ids():
+            target = wps.get(sid)
+            if target is None or self._seeker_target.get(sid) == target:
+                continue
+            self._seeker_target[sid] = target
+            self._send_control(sid, target[0], target[1], self.start_alt)
+            self.get_logger().info(
+                f'seeker D{sid} → ({target[0]:.0f}, {target[1]:.0f}) hover')
 
     def _assign_executors(self):
         """Assign opponent boxes to idle executors (nearest-first, no two on the
@@ -561,11 +588,14 @@ class SDC26Commander(Node):
             hdg = self.drone_hdg.get(n)
             hdg_s = f'{hdg:.0f}°' if hdg is not None else '—'
             rec = self._exec.get(n)
+            st = self._seeker_target.get(n)
             if rec and rec['phase'] == 'hover':
                 wp_s = 'hover'
             elif rec and rec['target'] is not None:
                 tx, ty = rec['target']
                 wp_s = f'({tx:.1f}, {ty:.1f})'
+            elif st is not None:
+                wp_s = f'({st[0]:.1f}, {st[1]:.1f})'
             else:
                 wp_s = '—'
             cu = self._cooldown_until.get(n)
