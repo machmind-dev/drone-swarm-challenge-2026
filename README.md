@@ -108,6 +108,48 @@ Substitute the drone number to check the others (e.g. `/drone_1/role` → `seeke
 
 ---
 
+## Swarm Behaviour
+
+The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`)
+orchestrates the swarm: it watches box detections, knows each drone's role, and
+drives role-specific behaviour. A 5 s start-up grace period runs before any drone
+command is sent, and the active team (LH/red or RH/blue) is taken live from the
+RQT panel (`/gcs/system/team_color`).
+
+### Executor (drones 2 & 4)
+
+Executors capture opponent boxes. For each one, the Commander streams waypoints to
+`/gcs/drone_<id>/control` (same arena-frame `id · x · y · height` convention as the
+Waypoint Commander / Swarm Mission tools — the firmware handles arena→NED and
+Manhattan stepping). The per-executor sequence is:
+
+1. **Fly to the box** — when an opponent box appears, the nearest **idle** executor
+   is sent to its coordinates. The two executors never take the same box (boxes are
+   claimed exclusively), so they always work separate targets.
+2. **Dwell (cooldown)** — on reaching the box it holds for the 5 s cooldown.
+3. **Return to the team-zone border** — flies back keeping the **same Y** as the
+   box, to the zone border X: **LH/red = 5**, **RH/blue = 15**.
+4. **Step out of the zone** — moves **3 m out**, same Y: **LH/red = 8**,
+   **RH/blue = 12**, then **hovers until the next command**.
+
+The dashboard's `WP` column shows each executor's current waypoint (or `hover`),
+and `COOLDOWN` shows the dwell timer at the box.
+
+### Seeker (drones 1 & 3)
+
+Seekers are the only role allowed to publish box locations (see
+[Swarm Information](#swarm-information)). Detected boxes are published by the
+firmware; the Commander consumes them and never overwrites found boxes. If a box
+is still undiscovered at the `--boxes-timeout` (default 2 min), the Commander fills
+it with a predefined random position (marked `[RND]` on the terminal only).
+
+### Leader (drone 5)
+
+The Leader checks the home base while no boxes have been captured *(behaviour
+in progress)*.
+
+---
+
 ## Repository Structure
 
 ```

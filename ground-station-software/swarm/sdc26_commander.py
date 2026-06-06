@@ -75,7 +75,13 @@ ARRIVAL_RADIUS_M    = 0.7     # executor "reached" a box within this distance
 ARRIVAL_HOLD_TICKS  = 4       # consecutive in-radius ticks to count as captured
 CONTROL_PERIOD_S    = 0.5     # control loop rate (2 Hz)
 STARTUP_DELAY_S     = 5.0     # grace period after start before any drone command
-COMMAND_COOLDOWN_S  = 5.0     # per-drone min time between commands (shown as COOLDOWN)
+COMMAND_COOLDOWN_S  = 5.0     # post-arrival dwell at the box before returning (COOLDOWN)
+
+# Executor return path, by scene (LH=red, RH=blue). After dwelling at the box the
+# executor flies back keeping the box's Y to the team-zone border X, then 3 m out
+# of the zone, and hovers. (red: 5 → 8, blue: 15 → 12.)
+ZONE_BORDER_X = {'red': 5.0,  'blue': 15.0}
+ZONE_OUT_X    = {'red': 8.0,  'blue': 12.0}
 
 # Random fallback positions for still-missing opponent boxes, by our scene/team.
 # LH scene = team red  (opponent boxes assumed in the blue area, x~17-18);
@@ -124,10 +130,12 @@ class SDC26Commander(Node):
         self.drone_states = {}               # id -> str
         self.drone_roles = {}                # id -> str (firmware-reported)
         self.drone_poses = {}                # id -> (x, y, z)
-        self.assignments = {}                # executor id -> box_id (current target)
-        self.captured = set()                # box_ids confirmed captured
-        self._arrival_ticks = {}             # executor id -> consecutive in-radius count
-        self._last_cmd_time = {}             # id -> seconds when last command was sent
+        # Per-executor mission state machine (see _advance_executor):
+        #   idle → to_box → (dwell/cooldown) → to_border → to_out → hover
+        self._exec = {ex: {'phase': 'idle', 'box': None, 'ref_y': None,
+                           'target': None, 'arr_ticks': 0}
+                      for ex in self._executor_ids()}
+        self._cooldown_until = {}            # id -> ts when post-arrival cooldown ends
         self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
@@ -205,6 +213,24 @@ class SDC26Commander(Node):
 
     def _leader_ids(self):
         return [i for i, r in ROLES.items() if r == 'leader']
+
+    def _zone_x(self):
+        """(border_x, out_x) for our team zone, by scene. LH/red: 5 → 8;
+        RH/blue: 15 → 12."""
+        return ZONE_BORDER_X.get(self.team, 5.0), ZONE_OUT_X.get(self.team, 8.0)
+
+    def _arrived(self, drone_id, target):
+        """True once the drone has held within ARRIVAL_RADIUS_M of target for
+        ARRIVAL_HOLD_TICKS consecutive ticks."""
+        pose = self.drone_poses.get(drone_id)
+        rec = self._exec.get(drone_id)
+        if pose is None or target is None or rec is None:
+            return False
+        if _dist(pose, target) <= ARRIVAL_RADIUS_M:
+            rec['arr_ticks'] += 1
+        else:
+            rec['arr_ticks'] = 0
+        return rec['arr_ticks'] >= ARRIVAL_HOLD_TICKS
 
     # ════════════════════════ Subscriptions ════════════════════════
     def _marker_cb(self, msg: Marker):
@@ -309,12 +335,75 @@ class SDC26Commander(Node):
                 f'boxes-timeout: fallback box id={bid} -> ({x:.0f}, {y:.0f}) [RND]')
 
     def _assign_executors(self):
-        """TODO #3: nearest-first greedy. For each free executor (in mission,
-        no live target or target reached), claim the nearest unclaimed opponent
-        box, send it there via _send_control, and detect arrival (within
-        ARRIVAL_RADIUS_M for ARRIVAL_HOLD_TICKS) to mark it captured and free
-        the executor for the next box."""
-        pass
+        """Assign opponent boxes to idle executors (nearest-first, no two on the
+        same box), then advance each executor's mission state machine."""
+        self._claim_boxes_for_idle_executors()
+        for ex in self._executor_ids():
+            self._advance_executor(ex)
+
+    def _claimed_boxes(self):
+        return {r['box'] for r in self._exec.values() if r['box'] is not None}
+
+    def _claim_boxes_for_idle_executors(self):
+        """Each idle executor claims the nearest unclaimed opponent box and is
+        sent there. Claims are exclusive so the two executors stay separate."""
+        claimed = self._claimed_boxes()
+        opp = self._opponent_box_ids()
+        for ex in self._executor_ids():
+            rec = self._exec[ex]
+            if rec['phase'] != 'idle':
+                continue
+            cands = [bid for bid in self.boxes if bid in opp and bid not in claimed]
+            if not cands:
+                continue
+            pose = self.drone_poses.get(ex)
+            if pose is not None:
+                bid = min(cands, key=lambda b: _dist(
+                    pose, (self.boxes[b]['x'], self.boxes[b]['y'])))
+            else:
+                bid = min(cands)          # deterministic fallback (lowest id)
+            bx, by = self.boxes[bid]['x'], self.boxes[bid]['y']
+            rec.update(phase='to_box', box=bid, ref_y=by, target=(bx, by), arr_ticks=0)
+            claimed.add(bid)
+            self._send_control(ex, bx, by, self.start_alt)
+            self.get_logger().info(
+                f'executor D{ex} → box {bid} ({bx:.1f}, {by:.1f})')
+
+    def _advance_executor(self, ex):
+        """Step one executor through to_box → dwell → to_border → to_out → hover."""
+        rec = self._exec[ex]
+        phase = rec['phase']
+        if phase in ('idle', 'hover'):
+            return
+        if not self._arrived(ex, rec['target']):
+            return
+
+        border_x, out_x = self._zone_x()
+        ref_y = rec['ref_y']
+        now = self._now_s()
+
+        if phase == 'to_box':
+            # Dwell at the box for the cooldown, then return to the zone border.
+            cu = self._cooldown_until.get(ex)
+            if cu is None:
+                self._cooldown_until[ex] = now + COMMAND_COOLDOWN_S
+                return
+            if now < cu:
+                return
+            self._cooldown_until.pop(ex, None)
+            rec.update(phase='to_border', target=(border_x, ref_y), arr_ticks=0)
+            self._send_control(ex, border_x, ref_y, self.start_alt)
+            self.get_logger().info(f'executor D{ex} → border ({border_x:.0f}, {ref_y:.1f})')
+
+        elif phase == 'to_border':
+            # Exit the zone by 3 m, same Y, then hover.
+            rec.update(phase='to_out', target=(out_x, ref_y), arr_ticks=0)
+            self._send_control(ex, out_x, ref_y, self.start_alt)
+            self.get_logger().info(f'executor D{ex} → out ({out_x:.0f}, {ref_y:.1f})')
+
+        elif phase == 'to_out':
+            rec.update(phase='hover', arr_ticks=0)
+            self.get_logger().info(f'executor D{ex} mission complete → hover')
 
     def _update_leader(self):
         """Leader: while no boxes captured, send it to the home base; stop once
@@ -325,7 +414,6 @@ class SDC26Commander(Node):
     def _send_control(self, drone_id: int, x: float, y: float, z: float, yaw_deg=0.0):
         role = self.drone_roles.get(drone_id) or ROLES.get(drone_id, '—')
         self._last_cmd = (drone_id, role, x, y)
-        self._last_cmd_time[drone_id] = self._now_s()
         if self.dry_run:
             self.get_logger().info(f'[dry-run] D{drone_id} → ({x:.2f}, {y:.2f}, {z:.2f})')
             return
@@ -451,17 +539,19 @@ class SDC26Commander(Node):
             role = self.drone_roles.get(n) or ROLES.get(n, '—')
             loc = self.drone_poses.get(n)
             loc_s = f'({loc[0]:.1f}, {loc[1]:.1f})' if loc else '—'
-            wp_id = self.assignments.get(n)
-            if wp_id is not None and wp_id in self.boxes:
-                b = self.boxes[wp_id]
-                wp_s = f'({b["x"]:.1f}, {b["y"]:.1f})'
+            rec = self._exec.get(n)
+            if rec and rec['phase'] == 'hover':
+                wp_s = 'hover'
+            elif rec and rec['target'] is not None:
+                tx, ty = rec['target']
+                wp_s = f'({tx:.1f}, {ty:.1f})'
             else:
                 wp_s = '—'
-            lc = self._last_cmd_time.get(n)
-            if lc is None:
+            cu = self._cooldown_until.get(n)
+            if cu is None:
                 cd_s = '—'
             else:
-                rem = max(0.0, COMMAND_COOLDOWN_S - (now - lc))
+                rem = cu - now
                 cd_s = f'{rem:.1f}s' if rem > 0 else 'ready'
             lines.append(f'   {n:<7}{status:<16}{role:<10}{loc_s:<16}{wp_s:<16}{cd_s:<9}')
 
