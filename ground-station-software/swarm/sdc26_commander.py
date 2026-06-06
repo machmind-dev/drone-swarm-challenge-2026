@@ -538,7 +538,8 @@ class SDC26Commander(Node):
         blanks then repaints), move the cursor home and overwrite in place —
         '\\033[K' erases each line's tail, '\\033[J' wipes any leftover lines.
         A single full clear runs only on the first frame."""
-        lines = [TEAL + l + RESET for l in LOGO.split('\n')]
+        lines = ['']   # shift the logo down one line so it isn't flush to the top
+        lines += [TEAL + l + RESET for l in LOGO.split('\n')]
         lines.append('')
 
         team = self.team or '—'
