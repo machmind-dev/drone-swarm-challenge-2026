@@ -46,6 +46,7 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy
 
 from std_msgs.msg import String
@@ -73,14 +74,29 @@ START_ALT_M         = 1.0     # starting altitude all drones climb to; the per-d
 ARRIVAL_RADIUS_M    = 0.7     # executor "reached" a box within this distance
 ARRIVAL_HOLD_TICKS  = 4       # consecutive in-radius ticks to count as captured
 CONTROL_PERIOD_S    = 0.5     # control loop rate (2 Hz)
+STARTUP_DELAY_S     = 5.0     # grace period after start before any drone command
 
-# Predefined fallback candidate positions (opponent area) for undiscovered boxes.
-# TODO: tune to the actual arena layout. (x, y) in arena metres.
-FALLBACK_CANDIDATES = [
-    (16.0, 2.5),
-    (16.0, 5.0),
-    (16.0, 7.5),
-]
+# Random fallback positions for still-missing opponent boxes, by our scene/team.
+# LH scene = team red  (opponent boxes assumed in the blue area, x~17-18);
+# RH scene = team blue (opponent boxes assumed in the red  area, x~4).
+# (x, y) in arena metres. The [RND] tag for these positions is TERMINAL-ONLY.
+FALLBACK_LH = [(17.0, 2.0), (18.0, 5.0), (17.0, 8.0)]   # team red  / LH scene
+FALLBACK_RH = [(4.0, 2.0),  (4.0, 5.0),  (4.0, 8.0)]    # team blue / RH scene
+
+# ── Terminal dashboard ──────────────────────────────────────────────────────
+TEAL  = '\033[38;2;51;117;110m'
+WHITE = '\033[38;2;220;220;220m'
+CYAN  = '\033[38;2;0;220;200m'
+DIM   = '\033[38;2;130;130;130m'
+RESET = '\033[0m'
+
+LOGO = r"""   ███╗   ███╗ █████╗  ██████╗██╗  ██╗    ███╗   ███╗██╗███╗   ██╗██████╗
+   ████╗ ████║██╔══██╗██╔════╝██║  ██║    ████╗ ████║██║████╗  ██║██╔══██╗
+   ██╔████╔██║███████║██║     ███████║    ██╔████╔██║██║██╔██╗ ██║██║  ██║
+   ██║╚██╔╝██║██╔══██║██║     ██╔══██║    ██║╚██╔╝██║██║██║╚██╗██║██║  ██║
+   ██║ ╚═╝ ██║██║  ██║╚██████╗██║  ██║    ██║ ╚═╝ ██║██║██║ ╚████║██████╔╝
+   ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝    ╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═════╝
+   http://machmind.dev                               Team Mach Mind (c) 2026"""
 
 
 def _dist(a, b):
@@ -110,6 +126,9 @@ class SDC26Commander(Node):
         self.assignments = {}                # executor id -> box_id (current target)
         self.captured = set()                # box_ids confirmed captured
         self._arrival_ticks = {}             # executor id -> consecutive in-radius count
+        self._last_contact = {}              # id -> seconds of last received message
+        self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
+        self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
         self._start_t = self.get_clock().now()
 
@@ -141,6 +160,7 @@ class SDC26Commander(Node):
                                      lambda m, d=i: self._pose_cb(m, d), 10)
 
         self.create_timer(CONTROL_PERIOD_S, self._control_loop)
+        self.create_timer(1.0, self._render)
 
         self._publish_roster()
         if self.team:
@@ -169,6 +189,14 @@ class SDC26Commander(Node):
     def _elapsed_s(self):
         return (self.get_clock().now() - self._start_t).nanoseconds / 1e9
 
+    def _now_s(self):
+        return self.get_clock().now().nanoseconds / 1e9
+
+    @staticmethod
+    def _fmt_dur(s):
+        m, sec = divmod(int(s), 60)
+        return f'{m:02d}:{sec:02d}'
+
     def _executor_ids(self):
         return [i for i, r in ROLES.items() if r == 'executor']
 
@@ -190,6 +218,7 @@ class SDC26Commander(Node):
         }
 
     def _role_cb(self, msg: String, drone_id: int):
+        self._last_contact[drone_id] = self._now_s()
         role = msg.data.strip().lower()
         self.drone_roles[drone_id] = role
         expected = ROLES.get(drone_id)
@@ -198,9 +227,11 @@ class SDC26Commander(Node):
                 f'D{drone_id} reports role "{role}" but table expects "{expected}"')
 
     def _state_cb(self, msg: String, drone_id: int):
+        self._last_contact[drone_id] = self._now_s()
         self.drone_states[drone_id] = msg.data.strip().lower()
 
     def _pose_cb(self, msg: PoseStamped, drone_id: int):
+        self._last_contact[drone_id] = self._now_s()
         self.drone_poses[drone_id] = (msg.pose.position.x,
                                       msg.pose.position.y,
                                       msg.pose.position.z)
@@ -219,6 +250,8 @@ class SDC26Commander(Node):
             return   # hold until RQT publishes our team on /gcs/system/team_color
         self._update_box_registry()
         self._apply_fallback_if_due()
+        if self._elapsed_s() < STARTUP_DELAY_S:
+            return   # startup grace period — track boxes but send no commands yet
         self._assign_executors()
         self._update_leader()
 
@@ -228,15 +261,36 @@ class SDC26Commander(Node):
         pass
 
     def _apply_fallback_if_due(self):
-        """TODO #2: once elapsed >= discovery_timeout, assign predefined
-        FALLBACK_CANDIDATES to any expected opponent box still undiscovered,
-        marking source='fallback'. Run once."""
+        """TODO #2: once elapsed >= discovery_timeout, fill every still-missing
+        opponent box with a predefined random position (scene-dependent) under an
+        opponent ArUco id that is not already in use. Runs once.
+
+        source='fallback' drives the terminal-only [RND] marker — if these are
+        ever published to RViz, publish plain coordinates, never the tag."""
         if self._fallback_applied or self._elapsed_s() < self.discovery_timeout:
             return
-        # TODO: pick missing opponent box ids, pop fallback candidates, populate
-        #       self.boxes[...] with source='fallback', log each.
         self._fallback_applied = True
-        self.get_logger().info('discovery timeout reached — fallback fill (TODO)')
+
+        coords = FALLBACK_LH if self.team == 'red' else FALLBACK_RH
+        opp_ids = self._opponent_box_ids()
+        opp_team = 'blue' if self.team == 'red' else 'red'
+
+        discovered = [bid for bid in self.boxes if bid in opp_ids]
+        n_missing = max(0, len(coords) - len(discovered))
+        if n_missing == 0:
+            self.get_logger().info('boxes-timeout: all opponent boxes found — no fallback')
+            return
+
+        # Take the lowest opponent ArUco ids not already in use, one per missing box.
+        unused = [bid for bid in opp_ids if bid not in self.boxes]
+        for i in range(min(n_missing, len(unused), len(coords))):
+            bid = unused[i]
+            x, y = coords[i]
+            self.boxes[bid] = {'x': float(x), 'y': float(y), 'z': 0.0,
+                               'team': opp_team, 'last_seen': self._elapsed_s(),
+                               'source': 'fallback'}
+            self.get_logger().info(
+                f'boxes-timeout: fallback box id={bid} -> ({x:.0f}, {y:.0f}) [RND]')
 
     def _assign_executors(self):
         """TODO #3: nearest-first greedy. For each free executor (in mission,
@@ -253,6 +307,8 @@ class SDC26Commander(Node):
 
     # ════════════════════════ Outgoing ════════════════════════
     def _send_control(self, drone_id: int, x: float, y: float, z: float, yaw_deg=0.0):
+        role = self.drone_roles.get(drone_id) or ROLES.get(drone_id, '—')
+        self._last_cmd = (drone_id, role, x, y)
         if self.dry_run:
             self.get_logger().info(f'[dry-run] D{drone_id} → ({x:.2f}, {y:.2f}, {z:.2f})')
             return
@@ -282,6 +338,86 @@ class SDC26Commander(Node):
         msg.data = json.dumps({'team': self.team, 'roles': ROLES})
         self.roster_pub.publish(msg)
 
+    # ════════════════════════ Terminal dashboard ════════════════════════
+    def _render(self):
+        """Redraw the operator dashboard once per second.
+
+        Flicker-free: instead of clearing the whole screen each tick (which
+        blanks then repaints), move the cursor home and overwrite in place —
+        '\\033[K' erases each line's tail, '\\033[J' wipes any leftover lines.
+        A single full clear runs only on the first frame."""
+        lines = [TEAL + l + RESET for l in LOGO.split('\n')]
+        lines.append('')
+
+        team = self.team or '—'
+        elapsed = self._elapsed_s()
+        mode = '  [DRY-RUN]' if self.dry_run else ''
+        if elapsed < STARTUP_DELAY_S:
+            mode += f'  [STARTUP HOLD {STARTUP_DELAY_S - elapsed:.0f}s]'
+        lines.append(f'{WHITE}   [SDC26 Commander]{RESET}   team={team}   '
+                     f'uptime={self._fmt_dur(elapsed)}{mode}')
+        lines.append('')
+
+        # Box line — up to EXPECTED_BOX_COUNT, sorted by id. '[RND]' next to the
+        # coordinate marks a random fallback position (not a real detection).
+        # This marker is TERMINAL-ONLY: it is derived from the internal 'source'
+        # field here and must never be added to any published marker/topic/label.
+        ids = sorted(self.boxes.keys())[:EXPECTED_BOX_COUNT]
+        cells = []
+        for i in range(EXPECTED_BOX_COUNT):
+            if i < len(ids):
+                b = self.boxes[ids[i]]
+                tag = ' [RND]' if b.get('source') == 'fallback' else ''
+                cells.append(f'BOX{i + 1}: ({b["x"]:.1f}, {b["y"]:.1f}){tag}')
+            else:
+                cells.append(f'BOX{i + 1}: (—)')
+        lines.append(CYAN + '   ' + '   '.join(cells) + RESET)
+
+        # Countdown until random fallback positions are published for any
+        # still-missing boxes (TODO #2).
+        if self._fallback_applied:
+            fb = 'random fallback for missing boxes: published — marked [RND]'
+        else:
+            remaining = max(0.0, self.discovery_timeout - elapsed)
+            fb = f'random fallback for missing boxes in: {remaining:.0f}s'
+        lines.append(DIM + '   ' + fb + RESET)
+        lines.append('')
+
+        # Per-drone table.
+        lines.append(WHITE + f'   {"DRONE":<7}{"STATUS":<16}{"ROLE":<10}'
+                     f'{"LOC":<16}{"WP":<16}{"DELAY":<8}' + RESET)
+        now = self._now_s()
+        for n in range(1, NUM_DRONES + 1):
+            status = self.drone_states.get(n, '—')
+            role = self.drone_roles.get(n) or ROLES.get(n, '—')
+            loc = self.drone_poses.get(n)
+            loc_s = f'({loc[0]:.1f}, {loc[1]:.1f})' if loc else '—'
+            wp_id = self.assignments.get(n)
+            if wp_id is not None and wp_id in self.boxes:
+                b = self.boxes[wp_id]
+                wp_s = f'({b["x"]:.1f}, {b["y"]:.1f})'
+            else:
+                wp_s = '—'
+            last = self._last_contact.get(n)
+            delay_s = f'{now - last:.1f}s' if last else '—'
+            lines.append(f'   {n:<7}{status:<16}{role:<10}{loc_s:<16}{wp_s:<16}{delay_s:<8}')
+
+        # Last command sent — below the table.
+        if self._last_cmd:
+            d, role, x, y = self._last_cmd
+            last_cmd_s = f'D{d} {role} ({x:.1f}, {y:.1f})'
+        else:
+            last_cmd_s = '—'
+        lines.append('')
+        lines.append(f'{WHITE}   last command sent:{RESET} {last_cmd_s}')
+        lines.append('')
+        lines.append(DIM + '   refresh 1 Hz · Ctrl-C to quit' + RESET)
+
+        prefix = '\033[2J\033[H' if self._first_render else '\033[H'
+        self._first_render = False
+        buf = prefix + '\n'.join(line + '\033[K' for line in lines) + '\033[J'
+        print(buf, end='', flush=True)
+
 
 def main():
     ap = argparse.ArgumentParser(description='Mach Mind SDC26 swarm commander (backbone).')
@@ -305,10 +441,12 @@ def main():
                           start_alt=args.start_altitude, dry_run=args.dry_run)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
