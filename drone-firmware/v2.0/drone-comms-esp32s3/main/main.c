@@ -92,7 +92,7 @@
 static const char *TAG = "drone";
 
 /* ── Identity ──────────────────────────────────────────────────────────── */
-#define DRONE_ID          1
+#define DRONE_ID          5
 
 /* ── Swarm role (compile-time, keyed on DRONE_ID) ───────────────────────────
  * Fixed role assignment for SDC26:
