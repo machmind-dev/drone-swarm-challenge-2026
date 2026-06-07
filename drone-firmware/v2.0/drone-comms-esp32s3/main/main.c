@@ -188,11 +188,11 @@ static const char *TAG = "drone";
 #define MANHATTAN_STEP_M        1.0f   /* distance between intermediate waypoints */
 #define MANHATTAN_ARRIVAL_M     1.0f   /* waypoint reached when closer than this */
 #define MANHATTAN_PASSTHROUGH_M 1.0f   /* setpoints ≤ this skip Manhattan (keyboard) */
-#define MANHATTAN_OBSTACLE_MM   1000   /* ToF threshold (mm) — stop and await new GCS command.
-                                        * Detection window is 1..MANHATTAN_OBSTACLE_MM with a
-                                        * valid (status==0, non-zero) reading; ≥ this, 0 mm, or
-                                        * an error status all read as "clear". 500→1000→1500→1000.
-                                        * TODO: add 1 s hover/debounce on detection (net-hole flicker). */
+#define MANHATTAN_OBSTACLE_MM   500    /* ToF upper threshold (mm) — stop and await new GCS command.
+                                        * Detection window is MANHATTAN_OBSTACLE_MIN_MM..MANHATTAN_OBSTACLE_MM
+                                        * with a valid (status==0) reading; outside this window or an
+                                        * error status reads as "clear". History: 500→1000→1500→1000→500. */
+#define MANHATTAN_OBSTACLE_MIN_MM 50   /* readings below this (contact/saturation noise) are ignored */
 #define MANHATTAN_MAX_WPS       40     /* 20 m + 10 m at 1 m steps + margin */
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -272,6 +272,7 @@ static volatile float nav_dest_z    = MISSION_TAKEOFF_ALT_M;
 static volatile bool  nav_new_dest  = false;
 static volatile bool  nav_active    = false;
 static volatile bool  nav_obs_hold  = false;
+static uint32_t       nav_obs_check_ms = 0;  /* tick of last obstacle recheck */
 
 volatile bool vision_enabled = false;
 
@@ -594,12 +595,12 @@ static rcl_publisher_t    publisher_battery;
 
 /* Box drop-zone (arena frame) — boxes only valid in the two team areas.
  * Applied here for both ANCHORED and CAMERA frames after world projection. */
-#define BOX_RED_X_MIN   0.0f
+#define BOX_RED_X_MIN   1.0f
 #define BOX_RED_X_MAX   7.0f
 #define BOX_BLUE_X_MIN  13.0f
-#define BOX_BLUE_X_MAX  20.0f
-#define BOX_AREA_Y_MIN  0.0f
-#define BOX_AREA_Y_MAX  10.0f
+#define BOX_BLUE_X_MAX  19.0f
+#define BOX_AREA_Y_MIN  1.0f
+#define BOX_AREA_Y_MAX  9.0f
 #define BOX_AREA_MARGIN_M 0.0f
 /* Camera mount: forward-facing, level, no offset. CAM_TILT_DEG = downward pitch
  * (0 = level); applied as a rotation about the body-right axis when projecting a
@@ -711,7 +712,8 @@ static uint16_t tof_min_horizontal_clearance(void)
     if (!p4_link_get_tof(&tof)) return UINT16_MAX;
     uint16_t min_mm = UINT16_MAX;
     for (int s = 0; s < 5; s++) {
-        if (tof.status[s] != 0 || tof.dist_mm[s] == 0) continue;  /* invalid → skip */
+        if (tof.status[s] != 0 || tof.dist_mm[s] == 0) continue;          /* invalid → skip */
+        if (tof.dist_mm[s] < MANHATTAN_OBSTACLE_MIN_MM) continue;         /* contact/saturation noise → skip */
         if (tof.dist_mm[s] < min_mm) min_mm = tof.dist_mm[s];
     }
     return min_mm;
@@ -856,8 +858,9 @@ static void mission_task_fn(void *arg)
 
                 if (clearance != UINT16_MAX && clearance < MANHATTAN_OBSTACLE_MM) {
                     /* Obstacle — stop and wait for new GCS command */
-                    nav_active   = false;
-                    nav_obs_hold = true;
+                    nav_active        = false;
+                    nav_obs_hold      = true;
+                    nav_obs_check_ms  = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
                     sp_x   = cur_x;
                     sp_y   = cur_y;
                     sp_z   = -nav_dest_z;
@@ -896,12 +899,27 @@ static void mission_task_fn(void *arg)
                     }
                 }
 
-            /* ── 3. Obstacle hold — hover until new GCS command ── */
+            /* ── 3. Obstacle hold — hover and recheck every 1 s; resume if clear ── */
             } else if (nav_obs_hold) {
                 sp_x   = cur_x;
                 sp_y   = cur_y;
                 sp_z   = -nav_dest_z;
                 sp_yaw = vision_pose_valid ? vision_yaw : 0.0f;
+
+                uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+                if (now_ms - nav_obs_check_ms >= 1000) {
+                    nav_obs_check_ms = now_ms;
+                    uint16_t recheck = tof_min_horizontal_clearance();
+                    if (recheck == UINT16_MAX || recheck >= MANHATTAN_OBSTACLE_MM) {
+                        nav_obs_hold = false;
+                        nav_active   = true;
+                        ESP_LOGI(TAG, "Manhattan: obstacle cleared (%s) — resuming wp %d/%d",
+                                 recheck == UINT16_MAX ? "no reading" : "clear",
+                                 nav_wp_idx, nav_wp_count);
+                    } else {
+                        ESP_LOGD(TAG, "Manhattan: obstacle still present %u mm", recheck);
+                    }
+                }
 
             /* ── 4. Pass-through (keyboard / small steps) ── */
             } else if (setpoint_received) {
