@@ -71,12 +71,13 @@ EXPECTED_BOX_COUNT  = 3       # physical boxes in the arena
 DISCOVERY_TIMEOUT_S = 120.0   # after this, fill missing boxes from fallback list
 START_ALT_M         = 1.0     # starting altitude all drones climb to; the per-drone
                               # mission altitude differs and is set later by assignment
-EXECUTOR_ALT_M      = 2.0     # executors fly to/from the box at this altitude
+EXECUTOR_ALT_M      = 1.5     # executors fly to/from the box at this altitude
 ARRIVAL_RADIUS_M    = 0.7     # executor "reached" a box within this distance
 ARRIVAL_HOLD_TICKS  = 4       # consecutive in-radius ticks to count as captured
 CONTROL_PERIOD_S    = 0.5     # control loop rate (2 Hz)
 STARTUP_DELAY_S     = 5.0     # grace period after start before any drone command
 COMMAND_COOLDOWN_S  = 5.0     # post-arrival dwell at the box before returning (COOLDOWN)
+SEEKER_STAGGER_S    = 3.0     # delay between consecutive seeker launch commands
 
 # Executor return path, by scene (LH=red, RH=blue). After dwelling at the box the
 # executor flies back keeping the box's Y to the team-zone border X, then 3 m out
@@ -146,7 +147,9 @@ class SDC26Commander(Node):
                            'target': None, 'arr_ticks': 0}
                       for ex in self._executor_ids()}
         self._cooldown_until = {}            # id -> ts when post-arrival cooldown ends
+        self._executor_launched_t = {}       # id -> timestamp of last dispatch to a box
         self._seeker_target = {}             # seeker id -> (x, y) last commanded
+        self._seeker_launched_t = {}         # seeker id -> timestamp of last launch command
         self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
@@ -369,13 +372,20 @@ class SDC26Commander(Node):
     def _update_seekers(self):
         """Send each Seeker (drones 1 & 3) to its fixed scene waypoint in the
         opponent area, then leave it hovering. Only re-commanded if the scene
-        (and thus the target) changes — so it holds 'till the next waypoint'."""
+        (and thus the target) changes — so it holds 'till the next waypoint'.
+        Seekers are staggered by SEEKER_STAGGER_S to avoid mid-air conflicts."""
         wps = SEEKER_WP.get(self.team, {})
+        now = self._now_s()
         for sid in self._seeker_ids():
             target = wps.get(sid)
             if target is None or self._seeker_target.get(sid) == target:
                 continue
+            # Enforce stagger: skip this seeker if another was launched too recently.
+            last_launch = max(self._seeker_launched_t.values(), default=0.0)
+            if now - last_launch < SEEKER_STAGGER_S and sid not in self._seeker_launched_t:
+                continue
             self._seeker_target[sid] = target
+            self._seeker_launched_t[sid] = now
             self._send_control(sid, target[0], target[1], self.start_alt)
             self.get_logger().info(
                 f'seeker D{sid} → ({target[0]:.0f}, {target[1]:.0f}) hover')
@@ -392,15 +402,21 @@ class SDC26Commander(Node):
 
     def _claim_boxes_for_idle_executors(self):
         """Each idle executor claims the nearest unclaimed opponent box and is
-        sent there. Claims are exclusive so the two executors stay separate."""
+        sent there. Claims are exclusive so the two executors stay separate.
+        Executors are staggered by SEEKER_STAGGER_S to avoid mid-air conflicts."""
         claimed = self._claimed_boxes()
         opp = self._opponent_box_ids()
+        now = self._now_s()
         for ex in self._executor_ids():
             rec = self._exec[ex]
             if rec['phase'] != 'idle':
                 continue
             cands = [bid for bid in self.boxes if bid in opp and bid not in claimed]
             if not cands:
+                continue
+            # Enforce stagger: skip if another executor was dispatched too recently.
+            last_launch = max(self._executor_launched_t.values(), default=0.0)
+            if now - last_launch < SEEKER_STAGGER_S and ex not in self._executor_launched_t:
                 continue
             pose = self.drone_poses.get(ex)
             if pose is not None:
@@ -411,6 +427,7 @@ class SDC26Commander(Node):
             bx, by = self.boxes[bid]['x'], self.boxes[bid]['y']
             rec.update(phase='to_box', box=bid, ref_y=by, target=(bx, by), arr_ticks=0)
             claimed.add(bid)
+            self._executor_launched_t[ex] = now
             self._send_control(ex, bx, by, EXECUTOR_ALT_M)
             self.get_logger().info(
                 f'executor D{ex} → box {bid} ({bx:.1f}, {by:.1f})')

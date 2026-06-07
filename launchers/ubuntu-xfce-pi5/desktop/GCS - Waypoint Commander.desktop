@@ -5,6 +5,6 @@ Type=Application
 Terminal=true
 Exec=/home/machmind/drone-swarm-challenge-2026/launchers/ubuntu-xfce-pi5/launch-waypoint-commander.sh
 Path=/home/machmind/drone-swarm-challenge-2026/launchers/ubuntu-xfce-pi5/
-Name=Mach Mind — Waypoint Commander
+Name=GCS — Waypoint Commander
 Comment=Send arena coordinates to drones via Manhattan navigation
 Icon=/home/machmind/drone-swarm-challenge-2026/launchers/swarm_ico.png

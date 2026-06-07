@@ -5,6 +5,6 @@ Type=Application
 Terminal=true
 Exec=/home/machmind/drone-swarm-challenge-2026/launchers/ubuntu-xfce-pi5/launch-swarm-mission.sh
 Path=/home/machmind/drone-swarm-challenge-2026/launchers/ubuntu-xfce-pi5/
-Name=GCS — Manual Flight
+Name=GCS — Keyboard Control
 Comment=Real-time keyboard control of a single drone
 Icon=/home/machmind/drone-swarm-challenge-2026/launchers/swarm_ico.png
