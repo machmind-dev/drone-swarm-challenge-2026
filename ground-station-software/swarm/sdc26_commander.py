@@ -79,6 +79,14 @@ STARTUP_DELAY_S     = 5.0     # grace period after start before any drone comman
 COMMAND_COOLDOWN_S  = 5.0     # post-arrival dwell at the box before returning (COOLDOWN)
 SEEKER_STAGGER_S    = 3.0     # delay between consecutive seeker launch commands
 
+# Leader centre-arena waypoint. Drone 5 hovers here and faces its own team zone:
+# LH scene (red)  → yaw 180° (−X, toward x=0..7)
+# RH scene (blue) → yaw   0° (+X, toward x=13..20)
+LEADER_WP           = (10.0, 5.0)
+LEADER_BASE_WP      = {'red': (8.0, 5.0), 'blue': (12.0, 5.0)}
+LEADER_BASE_ALT_M   = 0.5               # altitude after closing in to base waypoint
+LEADER_YAW          = {'red': 180.0, 'blue': 0.0}
+
 # Executor return path, by scene (LH=red, RH=blue). After dwelling at the box the
 # executor flies back keeping the box's Y to the team-zone border X, then 3 m out
 # of the zone, and hovers. (red: 5 → 8, blue: 15 → 12.)
@@ -150,6 +158,10 @@ class SDC26Commander(Node):
         self._executor_launched_t = {}       # id -> timestamp of last dispatch to a box
         self._seeker_target = {}             # seeker id -> (x, y) last commanded
         self._seeker_launched_t = {}         # seeker id -> timestamp of last launch command
+        self._leader_sent_team = None        # team for which leader was last dispatched
+        # Per-leader state machine:  idle → to_centre → to_base → hover
+        self._leader = {lid: {'phase': 'idle', 'target': None, 'arr_ticks': 0}
+                        for lid in self._leader_ids()}
         self._last_cmd = None                # (drone_id, role, x, y) of last setpoint
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
@@ -468,10 +480,68 @@ class SDC26Commander(Node):
             rec.update(phase='hover', arr_ticks=0)
             self.get_logger().info(f'executor D{ex} mission complete → hover')
 
+    def _leader_arrived(self, lid, target):
+        """Arrival check for the leader (same geometry as executor)."""
+        pose = self.drone_poses.get(lid)
+        rec = self._leader.get(lid)
+        if pose is None or target is None or rec is None:
+            return False
+        if _dist(pose, target) <= ARRIVAL_RADIUS_M:
+            rec['arr_ticks'] += 1
+        else:
+            rec['arr_ticks'] = 0
+        return rec['arr_ticks'] >= ARRIVAL_HOLD_TICKS
+
     def _update_leader(self):
-        """Leader: while no boxes captured, send it to the home base; stop once
-        the first capture happens. TODO: implement once capture tracking lands."""
-        pass
+        """Two-phase leader movement facing own team zone:
+          1. to_centre: fly to LEADER_WP (10, 5) at start_alt
+          2. to_base:   on arrival move to LEADER_BASE_WP at LEADER_BASE_ALT_M (0.5 m)
+               LH/red  → (8, 5)   RH/blue → (12, 5)
+        Waits SEEKER_STAGGER_S after last seeker departure before first move.
+        Resets and re-dispatches from scratch if team colour changes."""
+        if not self.team:
+            return
+
+        # Reset state machine on team change so the correct base WP is used.
+        if self._leader_sent_team != self.team:
+            for lid in self._leader_ids():
+                self._leader[lid].update(phase='idle', target=None, arr_ticks=0)
+            self._leader_sent_team = self.team
+
+        last_seeker = max(self._seeker_launched_t.values(), default=0.0)
+        stagger_ok = self._now_s() - last_seeker >= SEEKER_STAGGER_S
+
+        yaw   = LEADER_YAW[self.team]
+        cx, cy = LEADER_WP
+        bx, by = LEADER_BASE_WP[self.team]
+
+        for lid in self._leader_ids():
+            rec   = self._leader[lid]
+            phase = rec['phase']
+
+            if phase == 'idle':
+                if not stagger_ok:
+                    continue
+                rec.update(phase='to_centre', target=(cx, cy), arr_ticks=0)
+                self._send_control(lid, cx, cy, self.start_alt, yaw_deg=yaw)
+                self.get_logger().info(
+                    f'leader D{lid} → centre ({cx:.0f}, {cy:.0f}) '
+                    f'alt={self.start_alt:.1f}m yaw={yaw:.0f}°')
+
+            elif phase == 'to_centre':
+                if not self._leader_arrived(lid, rec['target']):
+                    continue
+                rec.update(phase='to_base', target=(bx, by), arr_ticks=0)
+                self._send_control(lid, bx, by, LEADER_BASE_ALT_M, yaw_deg=yaw)
+                self.get_logger().info(
+                    f'leader D{lid} → base ({bx:.0f}, {by:.0f}) '
+                    f'alt={LEADER_BASE_ALT_M:.1f}m yaw={yaw:.0f}°')
+
+            elif phase == 'to_base':
+                if not self._leader_arrived(lid, rec['target']):
+                    continue
+                rec.update(phase='hover', arr_ticks=0)
+                self.get_logger().info(f'leader D{lid} at base → hover')
 
     # ════════════════════════ Outgoing ════════════════════════
     def _send_control(self, drone_id: int, x: float, y: float, z: float, yaw_deg=0.0):

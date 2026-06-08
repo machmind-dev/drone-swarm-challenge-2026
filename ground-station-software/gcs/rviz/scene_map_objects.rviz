@@ -52,16 +52,9 @@ Visualization Manager:
       Namespaces:
         arena: true
         arena_labels: true
-        axes: true
-        axes_labels: true
         blue: true
         box_label: true
-        corner_labels: true
-        drone_1: true
         drone_2: true
-        drone_3: true
-        drone_4: true
-        drone_5: true
         labels_bottom: true
         labels_top: true
         launch_points: true
@@ -78,7 +71,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        drone_heading: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -224,7 +217,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        drone_heading: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -297,7 +290,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        drone_heading: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -370,7 +363,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        drone_heading: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -485,7 +478,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 35.355079650878906
+      Distance: 26.982988357543945
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -500,10 +493,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.0347989797592163
+      Pitch: 0.6497971415519714
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.883676052093506
+      Yaw: 4.468677043914795
     Saved: ~
 Window Geometry:
   Displays:
