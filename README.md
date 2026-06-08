@@ -1,5 +1,3 @@
----
-
 **Team**
 
 | Member | Disciplines |
