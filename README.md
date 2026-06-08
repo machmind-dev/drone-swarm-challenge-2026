@@ -38,11 +38,11 @@ The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) run
 
 ### Executor
 
-Capture opponent boxes, claimed exclusively so no two executors share a target: fly to the box → dwell for the 5 s cooldown → return along the box's Y to the zone border (X = 5 LH / 15 RH) → step 3 m clear (X = 8 LH / 12 RH) and hover.
+Capture opponent boxes based on data received from Seeker.
 
 ### Seeker
 
-The only role that publishes box locations. Boxes found by the firmware are never overwritten; any still undiscovered at `--boxes-timeout` (default 2 min) get a predefined random position (`[RND]`).
+The only role that publishes box locations. If none of the boxes were found, after 2 minutes GCS publishes random box for each not found.
 
 ### Leader
 
