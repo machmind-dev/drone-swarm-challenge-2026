@@ -1,16 +1,3 @@
-> **TODO (box detection):** box detection needs to be double-checked for correctness.
->
-> **TODO (hardware mod):** planned board/wiring revisions —
-> - establish a **common ground** between the BEC and the sensors (shared ground reference);
-> - add a **series current-limiting resistor** on the LED-strip control/data line(s);
-> - (firmware) implement **per-drone roles** in the ESP32-S3 firmware — **Seeker**, **Executor**, **Lead**.
->
-> **TODO (obstacle, hover):** add a 1 s hover/debounce on obstacle detection in the Manhattan leg path — the ToF (`MANHATTAN_OBSTACLE_MM`, now 1.0 m) fluctuates against the net wall's holes, so a single flickering reading can trigger a stop. Not yet implemented; decide whether the 1 s should debounce the trigger (confirm before halting) or settle before the await-GCS hold.
->
-> **TODO (obstacle, pass-through):** the pass-through clamp (`clamp_setpoint_for_obstacles`, keyboard-fly mode — not the leg path) still uses only the **forward** sensor, because it clamps motion along the travel vector; an all-5 min there would wrongly shorten forward motion when passing a side wall. Decide whether that mode should also stop on any-side proximity.
->
-> **Known issue (frame-mix):** `drone-comms-esp32s3/main/main.c:931` (`aruco_approach_task`) — `hold_y = vision_pose_valid ? vp_y : px4_pos_y` mixes arena-frame `vp_y` with NED `px4_pos_y`. Pre-existing bug, only in the ArUco-spin approach feature, not the waypoint path. Needs the vision branch converted to NED (`ned_offset_y - vp_y`).
-
 ---
 
 **Team**
@@ -174,24 +161,12 @@ drone-swarm-challenge-2026/
 
 ### Pre-Finals Critical
 
-- [ ] **Lower `C2_FAIL_THRESHOLD` to 1** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:157`) — currently set to 3 (6 s timeout) for WiFi RTT tolerance during testing. Must be lowered to 1 (2 s) before the competition flight.
-
 - [x] **ARM-time inertial anchor fix** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c:874`) — `inertial_anchor_valid = true` now set at ARM time; trail tracks live from takeoff.
 
 ### Navigation
 
 - [x] **Manhattan waypoint navigation** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c`) — 1 m steps X-leg first then Y-leg; yaw to face travel direction; ToF obstacle stop at 500 mm; awaits new GCS command on obstacle; keyboard pass-through for steps ≤ 1 m; arrival tolerance 1 m.
 
-### Analysis
-
-- [ ] **Analyse drift test `log_63_UnknownDate.ulg`** (`drone-firmware/v2.0/logs/2026-06-01_2109_drone4/`) — 5-minute aggressive inertial-only flight. Goal: quantify position error accumulation over time to set the mission planning envelope for how long the drone can fly without a position correction.
-
 ### Calibration
 
 - [ ] **Full ChArUco calibration on ESP32-P4** (`drone-firmware/v2.0/drone-vision-esp32p4/`) — barrel distortion not yet corrected. Current focal-length correction (fx=438.6 px) achieves ~1% range error but sub-cm accuracy requires a full calibration run with a ChArUco board.
-
-### Cleanup
-
-- [ ] **Remove dead heading-seed code** (`drone-firmware/v2.0/drone-comms-esp32s3/main/main.c`) — `SEED_YAW_ENABLE`, `seed_yaw_rad`, `seed_yaw_valid` are no longer effective. Remove once nav is confirmed stable.
-
-- [x] **Review `simulate_drones.py` active drone list** (`ground-station-software/swarm/algorithm/simulate_drones.py:20`) — all 5 drones now active.
