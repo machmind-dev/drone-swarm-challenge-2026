@@ -148,3 +148,23 @@ drone-swarm-challenge-2026/
 ### Calibration
 
 - [ ] **Full ChArUco calibration on ESP32-P4** (`drone-firmware/v2.0/drone-vision-esp32p4/`) — barrel distortion not yet corrected. Current focal-length correction (fx=438.6 px) achieves ~1% range error but sub-cm accuracy requires a full calibration run with a ChArUco board.
+
+---
+
+## Open Issues
+
+### Inertial drift
+
+Flying without a position correction reference, position error accumulates over time. A 5-minute aggressive inertial-only test (`log_63`, drone 4) showed visible drift; the safe mission envelope has not been formally quantified. A reliable absolute reference (ArUco or equivalent) is needed to bound this for longer missions.
+
+### ArUco navigation — unstabilised
+
+ArUco-based EKF fusion was developed but could not be stabilised in time for the finals. The core problem is the optical centre of the OV5647 sensor: the physical centre cannot be reached via register configuration (X_ADDR changes are only ~22% effective), leaving an uncorrected systematic bias in the world-pose estimate that feeds into the position correction. ArUco is therefore used only for box detection, not navigation.
+
+### Box detection — unverified correctness
+
+Box position detection logic has not been formally validated end-to-end. Detection works in testing but the mapping from image coordinates to arena coordinates has not been double-checked against ground truth under finals conditions.
+
+### Frame mismatch in ArUco approach task
+
+`drone-comms-esp32s3/main/main.c` (`aruco_approach_task`) — `hold_y = vision_pose_valid ? vp_y : px4_pos_y` mixes arena-frame `vp_y` with NED `px4_pos_y`. Pre-existing bug; affects only the ArUco-spin approach feature, not the waypoint path. Fix: convert the vision branch to NED (`ned_offset_y - vp_y`).
