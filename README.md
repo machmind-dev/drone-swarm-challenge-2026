@@ -25,71 +25,6 @@ Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified an
 
 ![System Architecture v2.0](docs/system_architecture.png)
 
----
-
-## Swarm Information
-
-Each drone is assigned a **fixed swarm role** at firmware compile time, keyed on
-its `DRONE_ID`. The role is published on `/drone_<ID>/role` and drives the
-mission behaviour (which drone publishes box locations, which captures boxes, and
-which watches the home base).
-
-### Initial role assignment
-
-| Drone ID | Role | Responsibility |
-|----------|----------|----------------|
-| 1 | **Seeker** | Only role allowed to publish box locations |
-| 2 | **Executor** | Only role sent to capture a discovered opponent box |
-| 3 | **Seeker** | Only role allowed to publish box locations |
-| 4 | **Executor** | Only role sent to capture a discovered opponent box |
-| 5 | **Leader** | Checks the home base while no boxes have been captured |
-
-### How roles can be changed
-
-Roles are **hard-coded at compile time** in
-[`drone-comms-esp32s3/main/main.c`](drone-firmware/v2.0/drone-comms-esp32s3/main/main.c)
-— the `DRONE_ID → DRONE_ROLE` mapping (`ROLE_SEEKER` / `ROLE_EXECUTOR` /
-`ROLE_LEADER`) sits directly under the `#define DRONE_ID` identity block. The
-role always follows the ID, so:
-
-- **To repurpose a drone during the challenge**, change its `#define DRONE_ID`
-  to an ID that carries the desired role and re-flash — e.g. flashing a spare as
-  `DRONE_ID 5` makes it the Leader. No separate role flag to keep in sync.
-- **To change the mapping itself** (e.g. make ID 4 a Seeker), edit the
-  `#if (DRONE_ID == …)` role block and re-flash the affected drone(s).
-
-#### Override a role from the GCS at runtime (no re-flash)
-
-The firmware emits its role on `/drone_<ID>/role` **once at boot**. Because ROS 2
-allows multiple publishers on a topic, the GCS can publish onto the same topic to
-override the role seen by every consumer — RViz, the RQT panel, and the planned
-SDC26 Commander (which keys its box→executor assignment off this topic):
-
-```bash
-# One-shot override — make drone 5 act as a Seeker for the swarm logic
-ros2 topic pub --once /drone_5/role std_msgs/msg/String "{data: seeker}"
-
-# Keep it asserted for late-joining subscribers (publishes continuously; Ctrl-C to stop)
-ros2 topic pub --rate 1 /drone_5/role std_msgs/msg/String "{data: seeker}"
-```
-
-> **Caveat:** this overrides only what the *ground station* consumes — it does
-> **not** change the drone's compile-time `DRONE_ROLE`. Any behaviour gated
-> on-board by role (e.g. the future Seeker-only box-publish gate) still follows
-> the flashed value; permanent changes need a re-flash. There is no runtime role
-> switch inside the firmware yet.
-
-### Quick test
-
-After flashing, confirm a drone reports the expected role over ROS 2:
-
-```bash
-ros2 topic echo /drone_5/role
-# → data: leader
-```
-
-Substitute the drone number to check the others (e.g. `/drone_1/role` → `seeker`,
-`/drone_2/role` → `executor`).
 
 ---
 
@@ -97,21 +32,21 @@ Substitute the drone number to check the others (e.g. `/drone_1/role` → `seeke
 
 The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) runs the swarm by role, streaming waypoints to `/gcs/drone_<id>/control` in the arena frame (`id · x · y · height`). A 5 s start-up grace period precedes any command, and the active team (LH/red or RH/blue) is read live from RQT (`/gcs/system/team_color`).
 
-**Swarm control via LLM — demo only:** Ollama (Gemma) turns natural-language instructions into JSON/coordinate commands, but it is a standalone demo and is not in the finals control loop. Meaningful coordinate tasking needs a reliable absolute position reference (ArUco), which we couldn't stabilise in time, so all live flight is run by the deterministic Commander above.
+**Swarm control via LLM — demo only:** Ollama (Gemma) turns natural-language instructions into JSON/coordinate commands, but it is a standalone DEMO and is NOT in live on the finals. Meaningful coordinate tasking needs a reliable absolute position reference (ArUco Navigation), which we couldn't fully implement in time, so all live flight is run by the deterministic Commander above.
 
 **Waypoint execution (Manhattan):** the firmware converts each arena waypoint to NED and reaches it in axis-aligned legs (one axis at a time, no diagonals), each leg flown as a sequence of discrete steps — keeping motion predictable and obstacle handling simple.
 
-### Executor (drones 2 & 4)
+### Executor
 
 Capture opponent boxes, claimed exclusively so no two executors share a target: fly to the box → dwell for the 5 s cooldown → return along the box's Y to the zone border (X = 5 LH / 15 RH) → step 3 m clear (X = 8 LH / 12 RH) and hover.
 
-### Seeker (drones 1 & 3)
+### Seeker
 
 The only role that publishes box locations. Boxes found by the firmware are never overwritten; any still undiscovered at `--boxes-timeout` (default 2 min) get a predefined random position (`[RND]`).
 
-### Leader (drone 5)
+### Leader
 
-Monitors the home base while no boxes are captured *(in progress)*.
+Monitors the home base, if no boxes were captured.
 
 ---
 
@@ -153,18 +88,8 @@ drone-swarm-challenge-2026/
 
 ## Open Issues
 
-### Inertial drift
 
-Flying without a position correction reference, position error accumulates over time. A 5-minute aggressive inertial-only test (`log_63`, drone 4) showed visible drift; the safe mission envelope has not been formally quantified. A reliable absolute reference (ArUco or equivalent) is needed to bound this for longer missions.
+### ArUco navigation
 
-### ArUco navigation — unstabilised
+ArUco-based EKF fusion was developed, but not fully deployed in time for the finals. ArUco is therefore used only for box detection, not navigation.
 
-ArUco-based EKF fusion was developed but could not be stabilised in time for the finals. The core problem is the optical centre of the OV5647 sensor: the physical centre cannot be reached via register configuration (X_ADDR changes are only ~22% effective), leaving an uncorrected systematic bias in the world-pose estimate that feeds into the position correction. ArUco is therefore used only for box detection, not navigation.
-
-### Box detection — unverified correctness
-
-Box position detection logic has not been formally validated end-to-end. Detection works in testing but the mapping from image coordinates to arena coordinates has not been double-checked against ground truth under finals conditions.
-
-### Frame mismatch in ArUco approach task
-
-`drone-comms-esp32s3/main/main.c` (`aruco_approach_task`) — `hold_y = vision_pose_valid ? vp_y : px4_pos_y` mixes arena-frame `vp_y` with NED `px4_pos_y`. Pre-existing bug; affects only the ArUco-spin approach feature, not the waypoint path. Fix: convert the vision branch to NED (`ned_offset_y - vp_y`).
