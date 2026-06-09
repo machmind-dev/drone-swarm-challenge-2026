@@ -24,6 +24,30 @@ Firmware is compiled and flashed from desktop shortcuts on the PC.
 
 > **Note:** To avoid versioning issues, code is built and compiled inside Docker.
 
+### Vision Module Configuration (ESP32-P4)
+
+#### Camera Exposure Tuning
+
+```cpp
+#define CONFIG_VISION_AEC_TARGET 15   // ← tune per venue
+```
+
+| Value | Sensor target | Use when |
+|-------|--------------|----------|
+| 47 | ~91% (max) | Dark indoor arena, no windows |
+| 20 | ~38% | Indoor with some ambient light |
+| 15 | ~29% | Daylit venue, windows visible — current default |
+| 10 | ~19% | Strong window glare / direct sunlight |
+
+#### Detection Resolution
+
+```cpp
+#define VISION_RES_QVGA   // 320×240 — ~8 m detection range (default)
+// #define VISION_RES_HVGA // 480×320 — ~12 m detection range, slower
+```
+
+---
+
 ### Comms Module Configuration (ESP32-S3)
 
 The ESP32-S3 must be configured with the micro-ROS agent IP and port before flashing. Open `idf.py menuconfig` → **micro-ROS Settings**.
