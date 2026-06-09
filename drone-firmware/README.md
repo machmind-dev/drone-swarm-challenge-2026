@@ -1,4 +1,4 @@
-# Mach Mind — Drone Firmware
+# Drone Firmware
 
 | Version | Event | Hardware | Vision Computing |
 |---------|-------|----------|-----------------|
