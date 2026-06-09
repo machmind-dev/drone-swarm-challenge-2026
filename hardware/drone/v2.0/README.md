@@ -1,6 +1,6 @@
 # Drone v2.0
 
-| Swarm Stack Bracket | Base mount LiDAR & Flow Motion Sensor | FC Mount Adapter 25.5 to 20 mm |
+| Swarm Stack Bracket | Base for LiDAR & Flow Motion | FC Mount Adapter 25.5 to 20 mm |
 |---|---|---|
 | [<img src="swarm_stack_bracket.png" width="260">](swarm_stack_bracket.stl) | [<img src="base_mount_lidar_flow_sensor_mk4.png" width="260">](base_mount_lidar_flow_sensor_mk4.stl) | [<img src="fc_mount_adapter_25_5 _to_20_mm.png" width="260">](fc_mount_adapter_25_5%20_to_20_mm.stl) |
 
