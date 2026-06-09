@@ -14,4 +14,4 @@ Drone assembled and ready for flight
 
 | | | |
 |---|---|---|
-| [<img src="../assembled_drone_version_2_0_photo_1.jpg" width="400">](../assembled_drone_version_2_0_photo_1.jpg) | [<img src="../assembled_drone_version_2_0_photo_2.jpg" width="400">](../assembled_drone_version_2_0_photo_2.jpg) | [<img src="../assembled_drone_version_2_0_photo_3.jpg" width="400">](../assembled_drone_version_2_0_photo_3.jpg) |
+| [<img src="../assembled_drone_version_2_0_photo_1.jpg" width="260">](../assembled_drone_version_2_0_photo_1.jpg) | [<img src="../assembled_drone_version_2_0_photo_2.jpg" width="260">](../assembled_drone_version_2_0_photo_2.jpg) | [<img src="../assembled_drone_version_2_0_photo_3.jpg" width="260">](../assembled_drone_version_2_0_photo_3.jpg) |
