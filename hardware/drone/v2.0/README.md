@@ -10,9 +10,9 @@
 
 ---
 
-<img src="../all_drones_being_prepared_for_flight.jpg" width="868">
+Drones assembled and ready for first flight test as formation of five units
 
-Drone assembled and ready for flight
+<img src="../all_drones_being_prepared_for_flight.jpg" width="868">
 
 | | | |
 |---|---|---|
