@@ -30,3 +30,5 @@ Schematics and board design: **Autodesk Eagle** (`.sch` / `.brd`)
 **Note 2:** BEC must share a common ground with the Swarm Stack.
 
 **Note 3:** Pinout was modified in the latest version — Waveshare ESP32-P4 with and without WiFi module have different pinouts.
+
+**Note 4:** C6 module with WiFi 6 is not used and meant for the future.
