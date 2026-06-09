@@ -1,5 +1,13 @@
 # Swarm Command and Control Tools
 
+**SDC26 Commander** — [sdc26_commander.py](sdc26_commander.py)
+
+Swarm orchestrator — assigns discovered boxes to executor drones, monitors leader home zone. Runs at 1 Hz, publishes waypoints over ROS2.
+
+<img src="../../launchers/sdc26_commander_terminal.jpg" width="868">
+
+---
+
 **Waypoint Commander** — [waypoint_commander.py](waypoint_commander.py)
 
 Sends arena coordinates to individual drones or all drones via Manhattan navigation. Format: `<drone_id|all> <x> <y> [z] [yaw_deg]`. Arena: x=0–20 m, y=0–10 m.
