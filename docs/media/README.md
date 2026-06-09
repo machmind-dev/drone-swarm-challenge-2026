@@ -21,12 +21,18 @@ Photos from crash and repair incidents during development — documenting the ha
 
 ## [gcs/](gcs/)
 
-Ground control station screenshots — RViz, ROS image streams, and ArUco testing.
-
-| | | |
-|---|---|---|
-| ![](gcs/rviz-first-test-1.png) | ![](gcs/rviz-first-test-2.png) | ![](gcs/image-stream-ros.png) |
-| ![](gcs/aruco-offboard-1.jpeg) | ![](gcs/aruco-offboard-2.jpeg) | ![](gcs/aruco-offboard-3.jpeg) |
+<table>
+<tr>
+<td><img src="gcs/rviz-first-test-1.png"></td>
+<td><img src="gcs/rviz-first-test-2.png"></td>
+<td><img src="gcs/image-stream-ros.png"></td>
+</tr>
+<tr>
+<td><img src="gcs/aruco-offboard-1.jpeg"></td>
+<td><img src="gcs/aruco-offboard-2.jpeg"></td>
+<td><img src="gcs/aruco-offboard-3.jpeg"></td>
+</tr>
+</table>
 
 ---
 
