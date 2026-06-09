@@ -7,6 +7,12 @@
 
 ---
 
+## Drone Hardware
+
+Hardware documentation (PCB, schematics, part list) is located at [hardware/drone/v2.0](https://github.com/machmind-dev/drone-swarm-challenge-2026/tree/main/hardware/drone/v2.0).
+
+---
+
 ## PX4 Flight Controller Settings
 
 Parameter file: [`PX4_settings.params`](PX4_settings.params)
