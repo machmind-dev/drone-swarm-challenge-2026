@@ -24,13 +24,12 @@ docker compose up -d
 
 | Command | Description |
 |---------|-------------|
-| `idf.py set-target esp32p4` | Set the target chip — run once after first container start (**P4 only**) |
+| `idf.py set-target esp32p4` | Set the target chip to ESP32-P4 — run once after first container start |
+| `idf.py set-target esp32s3` | Set the target chip to ESP32-S3 — run once after first container start |
 | `idf.py menuconfig` | Open interactive Kconfig menu to change settings (agent IP, drone ID, etc.) |
 | `idf.py build` | Compile the firmware |
 | `idf.py fullclean` | Delete the entire build directory — use when switching targets or after config changes |
 | `idf.py -p /dev/ttyACM0 flash` | Flash the compiled firmware to the board |
-| `idf.py -p /dev/ttyACM0 monitor` | Open serial monitor (921600 baud) |
-| `idf.py -p /dev/ttyACM0 flash monitor` | Flash and immediately open the monitor |
 
 ### ESP32-P4 example
 
