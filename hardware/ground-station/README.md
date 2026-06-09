@@ -20,8 +20,8 @@ Ground Control Station assembled and in use for flight testing
 
 | No name toolbox | Monitor trial fit |
 |---|---|
-| <img src="gcs_assembly_0.png" width="200"> | <img src="gcs_assembly_1.jpg" width="200"> |
+| <img src="gcs_assembly_0.png" width="420"> | <img src="gcs_assembly_1.jpg" width="420"> |
 
 | Assembling 1 | Assembling 2 |
 |---|---|
-| <img src="gcs_assembly_2.jpg" width="200"> | <img src="gcs_assembly_3.jpg" width="200"> |
+| <img src="gcs_assembly_2.jpg" width="420"> | <img src="gcs_assembly_3.jpg" width="420"> |
