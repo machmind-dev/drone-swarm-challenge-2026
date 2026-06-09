@@ -6,7 +6,7 @@
 
 | Swarm Stack PCB | Spoiler Block (for RFID) | Spoiler Block Bracket |
 |---|---|---|
-| <img src="PCB/pcb_board.png" width="260"> | [<img src="spoiler_block_mk3.png" width="260">](spoiler_block_mk3.stl) | [<img src="spoiler_block_bracket.png" width="260">](spoiler_block_bracket.stl) |
+| [<img src="PCB/pcb_board.png" width="260">](https://github.com/machmind-dev/drone-swarm-challenge-2026/tree/main/hardware/drone/v2.0/PCB) | [<img src="spoiler_block_mk3.png" width="260">](spoiler_block_mk3.stl) | [<img src="spoiler_block_bracket.png" width="260">](spoiler_block_bracket.stl) |
 
 ---
 
