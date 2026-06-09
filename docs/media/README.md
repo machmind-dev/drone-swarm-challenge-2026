@@ -12,10 +12,18 @@ Flight test recordings and photos, in chronological order.
 
 Photos from crash and repair incidents during development — documenting the hardware iteration process.
 
-| | | |
-|---|---|---|
-| ![](flight-testing/crashes/crash-1.jpeg) | ![](flight-testing/crashes/crash-2.jpeg) | ![](flight-testing/crashes/crash-3.jpg) |
-| ![](flight-testing/crashes/crash-4.jpg) | ![](flight-testing/crashes/crash-5.jpg) | ![](flight-testing/crashes/crash-6.jpg) |
+<table>
+<tr>
+<td><img src="flight-testing/crashes/crash-1.jpeg"></td>
+<td><img src="flight-testing/crashes/crash-2.jpeg"></td>
+<td><img src="flight-testing/crashes/crash-3.jpg"></td>
+</tr>
+<tr>
+<td><img src="flight-testing/crashes/crash-4.jpg"></td>
+<td><img src="flight-testing/crashes/crash-5.jpg"></td>
+<td><img src="flight-testing/crashes/crash-6.jpg"></td>
+</tr>
+</table>
 
 ---
 
