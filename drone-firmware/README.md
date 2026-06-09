@@ -1,5 +1,12 @@
 # Mach Mind — Drone Firmware
 
+| Version | Event | Hardware | Vision Computing |
+|---------|-------|----------|-----------------|
+| [v1.0](v1.0/) | SDC 2026 Qualifying | Single ESP32-S3 (COTS dev board) | Off-board (GCS) |
+| [v2.0](v2.0/) | SDC 2026 Finals | Dual ESP32-P4 + ESP32-S3 (custom PCB) | On-board (ESP32-P4) |
+
+---
+
 ## PX4 Flight Controller Settings
 
 Parameter file: [`PX4_settings.params`](PX4_settings.params)
