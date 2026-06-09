@@ -23,7 +23,7 @@ Drones assembled and ready for first flight test as formation of five units
 </tr><tr>
 <td><a href="../assembling_drone_version_2_0_photo_4.jpg"><img src="../assembling_drone_version_2_0_photo_4.jpg" width="260"></a></td>
 <td><a href="../assembling_drone_version_2_0_photo_5.jpg"><img src="../assembling_drone_version_2_0_photo_5.jpg" width="260"></a></td>
-<td><a href="../assembling_drone_version_2_0_photo_6.jpg"><img src="../assembling_drone_version_2_0_photo_6.jpg" width="260"></a></td>
+<td><a href="../assembling_drone_version_2_0_photo_7.jpg"><img src="../assembling_drone_version_2_0_photo_7.jpg" width="260"></a></td>
 </tr><tr>
 <td><a href="../testing_idea_after_qualifyings.jpg"><img src="../testing_idea_after_qualifyings.jpg" width="260"></a></td>
 <td><a href="../assembling_first_pcb.jpg"><img src="../assembling_first_pcb.jpg" width="260"></a></td>
