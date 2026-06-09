@@ -32,7 +32,7 @@ The file is a full parameter dump. The table below covers only the parameters th
 |-----------|-------|--------|
 | `COM_ARM_WO_GPS` | 1 | Allow arming without GPS fix — indoor arena, no GPS |
 | `COM_RC_IN_MODE` | 3 | RC input disabled; drone is controlled via MAVLink (GCS / companion) |
-| `EKF2_HGT_REF` | 2 (Vision) | Use vision (ArUco) as height reference instead of barometer |
+| `EKF2_HGT_REF` | 3 (Range sensor) | Use MTF-01 LiDAR rangefinder as height reference |
 | `EKF2_EV_CTRL` | 15 | Enable all external-vision fusion bits: horizontal pos + vertical pos + velocity + yaw |
 | `EKF2_EV_NOISE_MD` | 0 | Trust `EVP_NOISE` / `EVV_NOISE` values set below, not EV message covariance |
 | `EKF2_EVP_NOISE` | 0.10 m | Position noise for vision pose input |
