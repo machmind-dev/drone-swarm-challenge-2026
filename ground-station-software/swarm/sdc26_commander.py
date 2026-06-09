@@ -77,7 +77,12 @@ ARRIVAL_HOLD_TICKS  = 4       # consecutive in-radius ticks to count as captured
 CONTROL_PERIOD_S    = 0.5     # control loop rate (2 Hz)
 STARTUP_DELAY_S     = 5.0     # grace period after start before any drone command
 COMMAND_COOLDOWN_S  = 5.0     # post-arrival dwell at the box before returning (COOLDOWN)
-SEEKER_STAGGER_S    = 3.0     # delay between consecutive seeker launch commands
+RE_INTERCEPT_DELAY_S = 120.0  # 2 min after fallback posted (= 4 min total) before re-intercept
+SEEKER_STAGGER_S         = 3.0   # delay between consecutive seeker launch commands
+SEEKER_PATROL_INTERVAL_S = 60.0  # dwell at arrival waypoints before next leg
+SEEKER_CONFLICT_DELAY_S  = 5.0   # extra delay for D3 at steps where Y legs would collide
+ARENA_MID_X              = 10.0  # midline; seekers descend after crossing this X
+SEEKER_HOVER_ALT_M       = 0.5   # altitude once past the midline
 
 # Leader centre-arena waypoint. Drone 5 hovers here and faces its own team zone:
 # LH scene (red)  → yaw 180° (−X, toward x=0..7)
@@ -93,12 +98,55 @@ LEADER_YAW          = {'red': 180.0, 'blue': 0.0}
 ZONE_BORDER_X = {'red': 5.0,  'blue': 15.0}
 ZONE_OUT_X    = {'red': 8.0,  'blue': 12.0}
 
-# Seeker search waypoints in the opponent area, by scene then drone. After the
-# start-up grace each Seeker is sent here once and hovers until the next waypoint.
-# (Seekers are drones 1 & 3; LH=red → x=15, RH=blue → x=5.)
-SEEKER_WP = {
-    'red':  {1: (15.0, 5.0), 3: (15.0, 3.0)},   # LH scene
-    'blue': {1: (5.0, 5.0),  3: (5.0, 3.0)},    # RH scene
+# Seeker patrol sequences: (x, y, is_arrival).
+#   is_arrival=True  → deep column waypoint; drone dwells SEEKER_PATROL_INTERVAL_S
+#                       before moving on.  Approached on X axis (final leg is X).
+#   is_arrival=False → near-column pass-through; advance immediately on arrival.
+# Both seekers depart their arrival points simultaneously each minute.
+SEEKER_PATROL = {
+    'red': {                              # LH scene — deep col x=15, near col x=12
+        1: [                              # Drone 1
+            (15.0, 5.0, True),
+            (12.0, 7.0, False),
+            (15.0, 7.0, True),
+            (12.0, 5.0, False),
+            (15.0, 5.0, True),
+            (12.0, 3.0, True),
+            (15.0, 3.0, True),
+        ],
+        3: [                              # Drone 3
+            (15.0, 3.0, True),
+            (12.0, 5.0, False),
+            (15.0, 5.0, True),            # ← D3 departs here with +5 s conflict delay
+            (12.0, 7.0, False),
+            (15.0, 7.0, True),
+        ],
+    },
+    'blue': {                             # RH scene — deep col x=5, near col x=8
+        1: [                              # Drone 1
+            (5.0, 5.0, True),
+            (8.0, 3.0, False),
+            (5.0, 3.0, True),
+            (8.0, 5.0, False),
+            (5.0, 5.0, True),
+            (8.0, 7.0, False),
+            (5.0, 7.0, True),
+        ],
+        3: [                              # Drone 3
+            (5.0, 3.0, True),             # ← D3 departs here with +5 s conflict delay
+            (8.0, 5.0, False),
+            (5.0, 5.0, True),
+            (8.0, 7.0, False),
+            (5.0, 7.0, True),
+        ],
+    },
+}
+
+# wp_idx values (0-based) at which D3 must add SEEKER_CONFLICT_DELAY_S to its
+# departure timer to prevent opposite-direction Y legs at the near column.
+SEEKER_CONFLICT_STEPS = {
+    'red':  {3: {2}},   # D3 departs from wp_idx=2 (15,5) in LH scene
+    'blue': {3: {0}},   # D3 departs from wp_idx=0  (5,3) in RH scene
 }
 
 # Random fallback positions for still-missing opponent boxes, by our scene/team.
@@ -158,6 +206,11 @@ class SDC26Commander(Node):
         self._executor_launched_t = {}       # id -> timestamp of last dispatch to a box
         self._seeker_target = {}             # seeker id -> (x, y) last commanded
         self._seeker_launched_t = {}         # seeker id -> timestamp of last launch command
+        # Per-seeker patrol state machine:
+        #   idle → to_wp → at_arrival → to_wp → … → hover
+        self._seeker = {sid: {'phase': 'idle', 'wp_idx': 0, 'arr_ticks': 0,
+                               'depart_t': None, 'crossed_mid': False, 'team': None}
+                        for sid in self._seeker_ids()}
         self._leader_sent_team = None        # team for which leader was last dispatched
         # Per-leader state machine:  idle → to_centre → to_base → hover
         self._leader = {lid: {'phase': 'idle', 'target': None, 'arr_ticks': 0}
@@ -166,6 +219,9 @@ class SDC26Commander(Node):
         self._first_render = True            # full clear once, then overwrite in place
         self._fallback_applied = False
         self._fallback_ids = set()           # ids we publish as fallback (ignore echoes)
+        self._visited_fallback_ids = set()   # fallback ids already visited once; cleared at re-intercept
+        self._reintercept_done = False       # True once the 4-min re-intercept has fired
+        self._leader_as_executor = False     # True once Leader is promoted to emergency executor
         self._start_t = self.get_clock().now()
 
         # ── QoS ─────────────────────────────────────────────────────────────
@@ -248,8 +304,18 @@ class SDC26Commander(Node):
     def _executor_ids(self):
         return [i for i, r in ROLES.items() if r == 'executor']
 
+    def _active_executor_ids(self):
+        """Executor IDs currently active. Includes D5 when promoted to emergency executor."""
+        ids = self._executor_ids()
+        return ids + [5] if self._leader_as_executor else ids
+
     def _leader_ids(self):
         return [i for i, r in ROLES.items() if r == 'leader']
+
+    def _in_own_zone(self, x: float) -> bool:
+        """True if x lies within our team's zone."""
+        x_min, x_max = RED_X if self.team == 'red' else BLUE_X
+        return x_min <= x <= x_max
 
     def _zone_x(self):
         """(border_x, out_x) for our team zone, by scene. LH/red: 5 → 8;
@@ -333,6 +399,8 @@ class SDC26Commander(Node):
             return   # hold until RQT publishes our team on /gcs/system/team_color
         self._update_box_registry()
         self._apply_fallback_if_due()
+        self._reintercept_if_due()
+        self._check_executor_loss()
         if self._elapsed_s() < STARTUP_DELAY_S:
             return   # startup grace period — track boxes but send no commands yet
         self._update_seekers()
@@ -381,54 +449,194 @@ class SDC26Commander(Node):
             self.get_logger().info(
                 f'boxes-timeout: fallback box id={bid} -> ({x:.0f}, {y:.0f}) [RND]')
 
+    def _check_executor_loss(self):
+        """If both executors (D2 and D4) are reported disarmed, promote the Leader
+        (D5) to act as a third executor from its current position. Fires once and
+        is irreversible for the remainder of the match."""
+        if self._leader_as_executor:
+            return
+        if not all(self.drone_states.get(ex, '') == 'disarmed'
+                   for ex in self._executor_ids()):
+            return
+        self._leader_as_executor = True
+        self._exec[5] = {'phase': 'idle', 'box': None, 'ref_y': None,
+                         'target': None, 'arr_ticks': 0}
+        self.get_logger().warn(
+            'BOTH executors disarmed — Leader D5 promoted to emergency executor')
+
+    def _reintercept_if_due(self):
+        """At DISCOVERY_TIMEOUT_S + RE_INTERCEPT_DELAY_S (4 min total), if any
+        fallback box still has no real detection, clear the visited-fallback set
+        so both executors are re-dispatched to those positions one more time.
+        Fires at most once; skipped if all fallback boxes were replaced by real
+        detections before the timer fires."""
+        if self._reintercept_done or not self._fallback_applied:
+            return
+        if self._elapsed_s() < DISCOVERY_TIMEOUT_S + RE_INTERCEPT_DELAY_S:
+            return
+        self._reintercept_done = True
+        still_fallback = any(b.get('source') == 'fallback' for b in self.boxes.values())
+        if not still_fallback:
+            self.get_logger().info(
+                're-intercept: all fallback boxes confirmed by real detections — skip')
+            return
+        self._visited_fallback_ids.clear()
+        self.get_logger().info(
+            're-intercept: 4-min check — unconfirmed fallback boxes remain, '
+            're-dispatching both executors')
+
     def _update_seekers(self):
-        """Send each Seeker (drones 1 & 3) to its fixed scene waypoint in the
-        opponent area, then leave it hovering. Only re-commanded if the scene
-        (and thus the target) changes — so it holds 'till the next waypoint'.
-        Seekers are staggered by SEEKER_STAGGER_S to avoid mid-air conflicts."""
-        wps = SEEKER_WP.get(self.team, {})
+        """Seeker patrol state machine: idle → to_wp ⇄ at_arrival → … → hover.
+
+        Each seeker follows SEEKER_PATROL[team][drone_id]:
+          - Deep-column waypoints (is_arrival=True): drone dwells for
+            SEEKER_PATROL_INTERVAL_S (60 s) then departs simultaneously with
+            the other seeker.  D3 adds SEEKER_CONFLICT_DELAY_S (5 s) at the
+            two steps where simultaneous departure would put their Y legs on the
+            near column going in opposite directions.
+          - Near-column waypoints (is_arrival=False): advance immediately on
+            arrival — treated as turn points, not dwell positions.
+
+        Altitude: start_alt (1.0 m) until the drone crosses ARENA_MID_X, then
+        SEEKER_HOVER_ALT_M (0.5 m) for all subsequent legs.
+        Resets from scratch on team change."""
+        seq_map = SEEKER_PATROL.get(self.team, {})
         now = self._now_s()
         for sid in self._seeker_ids():
-            target = wps.get(sid)
-            if target is None or self._seeker_target.get(sid) == target:
+            seq = seq_map.get(sid)
+            if not seq:
                 continue
-            # Enforce stagger: skip this seeker if another was launched too recently.
-            last_launch = max(self._seeker_launched_t.values(), default=0.0)
-            if now - last_launch < SEEKER_STAGGER_S and sid not in self._seeker_launched_t:
-                continue
-            self._seeker_target[sid] = target
-            self._seeker_launched_t[sid] = now
-            self._send_control(sid, target[0], target[1], self.start_alt)
-            self.get_logger().info(
-                f'seeker D{sid} → ({target[0]:.0f}, {target[1]:.0f}) hover')
+            rec = self._seeker[sid]
+
+            # Reset on team change.
+            if rec['team'] != self.team:
+                rec.update(phase='idle', wp_idx=0, arr_ticks=0,
+                           depart_t=None, crossed_mid=False, team=self.team)
+                self._seeker_target.pop(sid, None)
+
+            phase = rec['phase']
+
+            if phase == 'idle':
+                # Stagger initial launches to avoid mid-air conflict at takeoff.
+                last = max(self._seeker_launched_t.values(), default=0.0)
+                if now - last < SEEKER_STAGGER_S and sid not in self._seeker_launched_t:
+                    continue
+                self._seeker_depart(sid, seq, 0, now)
+
+            elif phase == 'to_wp':
+                pose = self.drone_poses.get(sid)
+                if pose is None:
+                    continue
+
+                # Descend to hover altitude on first midline crossing.
+                if not rec['crossed_mid']:
+                    crossed = (self.team == 'red'  and pose[0] >= ARENA_MID_X) or \
+                              (self.team == 'blue' and pose[0] <= ARENA_MID_X)
+                    if crossed:
+                        rec['crossed_mid'] = True
+                        wx, wy, _ = seq[rec['wp_idx']]
+                        self._send_control(sid, wx, wy, SEEKER_HOVER_ALT_M)
+                        self.get_logger().info(
+                            f'seeker D{sid} past midline → {SEEKER_HOVER_ALT_M:.1f}m')
+
+                # Arrival detection.
+                wx, wy, is_arrival = seq[rec['wp_idx']]
+                if _dist(pose, (wx, wy)) <= ARRIVAL_RADIUS_M:
+                    rec['arr_ticks'] += 1
+                else:
+                    rec['arr_ticks'] = 0
+
+                hold = ARRIVAL_HOLD_TICKS if is_arrival else 1
+                if rec['arr_ticks'] < hold:
+                    continue
+
+                if is_arrival:
+                    # Start dwell timer; add conflict delay for D3 where needed.
+                    conflict = SEEKER_CONFLICT_STEPS.get(self.team, {}).get(sid, set())
+                    extra = SEEKER_CONFLICT_DELAY_S if rec['wp_idx'] in conflict else 0.0
+                    rec.update(phase='at_arrival', arr_ticks=0,
+                               depart_t=now + SEEKER_PATROL_INTERVAL_S + extra)
+                    self.get_logger().info(
+                        f'seeker D{sid} arrived ({wx:.0f},{wy:.0f}) '
+                        f'→ dwell {SEEKER_PATROL_INTERVAL_S + extra:.0f}s')
+                else:
+                    # Pass-through: immediately advance to the next waypoint.
+                    next_idx = rec['wp_idx'] + 1
+                    if next_idx < len(seq):
+                        self._seeker_depart(sid, seq, next_idx, now)
+                    else:
+                        rec['phase'] = 'hover'
+
+            elif phase == 'at_arrival':
+                if now < rec['depart_t']:
+                    continue
+                next_idx = rec['wp_idx'] + 1
+                if next_idx < len(seq):
+                    self._seeker_depart(sid, seq, next_idx, now)
+                else:
+                    rec['phase'] = 'hover'
+                    self.get_logger().info(f'seeker D{sid} patrol complete → hover')
+
+            # 'hover': no further commands
+
+    def _seeker_depart(self, sid: int, seq: list, wp_idx: int, now: float):
+        """Command seeker sid to waypoint wp_idx and update its state."""
+        wx, wy, _ = seq[wp_idx]
+        alt = SEEKER_HOVER_ALT_M if self._seeker[sid]['crossed_mid'] else self.start_alt
+        self._seeker[sid].update(phase='to_wp', wp_idx=wp_idx, arr_ticks=0)
+        self._seeker_target[sid] = (wx, wy)
+        self._seeker_launched_t[sid] = now
+        self._send_control(sid, wx, wy, alt)
+        kind = 'pass-thru' if not seq[wp_idx][2] else 'arrival'
+        self.get_logger().info(
+            f'seeker D{sid}[{wp_idx}] → ({wx:.0f},{wy:.0f}) '
+            f'alt={alt:.1f}m [{kind}]')
 
     def _assign_executors(self):
         """Assign opponent boxes to idle executors (nearest-first, no two on the
-        same box), then advance each executor's mission state machine."""
+        same box), then advance each executor's mission state machine.
+        Includes D5 when promoted to emergency executor."""
         self._claim_boxes_for_idle_executors()
-        for ex in self._executor_ids():
+        for ex in self._active_executor_ids():
             self._advance_executor(ex)
 
     def _claimed_boxes(self):
         return {r['box'] for r in self._exec.values() if r['box'] is not None}
 
     def _claim_boxes_for_idle_executors(self):
-        """Each idle executor claims the nearest unclaimed opponent box and is
-        sent there. Claims are exclusive so the two executors stay separate.
-        Executors are staggered by SEEKER_STAGGER_S to avoid mid-air conflicts."""
+        """Assign the next box to each idle executor based on priority:
+          Priority 1 (D2 & D4): opponent boxes in the opponent zone — nearest first.
+          Priority 2 (D2 only): opponent boxes detected in our own zone
+            (enemy has brought them here; D2 picks them up and exits).
+        Executors finish their current mission before taking the next one —
+        no interruption. Dispatches are staggered by SEEKER_STAGGER_S."""
         claimed = self._claimed_boxes()
-        opp = self._opponent_box_ids()
+        opp = set(self._opponent_box_ids())
+        # Split known boxes by location priority.
+        # Fallback boxes already visited are suppressed until the re-intercept fires.
+        opp_zone = [bid for bid, b in self.boxes.items()
+                    if bid in opp and not self._in_own_zone(b['x'])
+                    and bid not in self._visited_fallback_ids]
+        base_def = [bid for bid, b in self.boxes.items()
+                    if bid in opp and self._in_own_zone(b['x'])
+                    and bid not in self._visited_fallback_ids]
         now = self._now_s()
-        for ex in self._executor_ids():
+        for ex in self._active_executor_ids():
             rec = self._exec[ex]
             if rec['phase'] != 'idle':
-                continue
-            cands = [bid for bid in self.boxes if bid in opp and bid not in claimed]
-            if not cands:
                 continue
             # Enforce stagger: skip if another executor was dispatched too recently.
             last_launch = max(self._executor_launched_t.values(), default=0.0)
             if now - last_launch < SEEKER_STAGGER_S and ex not in self._executor_launched_t:
+                continue
+            # Priority 1: opponent-zone boxes (both executors).
+            cands = [bid for bid in opp_zone if bid not in claimed]
+            # Priority 2: base-defense boxes (D2 only, when no P1 target available).
+            defense = False
+            if not cands and ex == 2:
+                cands = [bid for bid in base_def if bid not in claimed]
+                defense = bool(cands)
+            if not cands:
                 continue
             pose = self.drone_poses.get(ex)
             if pose is not None:
@@ -441,11 +649,13 @@ class SDC26Commander(Node):
             claimed.add(bid)
             self._executor_launched_t[ex] = now
             self._send_control(ex, bx, by, EXECUTOR_ALT_M)
+            tag = ' [BASE DEFENSE]' if defense else ''
             self.get_logger().info(
-                f'executor D{ex} → box {bid} ({bx:.1f}, {by:.1f})')
+                f'executor D{ex}{tag} → box {bid} ({bx:.1f}, {by:.1f})')
 
     def _advance_executor(self, ex):
-        """Step one executor through to_box → dwell → to_border → to_out → hover."""
+        """Step one executor through to_box → dwell → to_border → to_out → idle.
+        Returning to idle (not hover) allows re-assignment to the next priority box."""
         rec = self._exec[ex]
         phase = rec['phase']
         if phase in ('idle', 'hover'):
@@ -477,8 +687,11 @@ class SDC26Commander(Node):
             self.get_logger().info(f'executor D{ex} → out ({out_x:.0f}, {ref_y:.1f})')
 
         elif phase == 'to_out':
-            rec.update(phase='hover', arr_ticks=0)
-            self.get_logger().info(f'executor D{ex} mission complete → hover')
+            bid = rec['box']
+            if bid is not None and bid in self._fallback_ids:
+                self._visited_fallback_ids.add(bid)
+            rec.update(phase='idle', box=None, ref_y=None, target=None, arr_ticks=0)
+            self.get_logger().info(f'executor D{ex} mission complete → idle (ready for next)')
 
     def _leader_arrived(self, lid, target):
         """Arrival check for the leader (same geometry as executor)."""
@@ -498,8 +711,9 @@ class SDC26Commander(Node):
           2. to_base:   on arrival move to LEADER_BASE_WP at LEADER_BASE_ALT_M (0.5 m)
                LH/red  → (8, 5)   RH/blue → (12, 5)
         Waits SEEKER_STAGGER_S after last seeker departure before first move.
-        Resets and re-dispatches from scratch if team colour changes."""
-        if not self.team:
+        Resets and re-dispatches from scratch if team colour changes.
+        Skipped entirely once D5 is promoted to emergency executor."""
+        if not self.team or self._leader_as_executor:
             return
 
         # Reset state machine on team change so the correct base WP is used.
@@ -677,22 +891,30 @@ class SDC26Commander(Node):
             hdg = self.drone_hdg.get(n)
             hdg_s = f'{hdg:.0f}°' if hdg is not None else '—'
             rec = self._exec.get(n)
-            st = self._seeker_target.get(n)
+            sk  = self._seeker.get(n, {})
+            st  = self._seeker_target.get(n)
             if rec and rec['phase'] == 'hover':
                 wp_s = 'hover'
             elif rec and rec['target'] is not None:
                 tx, ty = rec['target']
                 wp_s = f'({tx:.1f}, {ty:.1f})'
+            elif sk.get('phase') == 'hover':
+                wp_s = 'hover'
             elif st is not None:
                 wp_s = f'({st[0]:.1f}, {st[1]:.1f})'
             else:
                 wp_s = '—'
+            # Cooldown: executor box dwell OR seeker patrol dwell
             cu = self._cooldown_until.get(n)
-            if cu is None:
-                cd_s = '—'
-            else:
+            depart_t = sk.get('depart_t')
+            if cu is not None:
                 rem = cu - now
                 cd_s = f'{rem:.1f}s' if rem > 0 else 'ready'
+            elif depart_t is not None and sk.get('phase') == 'at_arrival':
+                rem = depart_t - now
+                cd_s = f'{rem:.0f}s' if rem > 0 else 'go'
+            else:
+                cd_s = '—'
             lines.append(f'   {n:<6}{status:<15}{role:<9}{loc_s:<13}'
                          f'{alt_s:<6}{hdg_s:<6}{wp_s:<13}{cd_s:<8}')
 
