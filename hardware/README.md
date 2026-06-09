@@ -1,8 +1,20 @@
 # Hardware
 
-## Drone
+## Drone Version 2.0
 
-See [drone/](drone/) for drone hardware details and version comparison.
+| Swarm Stack Bracket | Base for LiDAR & Flow Motion | FC adapter 25.5 to 20 mm |
+|---|---|---|
+| [<img src="drone/v2.0/swarm_stack_bracket.png" width="260">](drone/v2.0/swarm_stack_bracket.stl) | [<img src="drone/v2.0/base_mount_lidar_flow_sensor_mk4.png" width="260">](drone/v2.0/base_mount_lidar_flow_sensor_mk4.stl) | [<img src="drone/v2.0/fc_mount_adapter_25_5 _to_20_mm.png" width="260">](drone/v2.0/fc_mount_adapter_25_5%20_to_20_mm.stl) |
+
+| Swarm Stack PCB | Spoiler Block (for RFID) | Spoiler Block Bracket |
+|---|---|---|
+| <img src="drone/v2.0/PCB/pcb_board.png" width="260"> | [<img src="drone/v2.0/spoiler_block_mk3.png" width="260">](drone/v2.0/spoiler_block_mk3.stl) | [<img src="drone/v2.0/spoiler_block_bracket.png" width="260">](drone/v2.0/spoiler_block_bracket.stl) |
+
+Drone assembled and ready for flight
+
+| | | |
+|---|---|---|
+| [<img src="drone/assembled_drone_version_2_0_photo_1.jpg" width="260">](drone/assembled_drone_version_2_0_photo_1.jpg) | [<img src="drone/assembled_drone_version_2_0_photo_2.jpg" width="260">](drone/assembled_drone_version_2_0_photo_2.jpg) | [<img src="drone/assembled_drone_version_2_0_photo_3.jpg" width="260">](drone/assembled_drone_version_2_0_photo_3.jpg) |
 
 ---
 
