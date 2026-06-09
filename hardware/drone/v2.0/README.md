@@ -29,3 +29,21 @@ Drones assembled and ready for first flight test as formation of five units
 <td><a href="../assembling_first_pcb.jpg"><img src="../assembling_first_pcb.jpg" width="260"></a></td>
 <td><a href="../old_swarm_stack_vs_new.jpg"><img src="../old_swarm_stack_vs_new.jpg" width="260"></a></td>
 </tr></table>
+
+---
+
+## Part List
+
+| # | Part Number | Description | Link |
+|---|-------------|-------------|------|
+| 1 | GEP-CT30 Cinebot30 | Airframe | [AliExpress](https://de.aliexpress.com/item/1005009477649601.html) |
+| 2 | NxtPX4v2 H743 & BMI088 | Flight Controller | [AliExpress](https://de.aliexpress.com/item/1005006044318535.html) |
+| 3 | GEPRC SPEEDX2 1804 2450KV | Motors | [AliExpress](https://de.aliexpress.com/item/1005009432319223.html) |
+| 4 | HQPROP T3X1.5X3 | Propellers | [AliExpress](https://de.aliexpress.com/item/1005005411737841.html) |
+| 5 | Tattu 1100mAh 15.2V 60C 4S1P | Battery | [Gens Ace](https://gensace.de/products/taa11004s60x3) |
+| 6 | MicoAir MTF-01 | Optical Flow & LiDAR Sensor | [AliExpress](https://de.aliexpress.com/item/1005005545782306.html) |
+| 7 | VL53L1X | ToF Laser Ranger (×6) | [AliExpress](https://de.aliexpress.com/item/1005009800135193.html) |
+| 8 | OV5647 MIPI-CSI | Camera Module | [Amazon](https://www.amazon.de/dp/B07G9VLPZH) |
+| 9 | ESP32-S3 | Comms Module | [Amazon](https://www.amazon.de/dp/B0C69FFVHH) |
+| 10 | ESP32-P4 | Vision Module | [Amazon](https://www.amazon.de/dp/B0FKN8GCW6) |
+| 11 | Seeed Studio 2.4GHz Rod Antenna | WiFi Antenna | [AliExpress](https://de.aliexpress.com/item/1005006991095171.html) |
