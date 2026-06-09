@@ -4,7 +4,7 @@
 
 Flight test recordings and photos, in chronological order.
 
-| First flight — 24 March 2026 | Five-unit flight — May 2026 | Basic swarming — June 2026 |
+| First flight — 24 March 2026 | First flight 5 units — May 2026 | Basic swarming — June 2026 |
 |---|---|---|
 | [<img src="flight-testing/first-flight.jpg" width="260">](https://github.com/machmind-dev/drone-swarm-challenge-2026/blob/main/docs/media/flight-testing/first-flight.mp4) | [<img src="flight-testing/five-unit-flight-thumb.png" width="260">](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7463683893968187392) | [<img src="flight-testing/basic-swarm-thumb.png" width="260">](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7469555928992940034) |
 
