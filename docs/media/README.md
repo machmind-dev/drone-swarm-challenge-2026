@@ -6,7 +6,7 @@ Flight test recordings and photos, in chronological order.
 
 | First flight — 24 March 2026 | Five-unit flight | Basic swarming |
 |---|---|---|
-| [![First ever test flight, 24 March 2026](flight-testing/first-flight.jpg)](https://github.com/machmind-dev/drone-swarm-challenge-2026/blob/main/docs/media/flight-testing/first-flight.mp4) | [![Five-unit flight on LinkedIn](flight-testing/five-unit-flight-thumb.png)](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7469555928992940034) | [![Basic swarming on LinkedIn](flight-testing/basic-swarm-thumb.png)](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7463683893968187392) |
+| [<img src="flight-testing/first-flight.jpg" width="260">](https://github.com/machmind-dev/drone-swarm-challenge-2026/blob/main/docs/media/flight-testing/first-flight.mp4) | [<img src="flight-testing/five-unit-flight-thumb.png" width="260">](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7469555928992940034) | [<img src="flight-testing/basic-swarm-thumb.png" width="260">](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7463683893968187392) |
 
 ### [flight-testing/hardware-iterations/](flight-testing/hardware-iterations/)
 
