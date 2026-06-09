@@ -47,39 +47,48 @@ source /opt/ros/jazzy/setup.bash
 
 <table>
 <tr>
-<td><img src="../GCS_GUI_ico.png" width="50"><br><b>GCS - Mach Mind</b><br><code>launch.sh</code></td>
+<td><img src="../GCS_GUI_ico.png" width="150"><br><b>GCS - Mach Mind</b></td>
+<td><code>launch.sh</code></td>
 <td>Launches ROS2, uROS, RViz, rqt, troubleshooting</td>
 </tr>
 <tr>
-<td><img src="../GCS_Buttons_ico.png" width="50"><br><b>Mach Mind - Buttons</b><br><code>launch-buttons.sh</code></td>
+<td><img src="../GCS_Buttons_ico.png" width="150"><br><b>Mach Mind - Buttons</b></td>
+<td><code>launch-buttons.sh</code></td>
 <td>Physical buttons publishing state over ROS2</td>
 </tr>
 <tr>
-<td><img src="../swam_commander_ico.png" width="50"><br><b>GCS — SDC26 Commander</b><br><code>launch-sdc26-commander.sh</code></td>
+<td><img src="../swam_commander_ico.png" width="150"><br><b>GCS — SDC26 Commander</b></td>
+<td><code>launch-sdc26-commander.sh</code></td>
 <td>Swarm orchestrator — assigns boxes to executors, leader home-check</td>
 </tr>
 <tr>
-<td><img src="../swarm_ico.png" width="50"><br><b>GCS — Waypoint Commander</b><br><code>launch-waypoint-commander.sh</code></td>
+<td><img src="../swarm_ico.png" width="150"><br><b>GCS — Waypoint Commander</b></td>
+<td><code>launch-waypoint-commander.sh</code></td>
 <td>Send arena coordinates to drones via Manhattan navigation</td>
 </tr>
 <tr>
-<td><img src="../swarm_ico.png" width="50"><br><b>GCS — Keyboard Control</b><br><code>launch-swarm-mission.sh</code></td>
+<td><img src="../swarm_ico.png" width="150"><br><b>GCS — Keyboard Control</b></td>
+<td><code>launch-swarm-mission.sh</code></td>
 <td>Real-time keyboard control of a single drone</td>
 </tr>
 <tr>
-<td><img src="../swarm_ico.png" width="50"><br><b>GCS — Swarm Ollama</b><br><code>launch-swarm-ollama.sh</code></td>
+<td><img src="../swarm_ico.png" width="150"><br><b>GCS — Swarm Ollama</b></td>
+<td><code>launch-swarm-ollama.sh</code></td>
 <td>Launches Ollama services over ROS2</td>
 </tr>
 <tr>
-<td><img src="../stream_ico.png" width="50"><br><b>GCS — Arena View</b><br><code>launch-arena-view.sh</code></td>
+<td><img src="../stream_ico.png" width="150"><br><b>GCS — Arena View</b></td>
+<td><code>launch-arena-view.sh</code></td>
 <td>Camera and ToF data live stream over ROS2</td>
 </tr>
 <tr>
-<td><img src="../vision_ico.png" width="50"><br><b>GCS — Vision</b><br><code>launch-vision.sh</code></td>
+<td><img src="../vision_ico.png" width="150"><br><b>GCS — Vision</b></td>
+<td><code>launch-vision.sh</code></td>
 <td>GCS ArUco detection via OpenCV (not used)</td>
 </tr>
 <tr>
-<td><img src="../idf_py_ico.png" width="50"><br><b>Mach Mind Node IDE</b><br><code>launch-node-ide.sh</code></td>
+<td><img src="../idf_py_ico.png" width="150"><br><b>Mach Mind Node IDE</b></td>
+<td><code>launch-node-ide.sh</code></td>
 <td>Firmware flashing for ESP32 inside Docker</td>
 </tr>
 </table>
