@@ -10,8 +10,11 @@
 
 ---
 
+<img src="../all_drones_being_prepared_for_flight.jpg" width="868">
+
 Drone assembled and ready for flight
 
 | | | |
 |---|---|---|
 | [<img src="../assembled_drone_version_2_0_photo_1.jpg" width="260">](../assembled_drone_version_2_0_photo_1.jpg) | [<img src="../assembled_drone_version_2_0_photo_2.jpg" width="260">](../assembled_drone_version_2_0_photo_2.jpg) | [<img src="../assembled_drone_version_2_0_photo_3.jpg" width="260">](../assembled_drone_version_2_0_photo_3.jpg) |
+| [<img src="../testing_idea_after_qualifyings.jpg" width="260">](../testing_idea_after_qualifyings.jpg) | [<img src="../assembling_first_pcb.jpg" width="260">](../assembling_first_pcb.jpg) | [<img src="../old_swarm_stack_vs_new.jpg" width="260">](../old_swarm_stack_vs_new.jpg) |
