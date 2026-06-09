@@ -27,23 +27,6 @@ Photos from crash and repair incidents during development — documenting the ha
 
 ---
 
-## [gcs/](gcs/)
-
-<table>
-<tr>
-<td><img src="gcs/rviz-first-test-1.png"></td>
-<td><img src="gcs/rviz-first-test-2.png"></td>
-<td><img src="gcs/image-stream-ros.png"></td>
-</tr>
-<tr>
-<td><img src="gcs/aruco-offboard-1.jpeg"></td>
-<td><img src="gcs/aruco-offboard-2.jpeg"></td>
-<td><img src="gcs/aruco-offboard-3.jpeg"></td>
-</tr>
-</table>
-
----
-
 ## [software/](software/)
 
 3D model assets used by RViz for arena visualisation. Do not move or rename — paths are referenced by the RViz configuration.
