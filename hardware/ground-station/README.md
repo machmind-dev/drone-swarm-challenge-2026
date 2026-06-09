@@ -2,9 +2,9 @@
 
 ![Ground Control Station](ground_control_station_render.png)
 
-| | |
+| Top Panel | Interior Frame |
 |---|---|
-| ![](img-20260122-wa0003.jpg) | ![](img-20260123-wa0004.jpg) |
+| <img src="img-20260122-wa0003.jpg" width="520"> | <img src="img-20260123-wa0004.jpg" width="520"> |
 
 ---
 
