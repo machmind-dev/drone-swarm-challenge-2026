@@ -28,7 +28,7 @@ Detailed write-up: `../../../docs/flight-tests/2026-05-31/FINDINGS.md`.
 
 ### 2026-06-01 flights (post-`bd10a7a` build)
 
-| Flight (folder) | Drone | Scene | Log | Result | Root cause / notes (Claude analysis from ulog + mcap) |
+| Flight (folder) | Drone | Scene | Log | Result | Root cause / notes |
 |---|---|---|---|---|---|
 | 18:55 `..._1855_drone3` | 3 | LH | `log_29` | ❌ Flew away in East | **Bad-East ArUco fix → flyaway.** +X(North) leg flown cleanly on flow (East≈0); at t≈153 s the *first & only* vision fixes (17, all in last 10 s) arrived with a **~6 m East error** (fix `(2.5,5.6)` vs actual y≈0). PX4 `reset_pos_to_vision` snapped East, which ran to **+35 m** → drone chased it out. Marker 13 (rear wall x=0) was the trigger, as reported. |
 | 19:42 `..._1942_drone4` | 4 | LH | `log_58` | ❌ Got "crazy" after 90° turn | **Same bad-East flyaway.** L-path: +X to x≈18, yaw −90°, then East exploded. `reset_pos_to_vision` @t93 s; East **0→14→27 m**. Vision fix `(18.4, 6.39)` vs actual y≈0 (~6 m error). 3 fixes total, all at the end. `cs_opt_flow`=100 %, `cs_gps`=never. |
@@ -69,8 +69,6 @@ Detailed write-up: `../../../docs/flight-tests/2026-05-31/FINDINGS.md`.
 | **OPEN-7** | **Bad-East ArUco fix → flyaway (18:55, 19:42).** The first/only fixes have a ~6 m lateral (East) error — an IPPE planar-flip whose reflected solution lands *inside* the arena, so the bounds gate (`aruco_pose.cpp:92-97`) misses it. PX4 `reset_pos_to_vision` snaps East and runs to 27–35 m. | **Add a position-innovation gate:** reject any EV fix disagreeing with the current PX4 position by > ~2–3 m (flow holds short-term position, so a 6 m jump is provably wrong). Plus stronger flip disambiguation (use px4 yaw/position, not just arena bounds). Would have stopped *both* flyaways. |
 | **OPEN-8** | **180° yaw flip on first fix RETURNED (20:07).** `bd10a7a` set `cov[20]=NaN` to kill EV-yaw fusion, but **PX4 ignores the message yaw covariance** (`EKF2_EV_NOISE_MD=0` → uses `EKF2_EVA_NOISE`) and fuses EV yaw because `EKF2_EV_CTRL=15` has the yaw bit. First fix's flipped yaw → physical 180° flip. | **Either** set `EKF2_EV_CTRL=7` (drop yaw bit 8; gyro owns heading, ~1.5°/traverse drift — acceptable) **or** restore the verified `513cd8a` px4_yaw disambiguation. Param fix is cleanest and matches `bd10a7a`'s stated intent. |
 | **OPEN-9** | **Live trail frozen during flight.** Disc dead-reckon (`main.c:1089`) is gated on `inertial_anchor_valid`, set only after the first ArUco fix — which never arrives until landing → trail stuck at home the whole flight. | **Anchor dead-reckon at ARM** from the already-known home + `px4_home` (`main.c:871-877`), so the disc tracks live from takeoff (drifts with flow, snaps on ArUco). RViz side already done (`4fdc15b`). |
-
-> **To-do review (Claude, 2026-06-01):** OPEN-3 is the trunk — **coverage is still broken at 45°**, so relaxing the gate did not help; the real question is *why P4 detects nothing during the traverse* (camera FOV/exposure, marker layout vs flight path, detection pipeline), not the gate angle. OPEN-7/8 are both **flip** failures and likely share a cause (oblique-view IPPE ambiguity admitted by the 45° gate); fixing detection quality + adding an innovation gate addresses both. OPEN-1/OPEN-2 remain valid but are downstream of OPEN-3/7. Recommended order: **OPEN-8 (param, instant, stops flips) → OPEN-9 (so we can *see* the drone) → OPEN-7 (innovation gate) → OPEN-3 (root coverage).**
 
 ---
 
