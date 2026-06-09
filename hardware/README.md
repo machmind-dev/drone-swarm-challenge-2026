@@ -38,10 +38,10 @@ Ground Control Station assembled and in use for flight testing
 
 | Transport Box Version 2.0 | Transport Box Version 1.0 |
 |---|---|
-| [<img src="transportation/Version 2.0/transport_box_mk4.png" width="520">](transportation/Version%202.0/transport_box_mk4.stl) | [<img src="transportation/Version 1.0/transport_box_mk2.png" width="520">](transportation/Version%201.0/transport_box_mk2.stl) |
+| [<img src="transportation/Version 2.0/transport_box_mk4.png" width="400">](transportation/Version%202.0/transport_box_mk4.stl) | [<img src="transportation/Version 1.0/transport_box_mk2.png" width="400">](transportation/Version%201.0/transport_box_mk2.stl) |
 
 ---
 
 Drones packed for trip to ILA Berlin 2026
 
-![Drones packed for trip to ILA Berlin 2026](transportation/drones_packed_for_ILA_berlin.png)
+<img src="transportation/drones_packed_for_ILA_berlin.png" width="868">
