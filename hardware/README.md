@@ -52,6 +52,8 @@ Ground Control Station assembled and in use for flight testing
 
 <img src="ground-station/ground_contro_station_assembled.png" width="868">
 
+<img src="ground-station/Screenshot_2026-06-07_22-23-24.png" width="868">
+
 | Monitor trial fit | Assembling 1 | Assembling 2 |
 |---|---|---|
 | <img src="ground-station/gcs_assembly_1.jpg" width="260"> | <img src="ground-station/gcs_assembly_2.jpg" width="260"> | <img src="ground-station/gcs_assembly_3.jpg" width="260"> |
