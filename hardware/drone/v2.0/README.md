@@ -16,8 +16,16 @@ Drones assembled and ready for first flight test as formation of five units
 
 <img src="../all_drones_performing_connectivity_test.jpg" width="868">
 
-| | | |
-|---|---|---|
-| [<img src="../assembled_drone_version_2_0_photo_1.jpg" width="260">](../assembled_drone_version_2_0_photo_1.jpg) | [<img src="../assembled_drone_version_2_0_photo_2.jpg" width="260">](../assembled_drone_version_2_0_photo_2.jpg) | [<img src="../assembled_drone_version_2_0_photo_3.jpg" width="260">](../assembled_drone_version_2_0_photo_3.jpg) |
-| [<img src="../assembling_drone_version_2_0_photo_4.jpg" width="260">](../assembling_drone_version_2_0_photo_4.jpg) | [<img src="../assembling_drone_version_2_0_photo_5.jpg" width="260">](../assembling_drone_version_2_0_photo_5.jpg) | [<img src="../assembling_drone_version_2_0_photo_6.jpg" width="260">](../assembling_drone_version_2_0_photo_6.jpg) |
-| [<img src="../testing_idea_after_qualifyings.jpg" width="260">](../testing_idea_after_qualifyings.jpg) | [<img src="../assembling_first_pcb.jpg" width="260">](../assembling_first_pcb.jpg) | [<img src="../old_swarm_stack_vs_new.jpg" width="260">](../old_swarm_stack_vs_new.jpg) |
+<table><tr>
+<td><a href="../assembled_drone_version_2_0_photo_1.jpg"><img src="../assembled_drone_version_2_0_photo_1.jpg" width="260"></a></td>
+<td><a href="../assembled_drone_version_2_0_photo_2.jpg"><img src="../assembled_drone_version_2_0_photo_2.jpg" width="260"></a></td>
+<td><a href="../assembled_drone_version_2_0_photo_3.jpg"><img src="../assembled_drone_version_2_0_photo_3.jpg" width="260"></a></td>
+</tr><tr>
+<td><a href="../assembling_drone_version_2_0_photo_4.jpg"><img src="../assembling_drone_version_2_0_photo_4.jpg" width="260"></a></td>
+<td><a href="../assembling_drone_version_2_0_photo_5.jpg"><img src="../assembling_drone_version_2_0_photo_5.jpg" width="260"></a></td>
+<td><a href="../assembling_drone_version_2_0_photo_6.jpg"><img src="../assembling_drone_version_2_0_photo_6.jpg" width="260"></a></td>
+</tr><tr>
+<td><a href="../testing_idea_after_qualifyings.jpg"><img src="../testing_idea_after_qualifyings.jpg" width="260"></a></td>
+<td><a href="../assembling_first_pcb.jpg"><img src="../assembling_first_pcb.jpg" width="260"></a></td>
+<td><a href="../old_swarm_stack_vs_new.jpg"><img src="../old_swarm_stack_vs_new.jpg" width="260"></a></td>
+</tr></table>
