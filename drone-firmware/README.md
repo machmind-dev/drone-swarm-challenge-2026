@@ -25,6 +25,7 @@ The file is a full parameter dump. The table below covers only the parameters th
 | `BAT1_V_EMPTY` | 3.20 V | Conservative low-voltage cutoff |
 | `BAT1_A_PER_V` | 17.0 | Current sensor calibration for the onboard shunt |
 | `BAT1_R_INTERNAL` | 0.005 Ω | Pack internal resistance for voltage sag compensation |
+| `BAT1_V_DIV` | 10.1 | Voltage divider ratio for battery voltage measurement |
 
 ### Indoor / GPS-denied operation
 
@@ -32,7 +33,7 @@ The file is a full parameter dump. The table below covers only the parameters th
 |-----------|-------|--------|
 | `COM_ARM_WO_GPS` | 1 | Allow arming without GPS fix — indoor arena, no GPS |
 | `COM_RC_IN_MODE` | 3 | RC input disabled; drone is controlled via MAVLink (GCS / companion) |
-| `EKF2_HGT_REF` | 3 (Range sensor) | Use MTF-01 LiDAR rangefinder as height reference |
+| `EKF2_HGT_REF` | 2 (Vision) | Height reference set to vision/external source |
 | `EKF2_EV_CTRL` | 15 | Enable all external-vision fusion bits: horizontal pos + vertical pos + velocity + yaw |
 | `EKF2_EV_NOISE_MD` | 0 | Trust `EVP_NOISE` / `EVV_NOISE` values set below, not EV message covariance |
 | `EKF2_EVP_NOISE` | 0.10 m | Position noise for vision pose input |
@@ -46,7 +47,7 @@ The file is a full parameter dump. The table below covers only the parameters th
 | `CBRK_IO_SAFETY` | 22027 | No physical safety switch on custom PCB |
 | `CBRK_USB_CHK` | 197848 | Allow arming while USB connected (bench work and tethered testing) |
 | `CBRK_SUPPLY_CHK` | 894281 | Voltage divider calibrated separately; PX4 default check gives false fail |
-| `CBRK_FLIGHTTERM` | 121212 | Disable flight termination action (no parachute; eland used instead) |
+| `CBRK_FLIGHTTERM` | 0 | Flight termination active (default) |
 
 ### MAVLink / serial ports
 
@@ -62,9 +63,9 @@ The file is a full parameter dump. The table below covers only the parameters th
 
 | Parameter | Value | Reason |
 |-----------|-------|--------|
-| `CP_DIST` | −1 | Collision prevention disabled |
-| `CP_DELAY` | 0.40 s | Reaction delay when CP is enabled |
-| `CP_GUIDE_ANG` | 30° | Maximum deflection angle CP will apply to avoid obstacle |
+| `CP_DIST` | 0.5 m | Minimum distance to obstacle before collision prevention activates |
+| `CP_DELAY` | 0.40 s | Reaction delay |
+| `CP_GUIDE_ANG` | 30° | Maximum deflection angle to avoid obstacle |
 | `COM_OBS_AVOID` | 0 | Obstacle avoidance disabled at planner level |
 
 ### Motor / actuator mapping
@@ -95,8 +96,13 @@ X-frame quadrotor, motors on main PWM outputs:
 | `MC_YAWRATE_K` | 1.200 | Yaw rate global gain |
 | `MPC_XY_P` | 0.95 | Horizontal position loop gain |
 | `MPC_XY_VEL_P_ACC` | 1.80 | Horizontal velocity P |
+| `MPC_XY_VEL_I_ACC` | 0.40 | Horizontal velocity I |
+| `MPC_XY_VEL_D_ACC` | 0.20 | Horizontal velocity D |
 | `MPC_Z_P` | 1.00 | Vertical position loop gain |
+| `MPC_Z_VEL_P_ACC` | 4.00 | Vertical velocity P |
+| `MPC_Z_VEL_I_ACC` | 2.00 | Vertical velocity I |
 | `MPC_Z_VEL_MAX_UP` | 3.0 m/s | Maximum climb rate |
 | `MPC_Z_VEL_MAX_DN` | 1.5 m/s | Maximum descent rate |
 | `MPC_TKO_SPEED` | 1.5 m/s | Takeoff climb speed |
 | `MPC_LAND_SPEED` | 0.7 m/s | Landing descent speed |
+| `MPC_XY_CRUISE` | 0.5 m/s | Default horizontal cruise speed |
