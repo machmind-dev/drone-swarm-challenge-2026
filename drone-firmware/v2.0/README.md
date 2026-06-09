@@ -51,6 +51,16 @@ Firmware is compiled and flashed from desktop shortcuts on the PC.
 
 ### Comms Module Configuration (ESP32-S3)
 
+#### DRONE_ID
+
+```c
+#define DRONE_ID 2   // ← set per airframe before flashing
+```
+
+Set `DRONE_ID` in `main/main.c` to the airframe number before building. This value is intentionally not committed — the repo keeps `2` as a neutral default. It controls the micro-ROS agent port (`8880 + DRONE_ID`) and the NED coordinate offset for arena navigation.
+
+#### micro-ROS Agent IP and Port
+
 The ESP32-S3 must be configured with the micro-ROS agent IP and port before flashing. Open `idf.py menuconfig` → **micro-ROS Settings**.
 
 <table>
