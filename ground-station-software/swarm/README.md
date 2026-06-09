@@ -1,4 +1,4 @@
-# Swarm
+# Swarm Command and Control Tools
 
 **Waypoint Commander** — [waypoint_commander.py](waypoint_commander.py)
 
