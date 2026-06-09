@@ -6,6 +6,6 @@
 
 ---
 
-![Drones packed for trip to ILA Berlin 2026](drones_packed_for_ILA_berlin.png)
-
 Drones packed for trip to ILA Berlin 2026
+
+![Drones packed for trip to ILA Berlin 2026](drones_packed_for_ILA_berlin.png)
