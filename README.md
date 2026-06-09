@@ -82,3 +82,53 @@ drone-swarm-challenge-2026/
 
 ArUco-based EKF fusion was developed, but not fully deployed in time for the finals. ArUco is therefore used only for box detection, not navigation.
 
+---
+
+## Hardware
+
+### Drone
+
+See [drone/](hardware/drone/) for drone hardware details and version comparison.
+
+---
+
+### Ground Control Station
+
+| Bezel Mk2 | Panel Bottom | Bottom Frame Mk2 |
+|---|---|---|
+| [<img src="hardware/ground-station/bezel_mk2.png" width="260">](hardware/ground-station/bezel_mk2.stl) | [<img src="hardware/ground-station/panel_bottom.png" width="260">](hardware/ground-station/panel_bottom.stl) | [<img src="hardware/ground-station/bottom_frame_mk2.png" width="260">](hardware/ground-station/bottom_frame_mk2.stl) |
+
+| Exhaust | Top Connector | Top Lower LH Mk3 |
+|---|---|---|
+| [<img src="hardware/ground-station/exaust.png" width="260">](hardware/ground-station/exaust.stl) | [<img src="hardware/ground-station/top_connector.png" width="260">](hardware/ground-station/top_connector_mk3.stl) | [<img src="hardware/ground-station/top_lower_lh_mk3.png" width="260">](hardware/ground-station/top_lower_lh_mk3.stl) |
+
+| Top Lower RH Mk3 | Top Upper LH Mk3 | Top Upper RH Mk3 |
+|---|---|---|
+| [<img src="hardware/ground-station/top_lower_rh_mk3.png" width="260">](hardware/ground-station/top_lower_rh_mk3.stl) | [<img src="hardware/ground-station/top_upper_lh_mk3.png" width="260">](hardware/ground-station/top_upper_lh_mk3.stl) | [<img src="hardware/ground-station/top_upper_rh_mk3.png" width="260">](hardware/ground-station/top_upper_rh_mk3.stl) |
+
+Ground Control Station assembled and in use for flight testing
+
+<img src="hardware/ground-station/ground_contro_station_assembled.png" width="868">
+
+| No name toolbox | Monitor trial fit |
+|---|---|
+| <img src="hardware/ground-station/gcs_assembly_0.png" width="400"> | <img src="hardware/ground-station/gcs_assembly_1.jpg" width="400"> |
+
+| Assembling 1 | Assembling 2 |
+|---|---|
+| <img src="hardware/ground-station/gcs_assembly_2.jpg" width="400"> | <img src="hardware/ground-station/gcs_assembly_3.jpg" width="400"> |
+
+---
+
+### Transportation
+
+| Transport Box Version 2.0 | Transport Box Version 1.0 |
+|---|---|
+| [<img src="hardware/transportation/Version 2.0/transport_box_mk4.png" width="400">](hardware/transportation/Version%202.0/transport_box_mk4.stl) | [<img src="hardware/transportation/Version 1.0/transport_box_mk2.png" width="400">](hardware/transportation/Version%201.0/transport_box_mk2.stl) |
+
+---
+
+Drones packed for trip to ILA Berlin 2026
+
+<img src="hardware/transportation/drones_packed_for_ILA_berlin.png" width="868">
+
