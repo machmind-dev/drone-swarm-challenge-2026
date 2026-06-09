@@ -27,29 +27,6 @@ Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified an
 
 ---
 
-## Highlights
-
-### ArUco box detection — GCS view
-
-![ArUco offboard detection](docs/media/gcs/aruco-offboard-1.jpeg)
-
-### RViz — drone position over ROS
-
-![RViz first test](docs/media/gcs/rviz-first-test-1.png)
-
-### Flight test videos
-
-| Video | Description |
-|-------|-------------|
-| [basic-swarm.mp4](docs/media/flight-testing/basic-swarm.mp4) | First test of basic swarming functionality |
-| [five-unit-flight.mp4](docs/media/flight-testing/five-unit-flight.mp4) | First flight of all 5 units together |
-| [obstacle-detection.mp4](docs/media/flight-testing/obstacle-detection.mp4) | First test of ToF obstacle detection |
-| [first-flight.mp4](docs/media/flight-testing/first-flight.mp4) | First flight on an empty platform |
-
-Full media index: [docs/media/](docs/media/)
-
----
-
 ## Swarm Behaviour
 
 The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) runs the swarm by role, streaming waypoints to `/gcs/drone_<id>/control` in the arena frame (`id · x · y · height`).
