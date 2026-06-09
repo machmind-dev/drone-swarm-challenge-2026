@@ -2,13 +2,9 @@
 
 Launch scripts are located in [launchers/](../launchers/).
 
-<table><tr>
-<td align="center"><b>GUI</b></td>
-<td align="center"><b>SDC26 Commander</b></td>
-</tr><tr>
-<td><img src="../launchers/Screenshot_2026-06-09_16-37-10.png" width="400"></td>
-<td><img src="../launchers/Screenshot_2026-06-06_21-34-13(1).png" width="400"></td>
-</tr></table>
+**SDC26 Commander**
+
+<img src="../launchers/Screenshot_2026-06-06_21-34-13(1).png" width="868">
 
 ## Software
 
