@@ -86,9 +86,21 @@ ArUco-based EKF fusion was developed, but not fully deployed in time for the fin
 
 ## Hardware
 
-### Drone
+### Drone Version 2.0
 
-See [drone/](hardware/drone/) for drone hardware details and version comparison.
+| Swarm Stack Bracket | Base for LiDAR & Flow Motion | FC adapter 25.5 to 20 mm |
+|---|---|---|
+| [<img src="hardware/drone/v2.0/swarm_stack_bracket.png" width="260">](hardware/drone/v2.0/swarm_stack_bracket.stl) | [<img src="hardware/drone/v2.0/base_mount_lidar_flow_sensor_mk4.png" width="260">](hardware/drone/v2.0/base_mount_lidar_flow_sensor_mk4.stl) | [<img src="hardware/drone/v2.0/fc_mount_adapter_25_5 _to_20_mm.png" width="260">](hardware/drone/v2.0/fc_mount_adapter_25_5%20_to_20_mm.stl) |
+
+| Swarm Stack PCB | Spoiler Block (for RFID) | Spoiler Block Bracket |
+|---|---|---|
+| [<img src="hardware/drone/v2.0/PCB/pcb_board.png" width="260">](https://github.com/machmind-dev/drone-swarm-challenge-2026/tree/main/hardware/drone/v2.0/PCB) | [<img src="hardware/drone/v2.0/spoiler_block_mk3.png" width="260">](hardware/drone/v2.0/spoiler_block_mk3.stl) | [<img src="hardware/drone/v2.0/spoiler_block_bracket.png" width="260">](hardware/drone/v2.0/spoiler_block_bracket.stl) |
+
+Drone assembled and ready for flight
+
+| | | |
+|---|---|---|
+| [<img src="hardware/drone/assembled_drone_version_2_0_photo_1.jpg" width="260">](hardware/drone/assembled_drone_version_2_0_photo_1.jpg) | [<img src="hardware/drone/assembled_drone_version_2_0_photo_2.jpg" width="260">](hardware/drone/assembled_drone_version_2_0_photo_2.jpg) | [<img src="hardware/drone/assembled_drone_version_2_0_photo_3.jpg" width="260">](hardware/drone/assembled_drone_version_2_0_photo_3.jpg) |
 
 ---
 
@@ -110,13 +122,9 @@ Ground Control Station assembled and in use for flight testing
 
 <img src="hardware/ground-station/ground_contro_station_assembled.png" width="868">
 
-| No name toolbox | Monitor trial fit |
-|---|---|
-| <img src="hardware/ground-station/gcs_assembly_0.png" width="400"> | <img src="hardware/ground-station/gcs_assembly_1.jpg" width="400"> |
-
-| Assembling 1 | Assembling 2 |
-|---|---|
-| <img src="hardware/ground-station/gcs_assembly_2.jpg" width="400"> | <img src="hardware/ground-station/gcs_assembly_3.jpg" width="400"> |
+| Monitor trial fit | Assembling 1 | Assembling 2 |
+|---|---|---|
+| <img src="hardware/ground-station/gcs_assembly_1.jpg" width="260"> | <img src="hardware/ground-station/gcs_assembly_2.jpg" width="260"> | <img src="hardware/ground-station/gcs_assembly_3.jpg" width="260"> |
 
 ---
 
