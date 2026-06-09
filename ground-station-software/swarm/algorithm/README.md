@@ -8,7 +8,7 @@ This directory contains the Ollama-based natural-language swarm controller (`oll
 
 **Reliability:** The LLM output is non-deterministic. During testing, command interpretation was inconsistent — the model occasionally produced incorrect coordinates or malformed responses, which is unacceptable in a time-critical competition environment.
 
-**Computing power:** The controller runs on a Raspberry Pi 5 CPU. The Pi5 does not have sufficient CPU performance to run Gemma3 inference at a useful speed alongside the full ROS2 GCS stack (micro-ROS agent, RViz2, rqt). Response latency was too high for real-time swarm control.
+**Computing power:** The controller runs on a Raspberry Pi 5 CPU. The Pi5 does not have sufficient CPU performance to run Gemma3 inference at a useful speed alongside the full ROS2 GCS stack (micro-ROS agent, RViz2, rqt). Response latency was too high for real-time swarm control — during testing, a single command took around 2 seconds to process with the 1B parameter model.
 
 **Path planning:** PX4 runs in Offboard mode receiving position setpoints computed by the deterministic GCS algorithm — not by the LLM. The LLM was only ever intended for high-level tasking, not low-level trajectory generation.
 
