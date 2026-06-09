@@ -25,6 +25,7 @@ docker compose up -d
 | Command | Description |
 |---------|-------------|
 | `idf.py set-target <target>` | Set the chip target before building. Use `esp32p4` for the vision module or `esp32s3` for the comms module. Run once after the first container start or after `fullclean`. |
+| `idf.py flash` | Flash the compiled firmware to the board |
 
 ### ESP32-P4 example
 
