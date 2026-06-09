@@ -36,11 +36,11 @@ The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) run
 
 **Waypoint execution (Manhattan):** the firmware converts each arena waypoint to NED and reaches it in axis-aligned legs (one axis at a time, no diagonals), each leg flown as a sequence of discrete steps — keeping motion predictable and obstacle handling simple.
 
-| Role | Drones | Behaviour |
-|------|--------|-----------|
-| **Executor** | 2 & 4 | Captures opponent boxes based on locations received from a Seeker. |
-| **Seeker** | 1 & 3 | The only role that publishes box locations. If a box is not found within 2 minutes, the GCS publishes a random position for it. |
-| **Leader** | 5 | Monitors the home base while no boxes have been captured. |
+| Role | Behaviour |
+|------|-----------|
+| **Executor** | Captures opponent boxes based on locations received from a Seeker. |
+| **Seeker** | The only role that publishes box locations. If a box is not found within 2 minutes, the GCS publishes a random position for it. |
+| **Leader** | Monitors the home base while no boxes have been captured. |
 
 ---
 
