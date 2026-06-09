@@ -27,14 +27,10 @@ Photos from crash and repair incidents during development — documenting the ha
 
 Ground control station screenshots — RViz, ROS image streams, and ArUco testing.
 
-| File | Description |
-|------|-------------|
-| [rviz-first-test-1.png](gcs/rviz-first-test-1.png) | First RViz visualisation over ROS and ESP32 (2026-01-27) |
-| [rviz-first-test-2.png](gcs/rviz-first-test-2.png) | First RViz visualisation over ROS and ESP32 (2026-01-27) |
-| [image-stream-ros.png](gcs/image-stream-ros.png) | First camera image streamed over ROS |
-| [aruco-offboard-1.jpeg](gcs/aruco-offboard-1.jpeg) | ArUco detection — offboard/GCS-computed (2026-04-12) |
-| [aruco-offboard-2.jpeg](gcs/aruco-offboard-2.jpeg) | ArUco detection — offboard/GCS-computed (2026-04-12) |
-| [aruco-offboard-3.jpeg](gcs/aruco-offboard-3.jpeg) | ArUco detection — offboard/GCS-computed (2026-04-12) |
+| | | |
+|---|---|---|
+| ![](gcs/rviz-first-test-1.png) | ![](gcs/rviz-first-test-2.png) | ![](gcs/image-stream-ros.png) |
+| ![](gcs/aruco-offboard-1.jpeg) | ![](gcs/aruco-offboard-2.jpeg) | ![](gcs/aruco-offboard-3.jpeg) |
 
 ---
 
