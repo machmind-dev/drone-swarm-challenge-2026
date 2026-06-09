@@ -10,7 +10,7 @@ ESP-IDF firmware for the [Seeed Studio XIAO ESP32-S3](https://wiki.seeedstudio.c
 
 ### micro-ROS Agent Port
 
-The micro-ROS UDP port is derived automatically from `DRONE_ID`: `port = 8880 + DRONE_ID` (e.g. drone 1 → 8881, drone 2 → 8882). Set the agent IP via `idf.py menuconfig` → **micro-ROS Settings → Agent IP**.
+The micro-ROS UDP port is derived from `DRONE_ID`: `port = 8880 + DRONE_ID` (e.g. drone 1 → 8881, drone 2 → 8882). Both the Agent IP and Agent Port must be set manually via `idf.py menuconfig` → **micro-ROS Settings**.
 
 ## GCS RQT Panel — Vision Toggle
 
