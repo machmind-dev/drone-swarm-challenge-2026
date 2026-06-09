@@ -6,11 +6,15 @@ Sends arena coordinates to individual drones or all drones via Manhattan navigat
 
 <img src="../../launchers/waypoint_commander_terminal.jpg" width="868">
 
+---
+
 **Keyboard Drone Control** — [mission_forward_back.py](mission_forward_back.py)
 
 Real-time manual keyboard control of a single drone. Selects drone and team/starting side interactively before flight.
 
 <img src="../../launchers/keyboard_control_terminal.jpg" width="868">
+
+---
 
 **Ollama Control of Swarm** — [algorithm/ollama_commander.py](algorithm/ollama_commander.py)
 
