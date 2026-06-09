@@ -2,6 +2,10 @@
 
 Platform-specific launch scripts for the Mach Mind Ground Control Station.
 
+Screenshot of GCS desktop
+
+<img src="Screenshot_2026-06-09_16-37-10.png" width="868">
+
 | Property | [Ubuntu GNOME PC](ubuntu-gnome-pc/) | [Ubuntu XFCE Pi5](ubuntu-xfce-pi5/) |
 |----------|--------------------------------------|---------------------------------------|
 | Platform | x86_64 | ARM64 (Raspberry Pi 5) |
