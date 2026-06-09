@@ -11,14 +11,20 @@
 
 ## Building and Flashing
 
-Both firmwares use **ESP-IDF** via Docker. Each project has a `docker/` folder with a `docker-compose.yml`. Run all `idf.py` commands through `docker compose exec`.
+Firmware is compiled and flashed from desktop shortcuts on the GCS PC.
 
-### Start the container
-
-```bash
-# From drone-vision-esp32p4/docker/ or drone-comms-esp32s3/docker/
-docker compose up -d
-```
+<table>
+<tr>
+<td align="center"><img src="../../launchers/flash_ico.png" width="100"><br><b>IDE — Flash P4</b></td>
+<td><code>launch-drone-vision-p4.sh</code></td>
+<td>Firmware flashing for ESP32-P4 inside Docker</td>
+</tr>
+<tr>
+<td align="center"><img src="../../launchers/flash_ico.png" width="100"><br><b>IDE — Flash S3</b></td>
+<td><code>launch-drone-vision-s3.sh</code></td>
+<td>Firmware flashing for ESP32-S3 inside Docker</td>
+</tr>
+</table>
 
 ### idf.py commands
 
@@ -26,22 +32,3 @@ docker compose up -d
 |---------|-------------|
 | `idf.py set-target <target>` | Set the chip target before building. Use `esp32p4` for the vision module or `esp32s3` for the comms module. Run once after the first container start or after `fullclean`. |
 | `idf.py flash` | Flash the compiled firmware to the board |
-
-### ESP32-P4 example
-
-```bash
-cd drone-vision-esp32p4/docker
-docker compose up -d
-docker compose exec esp32p4_vision idf.py set-target esp32p4   # first time only
-docker compose exec esp32p4_vision idf.py build
-docker compose exec esp32p4_vision idf.py -p /dev/ttyACM0 flash monitor
-```
-
-### ESP32-S3 example
-
-```bash
-cd drone-comms-esp32s3/docker
-docker compose up -d
-docker compose exec esp32s3_comms idf.py build
-docker compose exec esp32s3_comms idf.py -p /dev/ttyACM0 flash monitor
-```
