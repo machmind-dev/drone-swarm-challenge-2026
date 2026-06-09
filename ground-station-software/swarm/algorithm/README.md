@@ -12,4 +12,6 @@ This directory contains the Ollama-based natural-language swarm controller (`oll
 
 **Path planning:** PX4 runs in Offboard mode receiving position setpoints computed by the deterministic GCS algorithm — not by the LLM. The LLM was only ever intended for high-level tasking, not low-level trajectory generation.
 
+<img src="../../../launchers/ollama_swarm_control_terminal.jpg" width="868">
+
 The functionality is fully implemented and can be demonstrated independently. To run it, Ollama must be running separately (`ollama serve`) with the `gemma3:1b` model pulled.
