@@ -27,4 +27,8 @@ Firmware is compiled and flashed from desktop shortcuts on the PC.
 | Command | Description |
 |---------|-------------|
 | `idf.py set-target <target>` | Set the chip target before building. Use `esp32p4` for the vision module or `esp32s3` for the comms module. Run once after the first container start or after `fullclean`. |
-| `idf.py flash` | Flash the compiled firmware to the board |
+| `idf.py fullclean` | Delete build directory |
+| `idf.py menuconfig` | Open settings menu |
+| `idf.py build` | Compile firmware |
+| `idf.py flash` | Flash to board |
+| `idf.py monitor` | Open serial console |
