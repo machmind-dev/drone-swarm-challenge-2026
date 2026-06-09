@@ -26,8 +26,6 @@ Firmware is compiled and flashed from desktop shortcuts on the PC.
 
 ### Vision Module Configuration (ESP32-P4)
 
-<img src="1779481021493.png" width="868">
-
 
 #### Camera Exposure Tuning
 

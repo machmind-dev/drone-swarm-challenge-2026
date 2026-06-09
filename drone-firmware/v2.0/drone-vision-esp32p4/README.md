@@ -3,6 +3,8 @@
 ESP-IDF firmware for the [Waveshare ESP32-P4 WiFi6](https://docs.waveshare.com/ESP32-P4-WIFI6) board with OV5647 MIPI-CSI camera.
 Performs real-time ArUco marker detection and outputs world-frame pose estimates over UART.
 
+<img src="../1779481021493.png" width="868">
+
 ## Camera Exposure Tuning
 
 ```cpp
