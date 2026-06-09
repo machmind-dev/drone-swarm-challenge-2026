@@ -1,3 +1,5 @@
+# Swarm Stack PCB
+
 Schematics and board design: **Autodesk Eagle** (`.sch` / `.brd`)
 
 <table><tr>
