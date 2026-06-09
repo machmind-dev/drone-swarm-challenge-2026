@@ -52,6 +52,10 @@ source /opt/ros/jazzy/setup.bash
 | `launch-vision.sh` | GCS-side ArUco vision node (`aruco_node.py`) |
 | `launch-buttons.sh` | Physical GPIO button handler — ARM / MISSION / EMERG buttons via gpiochip4 |
 | `launch-node-ide.sh` | Docker dev shell for drone firmware (ESP32-S3, micro-ROS) |
+| `launch-sdc26-commander.sh` | SDC26 swarm orchestrator — assigns boxes to executors, monitors leader home zone |
+| `launch-waypoint-commander.sh` | Manual waypoint sender — `<drone_id\|all> <x> <y> [z] [yaw_deg]` in arena frame |
+| `launch-arena-view.sh` | Top-down arena position map — serial port selector for P4 (ArUco pose) and S3 (LOCAL_NED) |
+| `launch-swarm-ollama.sh` | LLM swarm control (DEMO) — Gemma3 1B natural-language → waypoint commands via Ollama |
 
 ---
 
