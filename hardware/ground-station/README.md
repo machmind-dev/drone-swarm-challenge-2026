@@ -16,8 +16,12 @@
 
 Ground Control Station assembled and in use for flight testing
 
-<img src="ground_contro_station_assembled.png" width="780">
+<img src="ground_contro_station_assembled.png" width="868">
 
-| No name toolbox | Monitor trial fit | Assembling 1 | Assembling 2 |
-|---|---|---|---|
-| <img src="gcs_assembly_0.png" width="200"> | <img src="gcs_assembly_1.jpg" width="200"> | <img src="gcs_assembly_2.jpg" width="200"> | <img src="gcs_assembly_3.jpg" width="200"> |
+| No name toolbox | Monitor trial fit |
+|---|---|
+| <img src="gcs_assembly_0.png" width="200"> | <img src="gcs_assembly_1.jpg" width="200"> |
+
+| Assembling 1 | Assembling 2 |
+|---|---|
+| <img src="gcs_assembly_2.jpg" width="200"> | <img src="gcs_assembly_3.jpg" width="200"> |
