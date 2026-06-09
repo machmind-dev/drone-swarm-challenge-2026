@@ -14,6 +14,8 @@ Drones assembled and ready for first flight test as formation of five units
 
 <img src="../all_drones_being_prepared_for_flight.jpg" width="868">
 
+<img src="../all_drones_performing_connectivity_test.jpg" width="868">
+
 | | | |
 |---|---|---|
 | [<img src="../assembled_drone_version_2_0_photo_1.jpg" width="260">](../assembled_drone_version_2_0_photo_1.jpg) | [<img src="../assembled_drone_version_2_0_photo_2.jpg" width="260">](../assembled_drone_version_2_0_photo_2.jpg) | [<img src="../assembled_drone_version_2_0_photo_3.jpg" width="260">](../assembled_drone_version_2_0_photo_3.jpg) |
