@@ -11,18 +11,16 @@
 
 ## Building and Flashing
 
-Firmware is compiled and flashed from desktop shortcuts on the GCS PC.
+Firmware is compiled and flashed from desktop shortcuts on the PC.
 
 <table>
 <tr>
 <td align="center"><img src="../../launchers/flash_ico.png" width="100"><br><b>IDE — Flash P4</b></td>
-<td><code>launch-drone-vision-p4.sh</code></td>
-<td>Firmware flashing for ESP32-P4 inside Docker</td>
+<td>Firmware flashing for ESP32-P4 inside Docker<br>(<a href="../../launchers/ubuntu-gnome-pc/launch-drone-vision-p4.sh">launch-drone-vision-p4.sh</a>)</td>
 </tr>
 <tr>
 <td align="center"><img src="../../launchers/flash_ico.png" width="100"><br><b>IDE — Flash S3</b></td>
-<td><code>launch-drone-vision-s3.sh</code></td>
-<td>Firmware flashing for ESP32-S3 inside Docker</td>
+<td>Firmware flashing for ESP32-S3 inside Docker<br>(<a href="../../launchers/ubuntu-gnome-pc/launch-drone-vision-s3.sh">launch-drone-vision-s3.sh</a>)</td>
 </tr>
 </table>
 
