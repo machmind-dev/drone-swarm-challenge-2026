@@ -92,32 +92,3 @@ source /opt/ros/jazzy/setup.bash
 <td>Firmware flashing for ESP32 inside Docker</td>
 </tr>
 </table>
-
----
-
-## Quick Start
-
-```bash
-# 1. Launch full ground station
-./launch.sh
-
-# 2. (Optional) Physical button handler
-./launch-buttons.sh
-
-# 3. (Optional) ArUco vision only
-./launch-vision.sh
-
-# 4. (Optional) Run swarm mission (requires drones armed via rqt first)
-./launch-swarm-mission.sh
-```
-
----
-
-## Desktop Shortcuts
-
-`.desktop` launcher files are in the `desktop/` subfolder. In XFCE, copy them to `~/Desktop` for one-click launchers, or to `~/.local/share/applications/` to appear in the application menu.
-
-```bash
-cp desktop/*.desktop ~/Desktop/
-chmod +x ~/Desktop/*.desktop
-```
