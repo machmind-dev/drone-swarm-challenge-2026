@@ -13,7 +13,7 @@ setup(
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="Mindaugas",
-    maintainer_email="you@example.com",
+    maintainer_email="info@machmind.dev",
     description="Mach Mind GCS buttons for rqt",
     license="Apache-2.0",
     tests_require=["pytest"],
