@@ -30,9 +30,9 @@ Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified an
 
 ## Swarm Behaviour
 
-The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) runs the swarm by role, streaming waypoints to `/gcs/drone_<id>/control` in the arena frame (`id · x · y · height`). A 5 s start-up grace period precedes any command, and the active team (LH/red or RH/blue) is read live from RQT (`/gcs/system/team_color`).
+The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) runs the swarm by role, streaming waypoints to `/gcs/drone_<id>/control` in the arena frame (`id · x · y · height`).
 
-**Swarm control via LLM — demo only:** Ollama (Gemma) turns natural-language instructions into JSON/coordinate commands, but it is a standalone DEMO and is NOT in live on the finals. Meaningful coordinate tasking needs a reliable absolute position reference (ArUco Navigation), which we couldn't fully implement in time, so all live flight is run by the deterministic Commander above.
+**Swarm control via LLM — demo only:** Ollama (Gemma) turns natural-language instructions into JSON/coordinate commands, but it is a standalone DEMO and is NOT in live on the finals. Meaningful coordinate tasking needs a reliable absolute position reference (ArUco Navigation), which we couldn't be fully implement in time, so all live flight is run by the deterministic Commander above.
 
 **Waypoint execution (Manhattan):** the firmware converts each arena waypoint to NED and reaches it in axis-aligned legs (one axis at a time, no diagonals), each leg flown as a sequence of discrete steps — keeping motion predictable and obstacle handling simple.
 
