@@ -8,14 +8,14 @@ Flight test recordings and photos, in chronological order.
 |---|---|---|
 | [<img src="flight-testing/first-flight.jpg" width="260">](https://github.com/machmind-dev/drone-swarm-challenge-2026/blob/main/docs/media/flight-testing/first-flight.mp4) | [<img src="flight-testing/five-unit-flight-thumb.png" width="260">](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7463683893968187392) | [<img src="flight-testing/basic-swarm-thumb.png" width="260">](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7469555928992940034) |
 
-### [flight-testing/hardware-iterations/](flight-testing/hardware-iterations/)
+### [flight-testing/crashes/](flight-testing/crashes/)
 
 Photos from crash and repair incidents during development — documenting the hardware iteration process.
 
 | | | |
 |---|---|---|
-| ![](flight-testing/hardware-iterations/crash-1.jpeg) | ![](flight-testing/hardware-iterations/crash-2.jpeg) | ![](flight-testing/hardware-iterations/crash-3.jpg) |
-| ![](flight-testing/hardware-iterations/crash-4.jpg) | ![](flight-testing/hardware-iterations/crash-5.jpg) | ![](flight-testing/hardware-iterations/crash-6.jpg) |
+| ![](flight-testing/crashes/crash-1.jpeg) | ![](flight-testing/crashes/crash-2.jpeg) | ![](flight-testing/crashes/crash-3.jpg) |
+| ![](flight-testing/crashes/crash-4.jpg) | ![](flight-testing/crashes/crash-5.jpg) | ![](flight-testing/crashes/crash-6.jpg) |
 
 ---
 
