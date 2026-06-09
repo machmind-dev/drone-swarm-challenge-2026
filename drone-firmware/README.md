@@ -11,7 +11,7 @@
 
 Hardware documentation (PCB, schematics, part list) is located at [hardware/drone/v2.0](https://github.com/machmind-dev/drone-swarm-challenge-2026/tree/main/hardware/drone/v2.0).
 
-**Note:** Maximum speed is intentionally limited via PX4 parameters (`MPC_XY_CRUISE`, `MPC_Z_VEL_MAX_UP`, `MPC_Z_VEL_MAX_DN`) for safe indoor arena operation.
+**Note:** Maximum speed is intentionally limited via PX4 parameters (`MPC_XY_CRUISE`, `MPC_Z_VEL_MAX_UP`, `MPC_Z_VEL_MAX_DN`) to make it safe for indoor flight.
 
 ---
 
