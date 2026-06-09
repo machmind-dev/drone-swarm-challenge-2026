@@ -4,13 +4,9 @@
 
 Flight test recordings and photos, in chronological order.
 
-| File | Description |
-|------|-------------|
-| [first-flight.jpg](flight-testing/first-flight.jpg) | Photo — first flight on an empty platform (2026-03-24) |
-| [first-flight.mp4](flight-testing/first-flight.mp4) | Video — first flight on an empty platform (2026-03-24) |
-| [obstacle-detection.mp4](flight-testing/obstacle-detection.mp4) | Video — first test of ToF obstacle detection |
-| [five-unit-flight.mp4](flight-testing/five-unit-flight.mp4) | Video — first flight of all 5 units together |
-| [basic-swarm.mp4](flight-testing/basic-swarm.mp4) | Video — first test of basic swarming functionality |
+| First flight — 24 March 2026 | Five-unit flight | Basic swarming |
+|---|---|---|
+| [![First ever test flight, 24 March 2026](flight-testing/first-flight.jpg)](https://github.com/machmind-dev/drone-swarm-challenge-2026/blob/main/docs/media/flight-testing/first-flight.mp4) | [![Five-unit flight on LinkedIn](flight-testing/first-flight.jpg)](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7469555928992940034) | [![Basic swarming on LinkedIn](flight-testing/first-flight.jpg)](https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:7463683893968187392) |
 
 ### [flight-testing/hardware-iterations/](flight-testing/hardware-iterations/)
 
