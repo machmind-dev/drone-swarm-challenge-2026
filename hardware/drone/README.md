@@ -8,6 +8,6 @@
 | <div align="center">**Side view comparison**</div> | <div align="center">**Top view comparison**</div> |
 | ![Stack comparison — side](Swarm%20stack%20comparison%20V1%20vs%20V2%20side.jpg) | ![Stack comparison — top](Swarm_stack_comparison_V1_vs_V2_top.jpg) |
 
-**v2.0 PCB**
+**Swarm Stack Version 2.0**
 
 ![v2.0 PCB](v2.0/PCB/PXL_20260513_215804352.jpg)
