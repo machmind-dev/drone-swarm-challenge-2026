@@ -16,8 +16,8 @@
 
 Ground Control Station assembled and in use for flight testing
 
-![Ground Control Station assembled and in use for flight testing](ground_contro_station_assembled.png)
+<img src="ground_contro_station_assembled.png" width="780">
 
-| First look at toolbox for GCS | Trial Fit of Pi Monitor | Assembling GCS | Assembled GCS without labels and straps for lid |
+| No name toolbox | Monitor trial fit | Assembling 1 | Assembling 2 |
 |---|---|---|---|
 | <img src="gcs_assembly_0.png" width="200"> | <img src="gcs_assembly_1.jpg" width="200"> | <img src="gcs_assembly_2.jpg" width="200"> | <img src="gcs_assembly_3.jpg" width="200"> |
