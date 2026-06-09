@@ -24,6 +24,20 @@ Firmware is compiled and flashed from desktop shortcuts on the PC.
 
 > **Note:** To avoid versioning issues, code is built and compiled inside Docker.
 
+### Comms Module Configuration (ESP32-S3)
+
+The ESP32-S3 must be configured with the micro-ROS agent IP and port before flashing. Open `idf.py menuconfig` → **micro-ROS Settings**.
+
+**micro-ROS Agent IP** — IP address of the GCS machine running the micro-ROS agent. Must match the static IP assigned to the GCS on the swarm network.
+
+<img src="menuconfig-agent-ip.png" width="868">
+
+**micro-ROS Agent Port** — UDP port the agent listens on. Derived from `DRONE_ID`: port = `8880 + DRONE_ID` (e.g. drone 1 → 8881, drone 5 → 8885).
+
+<img src="menuconfig-agent-port.png" width="868">
+
+---
+
 ### idf.py commands
 
 | Command | Description |
