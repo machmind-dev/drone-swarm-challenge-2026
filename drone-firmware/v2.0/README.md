@@ -30,8 +30,8 @@ The ESP32-S3 must be configured with the micro-ROS agent IP and port before flas
 
 <table>
 <tr>
-<td align="center"><img src="menuconfig-agent-ip.png" width="400"><br><b>micro-ROS Agent IP</b><br>IP address of the GCS machine running the micro-ROS agent. Must match the static IP assigned to the GCS on the swarm network.</td>
-<td align="center"><img src="menuconfig-agent-port.png" width="400"><br><b>micro-ROS Agent Port</b><br>UDP port the agent listens on. Derived from <code>DRONE_ID</code>: port = <code>8880 + DRONE_ID</code> (e.g. drone 1 → 8881, drone 5 → 8885).</td>
+<td align="center"><img src="menuconfig-agent-ip.png" width="450"><br><b>micro-ROS Agent IP</b><br>IP address of the GCS machine running the micro-ROS agent. Must match the static IP assigned to the GCS on the swarm network.</td>
+<td align="center"><img src="menuconfig-agent-port.png" width="450"><br><b>micro-ROS Agent Port</b><br>UDP port the agent listens on. Derived from <code>DRONE_ID</code>: port = <code>8880 + DRONE_ID</code> (e.g. drone 1 → 8881, drone 5 → 8885).</td>
 </tr>
 </table>
 
