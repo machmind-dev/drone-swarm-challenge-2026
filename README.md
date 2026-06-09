@@ -39,7 +39,7 @@ The **SDC26 Commander** (`ground-station-software/swarm/sdc26_commander.py`) run
 | Role | Behaviour |
 |------|-----------|
 | **Executor** | Captures opponent boxes based on locations received from a Seeker. |
-| **Seeker** | The only role that publishes box locations. If a box is not found within 2 minutes, the GCS publishes a random position for it. |
+| **Seeker** | The only role that publishes box locations. If a box is not found within 2 minutes, the GCS publishes a random. |
 | **Leader** | Monitors the home base while no boxes have been captured. |
 
 ---
