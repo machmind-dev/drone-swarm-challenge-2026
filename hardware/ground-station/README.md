@@ -11,3 +11,13 @@
 | Top Lower RH Mk3 | Top Upper LH Mk3 | Top Upper RH Mk3 |
 |---|---|---|
 | [<img src="top_lower_rh_mk3.png" width="260">](top_lower_rh_mk3.stl) | [<img src="top_upper_lh_mk3.png" width="260">](top_upper_lh_mk3.stl) | [<img src="top_upper_rh_mk3.png" width="260">](top_upper_rh_mk3.stl) |
+
+---
+
+Ground Control Station assembled and in use for flight testing
+
+![Ground Control Station assembled and in use for flight testing](ground_contro_station_assembled.png)
+
+| First look at toolbox for GCS | Trial Fit of Pi Monitor | Assembling GCS | Assembled GCS without labels and straps for lid |
+|---|---|---|---|
+| <img src="gcs_assembly_0.png" width="200"> | <img src="gcs_assembly_1.jpg" width="200"> | <img src="gcs_assembly_2.jpg" width="200"> | <img src="gcs_assembly_3.jpg" width="200"> |
