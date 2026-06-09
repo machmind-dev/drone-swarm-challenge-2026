@@ -71,7 +71,7 @@ source /opt/ros/jazzy/setup.bash
 <tr>
 <td align="center"><img src="../stream_ico.png" width="100"><br><b>GCS — Arena View</b></td>
 <td><code>launch-arena-view.sh</code></td>
-<td>Camera and ToF data live stream over ROS2</td>
+<td>Top-down position map for checking correctness of drone positions in the arena</td>
 </tr>
 <tr>
 <td align="center"><img src="../stream_ico.png" width="100"><br><b>IDE — Stream View</b></td>
