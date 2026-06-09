@@ -25,3 +25,12 @@ Ground Control Station assembled and in use for flight testing
 | Assembling 1 | Assembling 2 |
 |---|---|
 | <img src="gcs_assembly_2.jpg" width="400"> | <img src="gcs_assembly_3.jpg" width="400"> |
+
+---
+
+## Part List
+
+| # | Part Number | Description | Link |
+|---|-------------|-------------|------|
+| 1 | M3 x5 x 4 Voron | Threaded Insert M3 | [Amazon Shop](https://www.amazon.de/dp/B0CDH36ZMX?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1) |
+| 2 | Toolbox 38 x 14.5 x 33 cm | BigDean Machine Case with Foam Insert Empty | [Amazon Shop](https://www.amazon.de/dp/B0D37TFB92?ref=ppx_yo2ov_dt_b_fed_asin_title) |
