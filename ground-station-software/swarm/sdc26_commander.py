@@ -80,7 +80,9 @@ COMMAND_COOLDOWN_S  = 5.0     # post-arrival dwell at the box before returning (
 RE_INTERCEPT_DELAY_S = 120.0  # 2 min after fallback posted (= 4 min total) before re-intercept
 SEEKER_STAGGER_S         = 3.0   # delay between consecutive seeker launch commands
 SEEKER_PATROL_INTERVAL_S = 60.0  # dwell at arrival waypoints before next leg
-SEEKER_CONFLICT_DELAY_S  = 5.0   # extra delay for D3 at steps where Y legs would collide
+SEEKER_PATROL_END_S      = 360.0 # seekers rotate until this (s from start ≈ 6 min), then hover
+SEEKER_CONFLICT_DELAY_S  = -5.0  # dwell adjustment at conflict steps (negative = depart EARLY)
+                                 # so the seeker on the shared y=5 row crosses before the other arrives
 ARENA_MID_X              = 10.0  # midline; seekers descend after crossing this X
 SEEKER_HOVER_ALT_M       = 0.5   # altitude once past the midline
 
@@ -98,55 +100,49 @@ LEADER_YAW          = {'red': 180.0, 'blue': 0.0}
 ZONE_BORDER_X = {'red': 5.0,  'blue': 15.0}
 ZONE_OUT_X    = {'red': 8.0,  'blue': 12.0}
 
-# Seeker patrol sequences: (x, y, is_arrival).
-#   is_arrival=True  → deep column waypoint; drone dwells SEEKER_PATROL_INTERVAL_S
-#                       before moving on.  Approached on X axis (final leg is X).
-#   is_arrival=False → near-column pass-through; advance immediately on arrival.
-# Both seekers depart their arrival points simultaneously each minute.
+# Seeker patrol — a repeating 4-waypoint rotation per drone, (x, y, is_arrival):
+#   is_arrival=True  → deep-column scan WP; dwell SEEKER_PATROL_INTERVAL_S, approached on X.
+#   is_arrival=False → near-column pass-through turn point; advance immediately.
+# The rotation loops (wp_idx wraps mod 4) until SEEKER_PATROL_END_S, after which the
+# seeker hovers at the next deep-column arrival. D1 keeps to its rows, D3 to its rows;
+# they share only y=5, deconflicted by an early departure at SEEKER_CONFLICT_STEPS.
 SEEKER_PATROL = {
     'red': {                              # LH scene — deep col x=15, near col x=12
-        1: [                              # Drone 1
+        1: [                              # Drone 1 — upper rows (y=5,7)
             (15.0, 5.0, True),
             (12.0, 7.0, False),
             (15.0, 7.0, True),
             (12.0, 5.0, False),
-            (15.0, 5.0, True),
-            (12.0, 3.0, True),
-            (15.0, 3.0, True),
         ],
-        3: [                              # Drone 3
+        3: [                              # Drone 3 — lower rows (y=3,5)
             (15.0, 3.0, True),
             (12.0, 5.0, False),
-            (15.0, 5.0, True),            # ← D3 departs here with +5 s conflict delay
-            (12.0, 7.0, False),
-            (15.0, 7.0, True),
+            (15.0, 5.0, True),            # ← loop idx 2: departs 5 s EARLY (conflict step)
+            (12.0, 3.0, False),
         ],
     },
     'blue': {                             # RH scene — deep col x=5, near col x=8
-        1: [                              # Drone 1
-            (5.0, 5.0, True),
+        1: [                              # Drone 1 — lower rows (y=3,5)
+            (5.0, 5.0, True),             # ← loop idx 0: departs 5 s EARLY (conflict step)
             (8.0, 3.0, False),
             (5.0, 3.0, True),
             (8.0, 5.0, False),
-            (5.0, 5.0, True),
-            (8.0, 7.0, False),
-            (5.0, 7.0, True),
         ],
-        3: [                              # Drone 3
-            (5.0, 3.0, True),             # ← D3 departs here with +5 s conflict delay
-            (8.0, 5.0, False),
-            (5.0, 5.0, True),
-            (8.0, 7.0, False),
+        3: [                              # Drone 3 — upper rows (y=5,7)
             (5.0, 7.0, True),
+            (8.0, 5.0, False),
+            (5.0, 5.0, True),            # ← loop idx 2: departs 5 s EARLY (conflict step)
+            (8.0, 7.0, False),
         ],
     },
 }
 
-# wp_idx values (0-based) at which D3 must add SEEKER_CONFLICT_DELAY_S to its
-# departure timer to prevent opposite-direction Y legs at the near column.
+# wp_idx values (0-based) at which a seeker applies SEEKER_CONFLICT_DELAY_S to its
+# departure timer (depart early) to clear the shared y=5 crossing before the other
+# seeker arrives. Keyed by team → drone_id → set of wp_idx.
 SEEKER_CONFLICT_STEPS = {
-    'red':  {3: {2}},   # D3 departs from wp_idx=2 (15,5) in LH scene
-    'blue': {3: {0}},   # D3 departs from wp_idx=0  (5,3) in RH scene
+    'red':  {3: {2}},          # LH: D3 departs loop idx 2 (15,5) 5 s early
+    'blue': {1: {0}, 3: {2}},  # RH: D1 idx 0 (5,5) and D3 idx 2 (5,5) depart 5 s early
 }
 
 # Random fallback positions for still-missing opponent boxes, by our scene/team.
@@ -491,11 +487,15 @@ class SDC26Commander(Node):
         Each seeker follows SEEKER_PATROL[team][drone_id]:
           - Deep-column waypoints (is_arrival=True): drone dwells for
             SEEKER_PATROL_INTERVAL_S (60 s) then departs simultaneously with
-            the other seeker.  D3 adds SEEKER_CONFLICT_DELAY_S (5 s) at the
-            two steps where simultaneous departure would put their Y legs on the
-            near column going in opposite directions.
+            the other seeker.  At a SEEKER_CONFLICT_STEPS waypoint the seeker
+            applies SEEKER_CONFLICT_DELAY_S (−5 s, i.e. departs early) so it
+            clears the shared y=5 crossing before the other seeker arrives.
           - Near-column waypoints (is_arrival=False): advance immediately on
             arrival — treated as turn points, not dwell positions.
+
+        The 4-WP rotation loops (wp_idx wraps mod len(seq)) until
+        SEEKER_PATROL_END_S (≈6 min from start); after that the seeker hovers at
+        the next deep-column arrival instead of departing again.
 
         Altitude: start_alt (1.0 m) until the drone crosses ARENA_MID_X, then
         SEEKER_HOVER_ALT_M (0.5 m) for all subsequent legs.
@@ -551,7 +551,7 @@ class SDC26Commander(Node):
                     continue
 
                 if is_arrival:
-                    # Start dwell timer; add conflict delay for D3 where needed.
+                    # Start dwell timer; apply early-departure adjustment at conflict steps.
                     conflict = SEEKER_CONFLICT_STEPS.get(self.team, {}).get(sid, set())
                     extra = SEEKER_CONFLICT_DELAY_S if rec['wp_idx'] in conflict else 0.0
                     rec.update(phase='at_arrival', arr_ticks=0,
@@ -560,22 +560,21 @@ class SDC26Commander(Node):
                         f'seeker D{sid} arrived ({wx:.0f},{wy:.0f}) '
                         f'→ dwell {SEEKER_PATROL_INTERVAL_S + extra:.0f}s')
                 else:
-                    # Pass-through: immediately advance to the next waypoint.
-                    next_idx = rec['wp_idx'] + 1
-                    if next_idx < len(seq):
-                        self._seeker_depart(sid, seq, next_idx, now)
-                    else:
-                        rec['phase'] = 'hover'
+                    # Pass-through turn point: loop straight on to the next waypoint.
+                    self._seeker_depart(sid, seq, (rec['wp_idx'] + 1) % len(seq), now)
 
             elif phase == 'at_arrival':
                 if now < rec['depart_t']:
                     continue
-                next_idx = rec['wp_idx'] + 1
-                if next_idx < len(seq):
-                    self._seeker_depart(sid, seq, next_idx, now)
-                else:
+                # Keep rotating until patrol time is up, then hover at this scan WP.
+                if self._elapsed_s() >= SEEKER_PATROL_END_S:
+                    wx, wy, _ = seq[rec['wp_idx']]
                     rec['phase'] = 'hover'
-                    self.get_logger().info(f'seeker D{sid} patrol complete → hover')
+                    self.get_logger().info(
+                        f'seeker D{sid} patrol time up ({SEEKER_PATROL_END_S:.0f}s) '
+                        f'→ hover at ({wx:.0f},{wy:.0f})')
+                else:
+                    self._seeker_depart(sid, seq, (rec['wp_idx'] + 1) % len(seq), now)
 
             # 'hover': no further commands
 
