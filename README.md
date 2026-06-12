@@ -158,3 +158,9 @@ Drones packed for trip to ILA Berlin 2026
 
 <img src="hardware/transportation/drones_packed_for_ILA_berlin.png" width="868">
 
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
