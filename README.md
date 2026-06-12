@@ -9,7 +9,7 @@
 
 # Swarm Drone Challenge 2026
 
-Source code of the solution by **Team Mach Mind** for the Swarm Drone Challenge 2026, organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigk.digital/en/brigkair/).
+Source code of the solution by **Team Mach Mind** for the [Swarm Drone Challenge 2026](https://swarmdronechallenge.digital/), organised by [MBDA](https://www.mbda-systems.com) and [brigkAIR](https://www.brigk.digital/en/brigkair/).
 
 Qualifying rounds took place **20–24 April 2026**. Team Mach Mind qualified as one of **6 finalists** and finished **4th place** at the Finals on **11 June 2026** at ILA Berlin.
 
