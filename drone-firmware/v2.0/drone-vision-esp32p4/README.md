@@ -109,3 +109,7 @@ Six VL53L1X time-of-flight sensors are polled at 20 Hz by the P4 and packed into
 **Known issues**
 
 - **Issue 1 — PX4 in Offboard mode ignores `OBSTACLE_DISTANCE` and `DISTANCE_SENSOR`.** PX4's built-in collision prevention (`CP_DIST`) is not active in Offboard mode. The S3 handles obstacle stopping by clamping position setpoints directly before sending them to PX4.
+
+---
+
+<!-- SEO: ESP32-P4 ArUco detection · ESP32-P4 MIPI-CSI ArUco · ArUco marker detection ESP32-P4 · ESP32-P4 OpenCV solvePnP · OV5647 ESP32-P4 ArUco · ESP32-P4 camera ArUco pose estimation · ESP-IDF 5.3 ArUco · Waveshare ESP32-P4 ArUco · ESP32-P4 VL53L1 ToF · ESP32-P4 WiFi6 computer vision -->
