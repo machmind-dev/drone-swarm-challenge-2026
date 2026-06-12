@@ -1,6 +1,6 @@
 # Drone Firmware v1.0 – ESP32-S3
 
-ESP-IDF firmware for the **Seeed XIAO ESP32S3 Sense** used in the qualifying rounds of the Swarm Drone Challenge 2026.
+ESP-IDF firmware for the [**Seeed XIAO ESP32S3 Sense**](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) used in the qualifying rounds of the Swarm Drone Challenge 2026.
 
 ## Features
 
