@@ -1,3 +1,5 @@
+[![Swarm takeoff](takeoff.gif)](docs/media)
+
 **Team** · [machmind.dev](http://machmind.dev)
 
 | Member | Disciplines |
